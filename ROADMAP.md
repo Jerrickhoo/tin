@@ -10,24 +10,24 @@
 
 These were answered in the kickoff session (2026-07-17). Don't re-litigate them casually.
 
-| Question | Decision |
-|---|---|
-| Split variant | **70 Needs / 20 Savings / 10 Wants** |
-| Editable percentages | **Yes**, in Settings. Shares live on envelopes as basis points (7000/2000/1000). Historical entries are never re-allocated — the ledger records actual centavos, so a ratio change only affects income logged after the change. |
-| Envelope goes negative | **Allow it, show red, offer one-tap "cover from…"** that writes a proper 2-row transfer. Never block an expense — the money already left GCash; blocking makes the ledger lie. |
-| Categories | **User-defined, each owned by exactly one envelope** (Food→Needs, Games→Wants). Picking a category implies the envelope → one less tap. App seeds a starter set; rename/add/archive freely. |
-| Recurring | **Yes, Phase 5.** Cheap implementation: templates that auto-post (with confirm toast) on next app open. No server cron — free tier doesn't have one anyway. |
-| Home screen | **Balances + big Add button.** Balances are the 10×/day glance; Add opens a keypad bottom sheet. PWA long-press shortcut deep-links straight to Add-expense. |
-| Name | **Tin** |
+| Question               | Decision                                                                                                                                                                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Split variant          | **70 Needs / 20 Savings / 10 Wants**                                                                                                                                                                                            |
+| Editable percentages   | **Yes**, in Settings. Shares live on envelopes as basis points (7000/2000/1000). Historical entries are never re-allocated — the ledger records actual centavos, so a ratio change only affects income logged after the change. |
+| Envelope goes negative | **Allow it, show red, offer one-tap "cover from…"** that writes a proper 2-row transfer. Never block an expense — the money already left GCash; blocking makes the ledger lie.                                                  |
+| Categories             | **User-defined, each owned by exactly one envelope** (Food→Needs, Games→Wants). Picking a category implies the envelope → one less tap. App seeds a starter set; rename/add/archive freely.                                     |
+| Recurring              | **Yes, Phase 5.** Cheap implementation: templates that auto-post (with confirm toast) on next app open. No server cron — free tier doesn't have one anyway.                                                                     |
+| Home screen            | **Balances + big Add button.** Balances are the 10×/day glance; Add opens a keypad bottom sheet. PWA long-press shortcut deep-links straight to Add-expense.                                                                    |
+| Name                   | **Tin**                                                                                                                                                                                                                         |
 
 ### Stack verdict (you asked me to challenge it)
 
 I keep your stack. Reasoning, so you know it was actually examined:
 
 - **React + Vite + TS + Tailwind** — fine. SvelteKit would ship a smaller bundle, but the difference is irrelevant at this app's size and React's ecosystem/familiarity wins for a solo dev pairing with an AI.
-- **Supabase** — correct choice, and the reason is *security*, not Postgres. The only free-tier rival is Cloudflare Workers + D1 (no project pausing, generous limits), but it makes you hand-roll auth and authorization — the exact two things a solo dev must not improvise on a public URL. Supabase gives you battle-tested auth + RLS for free. Accept the pause quirk; mitigate it (below).
+- **Supabase** — correct choice, and the reason is _security_, not Postgres. The only free-tier rival is Cloudflare Workers + D1 (no project pausing, generous limits), but it makes you hand-roll auth and authorization — the exact two things a solo dev must not improvise on a public URL. Supabase gives you battle-tested auth + RLS for free. Accept the pause quirk; mitigate it (below).
 - **Netlify vs Cloudflare Pages** — a wash at one user. Netlify per your plan; `_headers` and `_redirects` both work there.
-- **Dexie + outbox** — right design, wrong *time*. It's the single most complex subsystem in the app. It comes in Phase 6, after months of the online-only app working. Basic PWA installability (icon on your home screen) comes much earlier and cheaply in Phase 3, because it drives the daily habit.
+- **Dexie + outbox** — right design, wrong _time_. It's the single most complex subsystem in the app. It comes in Phase 6, after months of the online-only app working. Basic PWA installability (icon on your home screen) comes much earlier and cheaply in Phase 3, because it drives the daily habit.
 
 **Supabase keep-alive (cheapest option):** a GitHub Actions scheduled workflow every 3 days that curls the REST endpoint with the anon key. REST traffic counts as project activity. Costs ₱0.
 
@@ -36,7 +36,7 @@ I keep your stack. Reasoning, so you know it was actually examined:
 name: supabase-keepalive
 on:
   schedule:
-    - cron: "0 21 */3 * *"   # 05:00 Manila, every 3rd day
+    - cron: '0 21 */3 * *' # 05:00 Manila, every 3rd day
   workflow_dispatch:
 jobs:
   ping:
@@ -51,10 +51,12 @@ jobs:
 Caveat: GitHub disables scheduled workflows after 60 days of repo inactivity. Daily use means you'll commit often enough; if the project ever goes maintenance-only, move the ping to a Cloudflare Worker cron (also free).
 
 ### MFA
+
 Enable **TOTP MFA in Phase 7** — it's free on Supabase and worth having on a public URL. From day one: a unique strong password and Supabase's leaked-password protection turned on. Don't gate early phases on MFA.
 
 ### End-to-end encryption — recommendation: no
-E2EE would mean: every sum, monthly rollup, and category breakdown computed client-side over decrypted data (you lose SQL views entirely), a key-sync problem across devices, and key loss = total data loss with no recovery. What it defends against — Supabase staff or a DB breach reading *peso amounts and category names* — is a low-stakes threat for this data. RLS + TLS + strong password + MFA is the right level. One behavioral rule instead: **don't put account numbers or other PII in entry notes.**
+
+E2EE would mean: every sum, monthly rollup, and category breakdown computed client-side over decrypted data (you lose SQL views entirely), a key-sync problem across devices, and key loss = total data loss with no recovery. What it defends against — Supabase staff or a DB breach reading _peso amounts and category names_ — is a low-stakes threat for this data. RLS + TLS + strong password + MFA is the right level. One behavioral rule instead: **don't put account numbers or other PII in entry notes.**
 
 ---
 
@@ -63,7 +65,7 @@ E2EE would mean: every sum, monthly rollup, and category breakdown computed clie
 1. **Money is integer centavos**, `bigint` in Postgres, `number`/`BigInt` in TS. `10000` = ₱100.00. Format only at display: `Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' })`.
 2. **Largest-remainder split.** Floor each envelope's `total * share_bp / 10000`, then distribute leftover centavos one at a time by descending fractional part; ties broken by envelope `sort_order`. Compute internally with BigInt so huge amounts can't hit float territory. Unit-tested (see Phase 1 tests).
 3. **Append-only ledger.** One `entries` table. Income = 3 rows sharing a `group_id`; expense = 1 negative row; transfer = 2 rows sharing a `group_id`; opening balance/correction = `adjustment` rows. Balances are `SUM(amount_centavos)` — never a stored column. Edits are **void + re-insert**; deletes don't exist. Voids always target the **whole `group_id`** — voiding a single leg of an income or transfer would corrupt balances and the split invariant. Enforced at the database, not by discipline (see column grants in §3).
-4. **Client-generated UUIDs** for every entry. Why this matters *before* the sync layer exists: the failure mode of any network write is "request sent, response lost" — the client cannot know if the row landed. With server-generated IDs, a retry inserts a duplicate and **double-counts money**. With client IDs + upsert-on-primary-key (`ignoreDuplicates`), a retry is a no-op. Combined with append-only (no in-place edits racing each other), the only possible "conflict" is the same fact arriving twice — which the upsert collapses. This is the entire reason Phase 6's sync can be a dumb queue instead of a CRDT research project.
+4. **Client-generated UUIDs** for every entry. Why this matters _before_ the sync layer exists: the failure mode of any network write is "request sent, response lost" — the client cannot know if the row landed. With server-generated IDs, a retry inserts a duplicate and **double-counts money**. With client IDs + upsert-on-primary-key (`ignoreDuplicates`), a retry is a no-op. Combined with append-only (no in-place edits racing each other), the only possible "conflict" is the same fact arriving twice — which the upsert collapses. This is the entire reason Phase 6's sync can be a dumb queue instead of a CRDT research project.
 5. **`timestamptz` UTC in storage; Asia/Manila for display and grouping.** Manila is UTC+8: a 7am Feb 1 Manila transaction is Jan 31 in UTC. All month grouping goes through `occurred_at AT TIME ZONE 'Asia/Manila'` (SQL) or an `Intl`-based `manilaMonthKey()` (TS). Both are unit-tested at the boundary.
 6. **Backdating**: every entry form has an editable `occurred_at` defaulting to now.
 
@@ -74,7 +76,9 @@ E2EE would mean: every sum, monthly rollup, and category breakdown computed clie
 Effort = focused evenings (~2–3 h). Total to end of Phase 7: **~17–25 evenings**.
 
 ### Phase 0 — Hello, Tin (1 evening)
+
 **Goal:** prove the deploy pipeline before writing any product code.
+
 - GitHub repo, Vite + React + TS scaffold, Tailwind, ESLint/Prettier, Vitest wired.
 - `.gitignore` includes `.env` **from commit #1**. `.env.example` documents `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
 - `public/_headers` (baseline security headers) and `public/_redirects` (`/* /index.html 200` for the SPA router).
@@ -83,7 +87,9 @@ Effort = focused evenings (~2–3 h). Total to end of Phase 7: **~17–25 evenin
 **Shippable:** a live public URL. **Unblocks:** everything — every later phase ships the same evening it's built.
 
 ### Phase 1 — The money brain (1–2 evenings)
+
 **Goal:** all money math as pure, tested functions, before any UI or DB exists.
+
 - `src/lib/money.ts` — centavo helpers, `formatPHP()`, parse-input-to-centavos (handles "1,234.5", rejects >2 decimals).
 - `src/lib/split.ts` — `splitByLargestRemainder(totalCentavos, shares[])`.
 - `src/lib/dates.ts` — `manilaMonthKey()`, `manilaDayKey()`, month-boundary helpers via `Intl` (no date library).
@@ -92,17 +98,21 @@ Effort = focused evenings (~2–3 h). Total to end of Phase 7: **~17–25 evenin
 **Shippable:** a deployed **split preview** screen — type an income, watch it split live. **Unblocks:** Phase 3 forms just call these functions; the scariest math is done and trusted.
 
 ### Phase 2 — Accounts & vault (2–3 evenings)
-**Goal:** Supabase stands up with security *before* any real data exists.
+
+**Goal:** Supabase stands up with security _before_ any real data exists.
+
 - Supabase project; migration `001_core.sql` (full schema, RLS, grants, views — §3) committed to the repo.
 - Enable leaked-password protection; email + password auth; signup/login/logout screens; **forgot-password reset flow** (add the Netlify URL to Supabase's allowed redirect URLs); session persistence.
 - First-run seeding (client-side, idempotent): if the user has no envelopes, create the profile row + Needs 7000bp / Savings 2000bp / Wants 1000bp + starter categories. (Chosen over an `auth.users` trigger — trigger failures block signups and are miserable to debug.)
-- **RLS probe test:** create a second account, attempt to read/insert/update the first account's rows via the REST API. Keep the script; re-run it after *every* future migration.
+- **RLS probe test:** create a second account, attempt to read/insert/update the first account's rows via the REST API. Keep the script; re-run it after _every_ future migration.
 - Heads-up: Supabase's built-in email sender allows only a handful of emails per hour — fine for one real user, painful during testing. Create test users (e.g. the probe's second account) from the dashboard, auto-confirmed, instead of burning signup/reset emails.
 
 **Shippable:** log in on phone and laptop, see the same three envelopes. **Unblocks:** the ledger.
 
 ### Phase 3 — The ledger (4–6 evenings) ★ THE MILESTONE
+
 **Goal:** Tin becomes your daily driver. Everything after this phase is enhancement.
+
 - **Home:** three envelope balance cards (from `envelope_balances` view) + big bottom-center Add button.
 - **Add expense:** bottom sheet — amount keypad up immediately, category chips (category implies envelope), optional note, editable `occurred_at`. Target: <5 s, 2 taps from open.
 - **Add income:** amount → live split preview (Phase 1 function) → one `insert` of 3 rows sharing a `group_id`.
@@ -115,9 +125,11 @@ Effort = focused evenings (~2–3 h). Total to end of Phase 7: **~17–25 evenin
 **Shippable:** a real tracker you use every day. **Unblocks:** analytics has data; the habit starts.
 
 ### Phase 4 — Analytics (2–3 evenings)
+
 **Goal:** answer "how am I doing?" with Manila-correct months.
+
 - Month picker (Manila boundaries), income vs spending totals, net.
-- **Transfers are excluded from top-line income/spending totals** — they net to zero overall but would inflate both sides. Per-envelope flow views *do* include them (they're real to the envelope); adjustments get their own line.
+- **Transfers are excluded from top-line income/spending totals** — they net to zero overall but would inflate both sides. Per-envelope flow views _do_ include them (they're real to the envelope); adjustments get their own line.
 - Per-envelope inflow/outflow; per-category breakdown with % bars.
 - **Split adherence:** actual spending mix vs the 70/20/10 plan.
 - Charts as plain CSS/SVG bars first — no chart library until one is genuinely needed.
@@ -125,21 +137,25 @@ Effort = focused evenings (~2–3 h). Total to end of Phase 7: **~17–25 evenin
 **Shippable:** an Insights tab worth opening at month-end.
 
 ### Phase 5 — Recurring (2 evenings)
+
 **Goal:** rent/allowance/subscriptions log themselves.
+
 - `recurring_templates` table (amount, kind, category, day-of-month rule, `next_run_on`, `paused_at`).
 - On app open: catch-up poster generates due entries (backdated to their due date, Manila-correct) with an undoable confirm toast.
-- **Deterministic posting IDs:** a generated entry's UUID is derived (UUIDv5) from (template_id, due_date, leg index) — *not* random. If phone and laptop both catch up the same due date, they produce identical IDs and the upsert collapses them; with random IDs, two-device catch-up double-posts rent.
+- **Deterministic posting IDs:** a generated entry's UUID is derived (UUIDv5) from (template_id, due_date, leg index) — _not_ random. If phone and laptop both catch up the same due date, they produce identical IDs and the upsert collapses them; with random IDs, two-device catch-up double-posts rent.
 - Income templates post the full 3-way split at current shares (3 legs, one `group_id`) — reusing the Phase 1 split function — never a single-envelope row.
 - Manage screen: list, pause, edit, delete templates.
 
 **Shippable:** open Tin on the 1st, rent is already logged and confirmable.
 
 ### Phase 6 — PWA + offline (3–5 evenings) — the hardest phase
-**Goal:** works in a dead spot; syncs when back. Scope is *cache + outbox*, **not** a general sync engine.
+
+**Goal:** works in a dead spot; syncs when back. Scope is _cache + outbox_, **not** a general sync engine.
+
 - `vite-plugin-pwa` service worker; app shell cached.
 - Dexie mirror of entries/envelopes/categories; UI reads local-first.
-- **Outbox:** every write goes to Dexie + an outbox row, then a sync loop pushes them. Exactly two op types: *insert entries* (upsert, `ignoreDuplicates: true` — retries are no-ops, see rule 4) and *void group* (update `voided_at` by `group_id` — also idempotent on retry).
-- **Delta pull** by `updated_at > cursor` (voids bump `updated_at` via trigger — already in the schema). The cursor is the max `updated_at` the *server* returned, never the client clock, and each pull overlaps the previous window by ~60 s — overlap is harmless because the mirror upserts by `id`.
+- **Outbox:** every write goes to Dexie + an outbox row, then a sync loop pushes them. Exactly two op types: _insert entries_ (upsert, `ignoreDuplicates: true` — retries are no-ops, see rule 4) and _void group_ (update `voided_at` by `group_id` — also idempotent on retry).
+- **Delta pull** by `updated_at > cursor` (voids bump `updated_at` via trigger — already in the schema). The cursor is the max `updated_at` the _server_ returned, never the client clock, and each pull overlaps the previous window by ~60 s — overlap is harmless because the mirror upserts by `id`.
 - Online/offline indicator; queued-writes badge.
 - **Logout clears Dexie + outbox + service-worker caches.** Without this, logout on a shared laptop is theatre. Warn if the outbox is non-empty before logging out.
 - PWA shortcut (long-press icon) → deep link to Add expense.
@@ -147,6 +163,7 @@ Effort = focused evenings (~2–3 h). Total to end of Phase 7: **~17–25 evenin
 **Shippable:** log an expense in an elevator; it syncs on the way out.
 
 ### Phase 7 — Hardening & polish (2–3 evenings)
+
 - TOTP MFA enrollment + challenge flow.
 - Tighten CSP to a strict allowlist (self + your Supabase project origin only).
 - Keep-alive GitHub Action (see §0).
@@ -157,7 +174,9 @@ Effort = focused evenings (~2–3 h). Total to end of Phase 7: **~17–25 evenin
 **Shippable:** the version you stop thinking about.
 
 ### Phase 8 — GCash statement importer (optional; 4–8 evenings, high variance)
-**Goal:** backfill history from GCash's emailed, password-protected transaction export. **Entirely client-side — the file never leaves the machine.** This is an *importer with review*, not a sync.
+
+**Goal:** backfill history from GCash's emailed, password-protected transaction export. **Entirely client-side — the file never leaves the machine.** This is an _importer with review_, not a sync.
+
 - Parse in-browser (pdf.js handles password-protected PDFs; if GCash sends XLSX, SheetJS community edition).
 - Map rows → draft entries; **review-and-confirm table** (edit category/envelope per row; nothing auto-commits).
 - **Duplicate detection:** flag drafts matching an existing entry within ±amount-exact and ±36 h, and drafts identical to a previous import (store a source-row hash on imported entries).
@@ -357,7 +376,7 @@ group by 1, 2, 3, 4, 5;
 
 ### Key security callouts
 
-- **`VITE_`-prefixed vars are PUBLIC.** Anything with that prefix is baked into the JS bundle anyone can read. `VITE_SUPABASE_ANON_KEY` is fine there *only because RLS is on every table*. The **`service_role` key never leaves the Supabase dashboard** — not in frontend code, not in Netlify env vars, not in the repo, not in the keep-alive workflow. If it ever leaks, rotate it immediately; it bypasses RLS entirely.
+- **`VITE_`-prefixed vars are PUBLIC.** Anything with that prefix is baked into the JS bundle anyone can read. `VITE_SUPABASE_ANON_KEY` is fine there _only because RLS is on every table_. The **`service_role` key never leaves the Supabase dashboard** — not in frontend code, not in Netlify env vars, not in the repo, not in the keep-alive workflow. If it ever leaks, rotate it immediately; it bypasses RLS entirely.
 - Upserts from the client use `ignoreDuplicates: true` (`ON CONFLICT DO NOTHING`) — deliberately compatible with the revoked-UPDATE grant above.
 - `user_id` always defaults to `auth.uid()` server-side; the client never sends it.
 - `_headers` starts with: `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, and a CSP with `default-src 'self'; connect-src 'self' https://<ref>.supabase.co wss://<ref>.supabase.co; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'` (tightened further in Phase 7). **`style-src 'unsafe-inline'` is required, not sloppiness:** without it, `default-src 'self'` blocks inline `style=` attributes — which the analytics bars (dynamic widths) and bottom-sheet transforms rely on. Script injection is what CSP is really guarding here, and `script-src` stays strict `'self'`.
@@ -417,6 +436,7 @@ Rule of the house: **`src/lib` imports nothing from `src/`** — it's the tested
 Work top to bottom; nothing depends on anything below it.
 
 **Phase 0 — Hello, Tin**
+
 - [ ] 0.1 Create GitHub repo `tin`; init Vite React-TS app
 - [ ] 0.2 Add Tailwind, ESLint, Prettier, Vitest
 - [ ] 0.3 `.gitignore` with `.env`; commit `.env.example`
@@ -425,12 +445,14 @@ Work top to bottom; nothing depends on anything below it.
 - [ ] 0.6 Themed hello page with the §6 background/text tokens (first taste of cozy)
 
 **Phase 1 — Money brain**
+
 - [ ] 1.1 `money.ts` (+tests: format, parse, reject bad input)
 - [ ] 1.2 `split.ts` (+tests: ₱0.01, ₱0.03, ₱1,234.57, ₱888,888,888.88, 10k-random sum invariant, tie-break determinism)
 - [ ] 1.3 `dates.ts` (+tests: UTC/Manila month boundary both directions)
 - [ ] 1.4 Deployed split-preview screen
 
 **Phase 2 — Accounts & vault**
+
 - [ ] 2.1 Create Supabase project; enable leaked-password protection
 - [ ] 2.2 Write & apply `001_core.sql`; commit it
 - [ ] 2.3 Netlify env vars (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`); local `.env`
@@ -440,6 +462,7 @@ Work top to bottom; nothing depends on anything below it.
 - [ ] 2.7 Logout works (cache-wipe hook stubbed for Phase 6)
 
 **Phase 3 — The ledger ★**
+
 - [ ] 3.1 Home: balance cards from `envelope_balances` + bottom nav + Add button
 - [ ] 3.2 Expense bottom sheet: keypad-first, category chips, note, editable `occurred_at` — measure: ≤2 taps, <5 s
 - [ ] 3.3 Income flow: amount → live split preview → 3-row insert w/ shared `group_id`
@@ -452,17 +475,20 @@ Work top to bottom; nothing depends on anything below it.
 - [ ] 3.10 **Start using Tin daily. This is the finish line for “usable.”**
 
 **Phase 4 — Analytics**
+
 - [ ] 4.1 Month picker on Manila boundaries
 - [ ] 4.2 Income vs spending + net for month (transfers excluded from totals)
 - [ ] 4.3 Per-envelope and per-category breakdowns (CSS/SVG bars)
 - [ ] 4.4 Split adherence: actual mix vs plan
 
 **Phase 5 — Recurring**
+
 - [ ] 5.1 Catch-up poster logic: compute due dates from templates (table already shipped in `001_core.sql`), Manila-correct, clamp day 29–31 to month end; deterministic UUIDv5 posting IDs; income templates post the full split
 - [ ] 5.2 On-open catch-up with confirm/undo toast
 - [ ] 5.3 Manage screen (add/edit/pause/delete)
 
 **Phase 6 — PWA + offline**
+
 - [ ] 6.1 `vite-plugin-pwa` service worker, app shell cached
 - [ ] 6.2 Dexie mirror; UI reads local-first
 - [ ] 6.3 Outbox queue; writes go local + queue
@@ -472,6 +498,7 @@ Work top to bottom; nothing depends on anything below it.
 - [ ] 6.7 PWA shortcut → Add expense; airplane-mode end-to-end test
 
 **Phase 7 — Hardening**
+
 - [ ] 7.1 TOTP MFA enroll + challenge
 - [ ] 7.2 CSP tightened to strict allowlist
 - [ ] 7.3 Keep-alive workflow + repo secrets
@@ -480,6 +507,7 @@ Work top to bottom; nothing depends on anything below it.
 - [ ] 7.6 Monthly export reminder set up
 
 **Phase 8 — GCash importer (optional)**
+
 - [ ] 8.1 Request own GCash export; inspect real file format
 - [ ] 8.2 Client-side parse (pdf.js w/ password, or SheetJS if XLSX)
 - [ ] 8.3 Row → draft-entry mapping + review/confirm table
@@ -494,22 +522,22 @@ A dim room at night: warm espresso surfaces, cream text, honey accent. All body-
 
 ### Palette
 
-| Token | Hex | Use | Contrast on `bg-base` |
-|---|---|---|---|
-| `bg-base` | `#1D1814` | app background (deep espresso) | — |
-| `bg-surface` | `#272019` | cards | — |
-| `bg-raised` | `#322921` | bottom sheets, modals | — |
-| `border` | `#40352A` | hairlines, dividers | — |
-| `text-primary` | `#EDE3D4` | body & amounts (warm cream) | ~13.3 : 1 |
-| `text-secondary` | `#B3A493` | labels, secondary | ~7.1 : 1 |
-| `text-muted` | `#9A8875` | timestamps, hints | ~5.1 : 1 |
-| `accent` | `#E4A44C` | primary buttons, focus rings (honey) | ~8.0 : 1 |
-| `on-accent` | `#241A0E` | text on accent buttons | ~7.8 : 1 on accent |
-| `positive` | `#A8C29A` | income, positive deltas (sage) | ~8.9 : 1 |
-| `negative` | `#E08A83` | expenses, red envelopes (dusty rose) | ~6.7 : 1 |
-| `env-needs` | `#E4A44C` | Needs identity (honey) | — |
-| `env-savings` | `#A8C29A` | Savings identity (sage) | — |
-| `env-wants` | `#C4A9D1` | Wants identity (dusty lilac) | ~8.1 : 1 |
+| Token            | Hex       | Use                                  | Contrast on `bg-base` |
+| ---------------- | --------- | ------------------------------------ | --------------------- |
+| `bg-base`        | `#1D1814` | app background (deep espresso)       | —                     |
+| `bg-surface`     | `#272019` | cards                                | —                     |
+| `bg-raised`      | `#322921` | bottom sheets, modals                | —                     |
+| `border`         | `#40352A` | hairlines, dividers                  | —                     |
+| `text-primary`   | `#EDE3D4` | body & amounts (warm cream)          | ~13.3 : 1             |
+| `text-secondary` | `#B3A493` | labels, secondary                    | ~7.1 : 1              |
+| `text-muted`     | `#9A8875` | timestamps, hints                    | ~5.1 : 1              |
+| `accent`         | `#E4A44C` | primary buttons, focus rings (honey) | ~8.0 : 1              |
+| `on-accent`      | `#241A0E` | text on accent buttons               | ~7.8 : 1 on accent    |
+| `positive`       | `#A8C29A` | income, positive deltas (sage)       | ~8.9 : 1              |
+| `negative`       | `#E08A83` | expenses, red envelopes (dusty rose) | ~6.7 : 1              |
+| `env-needs`      | `#E4A44C` | Needs identity (honey)               | —                     |
+| `env-savings`    | `#A8C29A` | Savings identity (sage)              | —                     |
+| `env-wants`      | `#C4A9D1` | Wants identity (dusty lilac)         | ~8.1 : 1              |
 
 Ratios are against `bg-base`; every text token also clears AA (4.5:1) on the lighter `bg-surface` cards — worst case is `text-muted` at ~4.7:1. Note `env-needs` deliberately shares the accent honey; if Needs cards ever read as "buttons," shift Needs to a deeper amber like `#D08F3E` and re-check contrast.
 
@@ -524,8 +552,8 @@ Ratios are against `bg-base`; every text token also clears AA (4.5:1) on the lig
 
 ## 7. Risk list — top 5, blunt
 
-1. **You stop logging. (The #1 killer — not a bug, a habit.)** Every abandoned tracker died here. *Mitigation:* Phase 3 is ruthlessly optimized for 2-tap entry; installable icon in Phase 3, not Phase 6; backdating for forgotten days; dogfooding starts at end of Phase 3, not when it's "done." If entry ever takes >5 s, that's a P0 bug.
-2. **Offline sync scope creep.** A solo dev building a general sync engine is a tar pit; this is where the project quietly dies in month 3. *Mitigation:* app is fully usable online-only through Phase 5; Phase 6 is strictly mirror + outbox + delta pull; append-only + client UUIDs means there is no conflict resolution to build. If Phase 6 exceeds ~6 evenings, stop and ship online-only — it's already a complete product.
-3. **An RLS mistake exposes your finances on a public URL.** One table created without RLS is world-readable via the anon key. *Mitigation:* RLS lives in the same migration as `CREATE TABLE`; the two-account probe test is written in Phase 2 and re-run after every migration; `service_role` never leaves the dashboard.
-4. **Supabase free-tier project pause or loss.** Pauses after 7 days idle; free tier has no automated backups — a deleted project is gone. *Mitigation:* keep-alive Action (₱0); migrations in the repo mean rebuild-from-zero is ~10 minutes; export button ships in Phase 3 and a monthly export reminder makes backups a habit. Your data outlives any Supabase project.
-5. **Perfectionism before dogfood (solo student edition).** Tinkering with analytics colors in week 2 while expenses still can't be logged, then exams hit and the repo goes cold. *Mitigation:* the phase order **is** the mitigation — nothing about polish precedes daily usability; every phase ends deployed; if a phase stalls, cut its scope, not the shipping.
+1. **You stop logging. (The #1 killer — not a bug, a habit.)** Every abandoned tracker died here. _Mitigation:_ Phase 3 is ruthlessly optimized for 2-tap entry; installable icon in Phase 3, not Phase 6; backdating for forgotten days; dogfooding starts at end of Phase 3, not when it's "done." If entry ever takes >5 s, that's a P0 bug.
+2. **Offline sync scope creep.** A solo dev building a general sync engine is a tar pit; this is where the project quietly dies in month 3. _Mitigation:_ app is fully usable online-only through Phase 5; Phase 6 is strictly mirror + outbox + delta pull; append-only + client UUIDs means there is no conflict resolution to build. If Phase 6 exceeds ~6 evenings, stop and ship online-only — it's already a complete product.
+3. **An RLS mistake exposes your finances on a public URL.** One table created without RLS is world-readable via the anon key. _Mitigation:_ RLS lives in the same migration as `CREATE TABLE`; the two-account probe test is written in Phase 2 and re-run after every migration; `service_role` never leaves the dashboard.
+4. **Supabase free-tier project pause or loss.** Pauses after 7 days idle; free tier has no automated backups — a deleted project is gone. _Mitigation:_ keep-alive Action (₱0); migrations in the repo mean rebuild-from-zero is ~10 minutes; export button ships in Phase 3 and a monthly export reminder makes backups a habit. Your data outlives any Supabase project.
+5. **Perfectionism before dogfood (solo student edition).** Tinkering with analytics colors in week 2 while expenses still can't be logged, then exams hit and the repo goes cold. _Mitigation:_ the phase order **is** the mitigation — nothing about polish precedes daily usability; every phase ends deployed; if a phase stalls, cut its scope, not the shipping.
