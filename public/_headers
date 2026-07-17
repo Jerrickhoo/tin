@@ -1,0 +1,9 @@
+# Baseline security headers (ROADMAP §3). CSP tightens further in Phase 7.
+# Phase 2: add your Supabase origin to connect-src:
+#   https://<ref>.supabase.co wss://<ref>.supabase.co
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Content-Security-Policy: default-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'

@@ -1,0 +1,36 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+
+/*
+ * Tin design tokens — "cozy dark" (ROADMAP §6).
+ * Mapping to §6 names:
+ *   bg-base → base · bg-surface → surface · bg-raised → raised · border → line
+ *   text-primary → ink · text-secondary → ink-soft · text-muted → ink-mute
+ *   accent → honey · on-accent → on-honey · positive → sage · negative → rose
+ *   env-needs → honey · env-savings → sage · env-wants → lilac
+ */
+@theme {
+  --font-sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --color-base: #1d1814;
+  --color-surface: #272019;
+  --color-raised: #322921;
+  --color-line: #40352a;
+
+  --color-ink: #ede3d4;
+  --color-ink-soft: #b3a493;
+  --color-ink-mute: #9a8875;
+
+  --color-honey: #e4a44c;
+  --color-on-honey: #241a0e;
+  --color-sage: #a8c29a;
+  --color-rose: #e08a83;
+  --color-lilac: #c4a9d1;
+}
+
+body {
+  background-color: var(--color-base);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
