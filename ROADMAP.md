@@ -213,23 +213,32 @@ create table public.envelopes (
   archived_at timestamptz,
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now(),
-  unique (user_id, name)
+  unique (user_id, name),
+  unique (id, user_id)  -- composite-FK target: children prove they share the owner
 );
 -- "shares of active envelopes sum to 10000" is enforced in the app +
 -- asserted by the Settings save flow; a DB-level check would need a
 -- deferred trigger and isn't worth it at this scale.
+--
+-- OWNERSHIP FKs (added on top of the roadmap SQL): RLS alone lets user B
+-- *reference* user A's envelope/category ids (rows stay invisible via RLS,
+-- but the ledger would hold cross-user pointers). Children therefore carry
+-- composite FKs on (foreign_id, user_id) so a reference to someone else's
+-- row is impossible at the database, not by app discipline.
 
 create table public.categories (
   id          uuid primary key default gen_random_uuid(),
   user_id     uuid not null default auth.uid() references auth.users(id) on delete cascade,
-  envelope_id uuid not null references public.envelopes(id) on delete restrict,
+  envelope_id uuid not null,
   name        text not null check (char_length(name) between 1 and 40),
   emoji       text,
   archived_at timestamptz,
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now(),
   unique (user_id, envelope_id, name),
-  unique (id, envelope_id)  -- composite-FK target: lets entries enforce category ↔ envelope
+  unique (id, envelope_id),  -- composite-FK target: lets entries enforce category ↔ envelope
+  unique (id, user_id),      -- composite-FK target: recurring_templates ownership
+  foreign key (envelope_id, user_id) references public.envelopes (id, user_id) on delete restrict
 );
 
 create table public.entries (
@@ -237,7 +246,7 @@ create table public.entries (
   user_id         uuid not null default auth.uid() references auth.users(id) on delete cascade,
   group_id        uuid not null,     -- legs of one action (income split, transfer) share this
   kind            text not null check (kind in ('income','expense','transfer','adjustment')),
-  envelope_id     uuid not null references public.envelopes(id) on delete restrict,
+  envelope_id     uuid not null,
   category_id     uuid,
   amount_centavos bigint not null check (amount_centavos <> 0),
   note            text check (char_length(note) <= 500),
@@ -255,21 +264,27 @@ create table public.entries (
   -- skipped entirely when category_id is null (income/transfer legs). Side effect:
   -- a category can't be re-parented to another envelope once entries reference it —
   -- archive + create new instead, which is the product rule anyway.
-  foreign key (category_id, envelope_id) references public.categories (id, envelope_id)
+  foreign key (category_id, envelope_id) references public.categories (id, envelope_id),
+  -- the entry's envelope must belong to the entry's owner (see note on envelopes)
+  foreign key (envelope_id, user_id) references public.envelopes (id, user_id) on delete restrict
 );
 
 create table public.recurring_templates (   -- used from Phase 5
   id              uuid primary key default gen_random_uuid(),
   user_id         uuid not null default auth.uid() references auth.users(id) on delete cascade,
   kind            text not null check (kind in ('income','expense')),
-  category_id     uuid references public.categories(id) on delete set null,
+  category_id     uuid,
   amount_centavos bigint not null check (amount_centavos > 0),
   note            text,
   day_of_month    integer not null check (day_of_month between 1 and 31), -- clamped to month length
   next_run_on     date not null,   -- Manila-local date
   paused_at       timestamptz,
   created_at      timestamptz not null default now(),
-  updated_at      timestamptz not null default now()
+  updated_at      timestamptz not null default now(),
+  -- MATCH SIMPLE: skipped when category_id is null. SET NULL (category_id)
+  -- clears only the category on delete (PG 15+); user_id stays intact.
+  foreign key (category_id, user_id) references public.categories (id, user_id)
+    on delete set null (category_id)
 );
 
 -- ============ updated_at TRIGGERS (needed for Phase 6 delta pull) ============
@@ -381,6 +396,7 @@ group by 1, 2, 3, 4, 5;
 - `user_id` always defaults to `auth.uid()` server-side; the client never sends it.
 - `_headers` starts with: `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, and a CSP with `default-src 'self'; connect-src 'self' https://<ref>.supabase.co wss://<ref>.supabase.co; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'` (tightened further in Phase 7). **`style-src 'unsafe-inline'` is required, not sloppiness:** without it, `default-src 'self'` blocks inline `style=` attributes — which the analytics bars (dynamic widths) and bottom-sheet transforms rely on. Script injection is what CSP is really guarding here, and `script-src` stays strict `'self'`.
 - Known, accepted gap: the DB doesn't verify that a transfer's two legs sum to zero, or that an income's three legs match the split — that's app logic (unit-tested in Phase 1). A deferred constraint trigger could enforce it but isn't worth the complexity for a solo project; the append-only ledger means a bad group is at least visible and voidable, never silently mutated.
+- **Ownership FKs (added during Phase 2 build, closing a gap the original SQL missed):** RLS hides rows but doesn't stop user B from *referencing* user A's envelope/category ids in B's own rows. Children now carry composite FKs on `(foreign_id, user_id)` — `entries→envelopes`, `categories→envelopes`, `recurring_templates→categories` — so cross-user references fail at the database. The RLS probe asserts this.
 
 ---
 
