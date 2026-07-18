@@ -52,7 +52,7 @@ Caveat: GitHub disables scheduled workflows after 60 days of repo inactivity. Da
 
 ### MFA
 
-Enable **TOTP MFA in Phase 7** — it's free on Supabase and worth having on a public URL. From day one: a unique strong password and Supabase's leaked-password protection turned on. Don't gate early phases on MFA.
+Enable **TOTP MFA in Phase 7** — it's free on Supabase and worth having on a public URL. From day one: a unique strong password (leaked-password protection turned out to be Pro-plan-only — verified 2026-07-18 — so the free-tier stack is strong password + RLS now, TOTP MFA in Phase 7). Don't gate early phases on MFA.
 
 ### End-to-end encryption — recommendation: no
 
@@ -102,7 +102,7 @@ Effort = focused evenings (~2–3 h). Total to end of Phase 7: **~17–25 evenin
 **Goal:** Supabase stands up with security _before_ any real data exists.
 
 - Supabase project; migration `001_core.sql` (full schema, RLS, grants, views — §3) committed to the repo.
-- Enable leaked-password protection; email + password auth; signup/login/logout screens; **forgot-password reset flow** (add the Netlify URL to Supabase's allowed redirect URLs); session persistence.
+- Email + password auth (leaked-password protection is Pro-only — skipped); signup/login/logout screens; **forgot-password reset flow** (add the Netlify URL to Supabase's allowed redirect URLs); session persistence.
 - First-run seeding (client-side, idempotent): if the user has no envelopes, create the profile row + Needs 7000bp / Savings 2000bp / Wants 1000bp + starter categories. (Chosen over an `auth.users` trigger — trigger failures block signups and are miserable to debug.)
 - **RLS probe test:** create a second account, attempt to read/insert/update the first account's rows via the REST API. Keep the script; re-run it after _every_ future migration.
 - Heads-up: Supabase's built-in email sender allows only a handful of emails per hour — fine for one real user, painful during testing. Create test users (e.g. the probe's second account) from the dashboard, auto-confirmed, instead of burning signup/reset emails.
@@ -469,7 +469,7 @@ Work top to bottom; nothing depends on anything below it.
 
 **Phase 2 — Accounts & vault**
 
-- [ ] 2.1 Create Supabase project; enable leaked-password protection
+- [x] 2.1 Create Supabase project (leaked-password protection: Pro-only, skipped)
 - [ ] 2.2 Write & apply `001_core.sql`; commit it
 - [ ] 2.3 Netlify env vars (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`); local `.env`
 - [ ] 2.4 Auth screens + session handling + route guard + password-reset flow (redirect URL allowlisted in Supabase)
