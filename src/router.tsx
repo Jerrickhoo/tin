@@ -7,6 +7,8 @@ import { ResetRequest } from './features/auth/ResetRequest'
 import { UpdatePassword } from './features/auth/UpdatePassword'
 import { Home } from './features/home/Home'
 import { History } from './features/entries/History'
+import { Insights } from './features/analytics/Insights'
+import { Recurring } from './features/recurring/Recurring'
 import { Settings } from './features/settings/Settings'
 import { SplitPreview } from './features/entries/SplitPreview'
 import { AppShell } from './AppShell'
@@ -25,6 +27,8 @@ export function AppRouter() {
           >
             <Route path="/" element={<Home />} />
             <Route path="/history" element={<History />} />
+            <Route path="/insights" element={<Insights />} />
+            <Route path="/recurring" element={<Recurring />} />
             <Route path="/settings" element={<Settings />} />
           </Route>
           <Route path="/split" element={<SplitPreview />} />

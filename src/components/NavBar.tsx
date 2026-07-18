@@ -8,6 +8,7 @@ export function NavBar() {
     <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 backdrop-blur">
       <div className="mx-auto flex w-full max-w-sm items-center px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
         <TabLink to="/" label="Home" active={pathname === '/'} />
+        <TabLink to="/history" label="History" active={pathname === '/history'} />
         <button
           type="button"
           onClick={() => open()}
@@ -16,7 +17,7 @@ export function NavBar() {
         >
           +
         </button>
-        <TabLink to="/history" label="History" active={pathname === '/history'} />
+        <TabLink to="/insights" label="Insights" active={pathname === '/insights'} />
         <TabLink to="/settings" label="Settings" active={pathname === '/settings'} />
       </div>
     </nav>

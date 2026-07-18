@@ -10,13 +10,18 @@ export function useLedger() {
 }
 
 // --- toasts ---
+export interface ToastAction {
+  label: string
+  run: () => void
+}
 export interface Toast {
   id: number
   message: string
   kind: 'ok' | 'error'
+  action?: ToastAction
 }
 export const ToastContext = createContext<{
-  show: (message: string, kind?: Toast['kind']) => void
+  show: (message: string, kind?: Toast['kind'], action?: ToastAction) => void
 }>({ show: () => {} })
 export function useToast() {
   return useContext(ToastContext)

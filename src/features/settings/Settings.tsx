@@ -97,6 +97,16 @@ export function Settings() {
       </section>
 
       <section className="rounded-2xl border border-line bg-surface p-4">
+        <h2 className="font-medium">Recurring</h2>
+        <p className="mt-1 text-sm text-ink-soft">
+          Rent, allowance, subscriptions — they log themselves on app open.
+        </p>
+        <Link to="/recurring" className="mt-2 inline-block text-sm font-medium text-accent">
+          Manage templates →
+        </Link>
+      </section>
+
+      <section className="rounded-2xl border border-line bg-surface p-4">
         <h2 className="font-medium">Extras</h2>
         <p className="mt-1 text-sm">
           <Link to="/split" className="text-accent">
