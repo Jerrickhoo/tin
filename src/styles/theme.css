@@ -40,3 +40,13 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
+
+/* §6 motion: 150–200 ms ease-out on sheets; none on data updates */
+@keyframes sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}
+.sheet-in {
+  animation: sheet-in 180ms ease-out;
+}

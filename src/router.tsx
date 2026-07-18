@@ -6,7 +6,10 @@ import { Signup } from './features/auth/Signup'
 import { ResetRequest } from './features/auth/ResetRequest'
 import { UpdatePassword } from './features/auth/UpdatePassword'
 import { Home } from './features/home/Home'
+import { History } from './features/entries/History'
+import { Settings } from './features/settings/Settings'
 import { SplitPreview } from './features/entries/SplitPreview'
+import { AppShell } from './AppShell'
 
 export function AppRouter() {
   return (
@@ -14,13 +17,16 @@ export function AppRouter() {
       <SessionProvider>
         <Routes>
           <Route
-            path="/"
             element={
               <RequireAuth>
-                <Home />
+                <AppShell />
               </RequireAuth>
             }
-          />
+          >
+            <Route path="/" element={<Home />} />
+            <Route path="/history" element={<History />} />
+            <Route path="/settings" element={<Settings />} />
+          </Route>
           <Route path="/split" element={<SplitPreview />} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />

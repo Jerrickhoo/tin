@@ -9,5 +9,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts', 'supabase/tests/**/*.test.ts'],
+    // the live integration tests share one probe account — never run them in parallel
+    fileParallelism: false,
   },
 })
