@@ -5,3 +5,8 @@
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()
   Content-Security-Policy: default-src 'self'; connect-src 'self' https://kchmvvjyysitfvbylwpo.supabase.co wss://kchmvvjyysitfvbylwpo.supabase.co; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
+
+# The service worker must never be served stale — a cached-forever sw.js
+# would pin users to an old app shell (ROADMAP 6.1).
+/sw.js
+  Cache-Control: public, max-age=0, must-revalidate

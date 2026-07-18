@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import { useToast } from '../../app-context'
 import { supabase } from '../../db/supabase'
 import { wipeLocalCaches } from '../../db/cacheWipe'
+import { outboxCount } from '../../db/dexie'
 import {
   fetchAllCategoriesForExport,
   fetchAllEntriesForExport,
@@ -57,7 +58,16 @@ export function Settings() {
   }
 
   async function logout() {
-    await wipeLocalCaches() // Phase 6 stub — wired now so logout hygiene is a habit
+    // ROADMAP 6.6: unsynced writes die with the wipe — never silently
+    const pending = await outboxCount()
+    if (pending > 0) {
+      const ok = window.confirm(
+        `${pending} write${pending === 1 ? '' : 's'} haven't reached the server yet ` +
+          `(you're probably offline). Logging out deletes them from this device forever. Log out anyway?`,
+      )
+      if (!ok) return
+    }
+    await wipeLocalCaches()
     await supabase.auth.signOut()
   }
 

@@ -503,15 +503,15 @@ Work top to bottom; nothing depends on anything below it.
 - [ ] 5.2 On-open catch-up with confirm/undo toast
 - [ ] 5.3 Manage screen (add/edit/pause/delete)
 
-**Phase 6 — PWA + offline**
+**Phase 6 — PWA + offline** _(done 2026-07-19)_
 
-- [ ] 6.1 `vite-plugin-pwa` service worker, app shell cached
-- [ ] 6.2 Dexie mirror; UI reads local-first
-- [ ] 6.3 Outbox queue; writes go local + queue
-- [ ] 6.4 Sync loop: push entry upserts (`ignoreDuplicates`) + void-group updates; delta pull by `updated_at` (server-side cursor, ~60 s overlap)
-- [ ] 6.5 Online/offline indicator + queued-writes badge
-- [ ] 6.6 Logout wipes Dexie + outbox + SW caches (warn if outbox non-empty)
-- [ ] 6.7 PWA shortcut → Add expense; airplane-mode end-to-end test
+- [x] 6.1 `vite-plugin-pwa` service worker, app shell cached
+- [x] 6.2 Dexie mirror; UI reads local-first
+- [x] 6.3 Outbox queue; writes go local + queue
+- [x] 6.4 Sync loop: push entry upserts (`ignoreDuplicates`) + void-group updates; delta pull by `updated_at` (server-side cursor, ~60 s overlap)
+- [x] 6.5 Online/offline indicator + queued-writes badge
+- [x] 6.6 Logout wipes Dexie + outbox + SW caches (warn if outbox non-empty)
+- [x] 6.7 PWA shortcut → Add expense; airplane-mode end-to-end test (headless-Edge Playwright: offline reload from SW → offline expense queued → reconnect → outbox drained → logout wipe verified)
 
 **Phase 7 — Hardening**
 

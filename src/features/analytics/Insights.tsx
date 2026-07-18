@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLedger, useToast } from '../../app-context'
-import { supabase } from '../../db/supabase'
-import { fetchCategories, fetchEnvelopes, type Category, type Envelope } from '../../db/entries'
+import {
+  fetchCategories,
+  fetchEntriesBetween,
+  fetchEnvelopes,
+  type Category,
+  type Envelope,
+} from '../../db/entries'
 import { splitAdherence, summarizeMonth } from '../../lib/analytics'
 import {
   manilaMonthKey,
@@ -13,18 +18,11 @@ import {
 import type { EntryRow } from '../../lib/groups'
 import { formatPHP } from '../../lib/money'
 
+// Local-first (Phase 6): the month window reads the Dexie mirror, so Insights
+// works in a dead spot too.
 async function fetchMonthEntries(monthKey: string): Promise<EntryRow[]> {
   const { start, end } = manilaMonthRangeUtc(monthKey)
-  const { data, error } = await supabase
-    .from('entries')
-    .select(
-      'id, group_id, kind, envelope_id, category_id, amount_centavos, note, occurred_at, voided_at, void_reason',
-    )
-    .gte('occurred_at', start.toISOString())
-    .lt('occurred_at', end.toISOString())
-    .is('voided_at', null)
-  if (error) throw error
-  return (data ?? []) as EntryRow[]
+  return fetchEntriesBetween(start.toISOString(), end.toISOString())
 }
 
 export function Insights() {

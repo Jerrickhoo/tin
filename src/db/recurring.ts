@@ -4,7 +4,8 @@
 // here would double-post rent; determinism IS the correctness.
 
 import { supabase } from './supabase'
-import { fetchCategories, fetchEnvelopes } from './entries'
+import { fetchCategories, fetchEnvelopes, insertPostedRows } from './entries'
+import { isOffline } from './sync'
 import { manilaDayKey } from '../lib/dates'
 import { splitByLargestRemainder } from '../lib/split'
 import { dueDateOccurredAt, dueDatesUpTo, firstRunOnOrAfter, nextRunAfter } from '../lib/recurring'
@@ -120,8 +121,13 @@ export interface CatchUpResult {
   warnings: string[]
 }
 
-/** Post everything due through today (Manila). Safe to run on every app open. */
+/** Post everything due through today (Manila). Safe to run on every app open.
+ *  Offline it does nothing — templates live on the server, and a missed run
+ *  simply catches up on the next online open (that's the whole design). */
 export async function runCatchUp(): Promise<CatchUpResult> {
+  if (isOffline()) {
+    return { postedCount: 0, postedGroupIds: [], descriptions: [], warnings: [] }
+  }
   const today = manilaDayKey(new Date())
   const [templates, envelopes, categories] = await Promise.all([
     fetchTemplates(),
@@ -188,8 +194,9 @@ export async function runCatchUp(): Promise<CatchUpResult> {
         ).filter((r) => r.amount_centavos > 0)
       }
 
-      const { error } = await supabase.from('entries').upsert(rows, { ignoreDuplicates: true })
-      if (error) throw error
+      // local-first like every other write (mirror + outbox, ROADMAP 6.3);
+      // deterministic ids collapse in the mirror AND in the eventual push
+      await insertPostedRows(rows)
       result.postedCount += 1
       result.postedGroupIds.push(groupId)
       result.descriptions.push(`${label} · ${due}`)

@@ -1,10 +1,16 @@
-// Ledger data layer (ROADMAP §1 rules 3–4): append-only writes, client-generated
-// UUIDs, upsert + ignoreDuplicates so a retried request is a no-op, never a
-// double-count. Voids target the whole group_id, enforced here by API shape.
+// Ledger data layer, LOCAL-FIRST since Phase 6: every read comes from the
+// Dexie mirror, every write lands in the mirror + outbox atomically and syncs
+// in the background. The §1 rules still hold — append-only, client UUIDs,
+// whole-group voids — and the local apply semantics deliberately match the
+// server's (insert ignores duplicate ids, void touches only un-voided rows),
+// so mirror and server can never disagree about money, only about lag.
+// This module never imports Supabase; sync.ts owns the network.
 
-import { supabase } from './supabase'
 import { splitByLargestRemainder } from '../lib/split'
+import { balancesFromEntries } from '../lib/balances'
 import type { EntryRow } from '../lib/groups'
+import { applyLocalInsert, applyLocalVoidGroup, localDb } from './dexie'
+import type { NewEntryRow } from './outbox'
 
 export interface Envelope {
   id: string
@@ -23,86 +29,90 @@ export interface Category {
   archived_at: string | null
 }
 
-const ENTRY_COLUMNS =
-  'id, group_id, kind, envelope_id, category_id, amount_centavos, note, occurred_at, voided_at, void_reason'
-
 export async function fetchEnvelopes(): Promise<Envelope[]> {
-  const { data, error } = await supabase
-    .from('envelopes')
-    .select('id, name, share_bp, sort_order, color, archived_at')
-    .is('archived_at', null)
-    .order('sort_order')
-  if (error) throw error
-  return data ?? []
+  const db = await localDb()
+  const rows = await db.envelopes.orderBy('sort_order').toArray()
+  return rows
+    .filter((r) => r.archived_at === null)
+    .map((r) => ({
+      id: r.id,
+      name: r.name,
+      share_bp: r.share_bp,
+      sort_order: r.sort_order,
+      color: r.color,
+      archived_at: r.archived_at,
+    }))
 }
 
 export async function fetchCategories(): Promise<Category[]> {
-  const { data, error } = await supabase
-    .from('categories')
-    .select('id, envelope_id, name, emoji, archived_at')
-    .is('archived_at', null)
-    .order('name')
-  if (error) throw error
-  return data ?? []
+  const db = await localDb()
+  const rows = await db.categories.orderBy('name').toArray()
+  return rows
+    .filter((r) => r.archived_at === null)
+    .map((r) => ({
+      id: r.id,
+      envelope_id: r.envelope_id,
+      name: r.name,
+      emoji: r.emoji,
+      archived_at: r.archived_at,
+    }))
 }
 
 export async function fetchBalances(): Promise<Map<string, number>> {
-  const { data, error } = await supabase
-    .from('envelope_balances')
-    .select('envelope_id, balance_centavos')
-  if (error) throw error
-  return new Map((data ?? []).map((b) => [b.envelope_id as string, Number(b.balance_centavos)]))
+  const db = await localDb()
+  const [envelopes, entries] = await Promise.all([
+    db.envelopes.toCollection().primaryKeys(),
+    db.entries.toArray(),
+  ])
+  return balancesFromEntries(envelopes as string[], entries)
 }
 
 export async function fetchEntries(limit = 400): Promise<EntryRow[]> {
-  const { data, error } = await supabase
-    .from('entries')
-    .select(ENTRY_COLUMNS)
-    .order('occurred_at', { ascending: false })
-    .order('id', { ascending: false })
-    .limit(limit)
-  if (error) throw error
-  return (data ?? []) as EntryRow[]
+  const db = await localDb()
+  return db.entries.orderBy('[occurred_at+id]').reverse().limit(limit).toArray()
+}
+
+/** Entries in [startIso, endIso), non-voided — the Insights month window. */
+export async function fetchEntriesBetween(startIso: string, endIso: string): Promise<EntryRow[]> {
+  const db = await localDb()
+  const rows = await db.entries.where('occurred_at').between(startIso, endIso, true, false).toArray()
+  return rows.filter((r) => r.voided_at === null)
 }
 
 export async function fetchAllEntriesForExport(): Promise<EntryRow[]> {
   // includes voided — the export is the honest full ledger (ROADMAP 3.8)
-  const { data, error } = await supabase
-    .from('entries')
-    .select(ENTRY_COLUMNS)
-    .order('occurred_at', { ascending: true })
-  if (error) throw error
-  return (data ?? []) as EntryRow[]
+  const db = await localDb()
+  return db.entries.orderBy('occurred_at').toArray()
 }
 
 // Export fetchers include archived rows — the export is complete or it's useless.
+// The mirror keeps every pulled column, so going local loses no fidelity.
 export async function fetchAllEnvelopesForExport() {
-  const { data, error } = await supabase.from('envelopes').select('*').order('sort_order')
-  if (error) throw error
-  return data ?? []
+  const db = await localDb()
+  return db.envelopes.orderBy('sort_order').toArray()
 }
 
 export async function fetchAllCategoriesForExport() {
-  const { data, error } = await supabase.from('categories').select('*').order('name')
-  if (error) throw error
-  return data ?? []
+  const db = await localDb()
+  return db.categories.orderBy('name').toArray()
 }
 
 export async function hasAnyEntries(): Promise<boolean> {
-  const { count, error } = await supabase
-    .from('entries')
-    .select('id', { count: 'exact', head: true })
-  if (error) throw error
-  return (count ?? 0) > 0
+  const db = await localDb()
+  return (await db.entries.count()) > 0
 }
 
 const nowIso = () => new Date().toISOString()
 
-async function insertRows(rows: Omit<EntryRow, 'voided_at' | 'void_reason'>[]): Promise<void> {
-  // upsert on the client-generated primary key: a retry after a lost response
-  // collapses into the already-landed rows instead of double-counting money
-  const { error } = await supabase.from('entries').upsert(rows, { ignoreDuplicates: true })
-  if (error) throw error
+async function insertRows(rows: NewEntryRow[]): Promise<void> {
+  await applyLocalInsert(rows)
+}
+
+/** Recurring catch-up posts through the same local-first path (ROADMAP 6.3:
+ *  EVERY write goes to Dexie + an outbox row). Deterministic ids make the
+ *  eventual server upsert — and the mirror insert — collapse duplicates. */
+export async function insertPostedRows(rows: NewEntryRow[]): Promise<void> {
+  await insertRows(rows)
 }
 
 export async function addExpense(params: {
@@ -228,10 +238,5 @@ export async function addOpeningBalances(
 
 /** The ONLY mutation the ledger allows — and always the whole group. */
 export async function voidGroup(groupId: string, reason: string): Promise<void> {
-  const { error } = await supabase
-    .from('entries')
-    .update({ voided_at: nowIso(), void_reason: reason.trim() || null })
-    .eq('group_id', groupId)
-    .is('voided_at', null)
-  if (error) throw error
+  await applyLocalVoidGroup(groupId, nowIso(), reason.trim() || null)
 }

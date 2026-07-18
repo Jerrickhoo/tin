@@ -1,9 +1,11 @@
+import 'fake-indexeddb/auto'
 import { afterAll, describe, expect, it } from 'vitest'
 
-// Live test of the Phase 5 catch-up poster as probe-B. The critical claim:
-// running catch-up twice for the same due date (two devices, retries) must
-// NOT double-post — deterministic UUIDv5 ids + upsert collapse the second
-// run into a no-op. Cleans up after itself (void + delete template).
+// Live test of the Phase 5 catch-up poster as probe-B, now through the
+// Phase 6 local-first path: postings land in the mirror + outbox and sync
+// pushes them. The critical claim stands: running catch-up twice for the
+// same due date (two devices, retries) must NOT double-post — deterministic
+// UUIDv5 ids collapse in the mirror AND in the server upsert.
 const password = process.env.PROBE_B_PASSWORD
 const email = process.env.PROBE_B_EMAIL ?? 'probe-b@tin.test'
 
@@ -12,11 +14,19 @@ describe.skipIf(!password)('recurring catch-up against the live project', () => 
     const { supabase } = await import('../../src/db/supabase')
     const entriesDb = await import('../../src/db/entries')
     const recurringDb = await import('../../src/db/recurring')
+    const { openForUser, outboxCount } = await import('../../src/db/dexie')
+    const { syncNow } = await import('../../src/db/sync')
     const { manilaDayKey } = await import('../../src/lib/dates')
     const { nextRunAfter } = await import('../../src/lib/recurring')
 
     const signIn = await supabase.auth.signInWithPassword({ email, password: password! })
     expect(signIn.error).toBeNull()
+
+    // catch-up reads envelopes/categories from the mirror — sync it first,
+    // exactly like the app's boot order (openForUser → syncNow → runCatchUp)
+    await openForUser(signIn.data.user!.id)
+    await syncNow()
+    expect(await outboxCount()).toBe(0)
 
     const today = manilaDayKey(new Date())
     const todayDay = Number(today.slice(8, 10))
@@ -78,7 +88,19 @@ describe.skipIf(!password)('recurring catch-up against the live project', () => 
     await recurringDb.deleteTemplate(probe!.id)
     const restored = await entriesDb.fetchBalances()
     expect(restored.get(needsId)).toBe(baseline.get(needsId) ?? 0)
-  }, 45000)
+
+    // flush the outbox and prove the server holds exactly ONE posted group,
+    // voided — the deterministic ids collapsed every re-post on both sides
+    await syncNow()
+    expect(await outboxCount()).toBe(0)
+    const server = await supabase
+      .from('entries')
+      .select('id, voided_at')
+      .eq('group_id', probeGroups[0].g)
+    expect(server.error).toBeNull()
+    expect(server.data).toHaveLength(1)
+    expect(server.data![0].voided_at).not.toBeNull()
+  }, 60000)
 
   afterAll(async () => {
     const { supabase } = await import('../../src/db/supabase')
