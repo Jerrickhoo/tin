@@ -37,14 +37,14 @@ export function Signup() {
       footer={
         <p>
           Already have an account?{' '}
-          <Link to="/login" className="text-honey">
+          <Link to="/login" className="text-accent">
             Log in
           </Link>
         </p>
       }
     >
       {notice ? (
-        <p className="text-sm text-sage">{notice}</p>
+        <p className="text-sm text-pos">{notice}</p>
       ) : (
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
           <input
@@ -66,7 +66,7 @@ export function Signup() {
             onChange={(e) => setPassword(e.target.value)}
             className={fieldClass}
           />
-          {error && <p className="text-sm text-rose">{error}</p>}
+          {error && <p className="text-sm text-neg">{error}</p>}
           <button type="submit" disabled={busy} className={buttonClass}>
             {busy ? 'Creating…' : 'Create account'}
           </button>

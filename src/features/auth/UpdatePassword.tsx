@@ -31,9 +31,9 @@ export function UpdatePassword() {
       {loading ? (
         <p className="text-sm text-ink-mute">Checking your reset link…</p>
       ) : !session ? (
-        <p className="text-sm text-rose">
+        <p className="text-sm text-neg">
           This page only works right after opening the reset link from your email.{' '}
-          <Link to="/reset" className="text-honey">
+          <Link to="/reset" className="text-accent">
             Request a new one
           </Link>
           .
@@ -50,7 +50,7 @@ export function UpdatePassword() {
             onChange={(e) => setPassword(e.target.value)}
             className={fieldClass}
           />
-          {error && <p className="text-sm text-rose">{error}</p>}
+          {error && <p className="text-sm text-neg">{error}</p>}
           <button type="submit" disabled={busy} className={buttonClass}>
             {busy ? 'Saving…' : 'Save new password'}
           </button>

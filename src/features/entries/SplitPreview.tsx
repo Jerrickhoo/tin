@@ -6,9 +6,9 @@ import { splitByLargestRemainder } from '../../lib/split'
 // Phase 1 shippable, kept as a public playground. Real envelopes (editable
 // percentages, basis points on rows) live in the database from Phase 2 on.
 const ENVELOPES = [
-  { name: 'Needs', shareBp: 7000, dot: 'bg-honey', bar: 'w-[70%] bg-honey' },
-  { name: 'Savings', shareBp: 2000, dot: 'bg-sage', bar: 'w-[20%] bg-sage' },
-  { name: 'Wants', shareBp: 1000, dot: 'bg-lilac', bar: 'w-[10%] bg-lilac' },
+  { name: 'Needs', shareBp: 7000, dot: 'bg-needs', bar: 'w-[70%] bg-needs' },
+  { name: 'Savings', shareBp: 2000, dot: 'bg-savings', bar: 'w-[20%] bg-savings' },
+  { name: 'Wants', shareBp: 1000, dot: 'bg-wants', bar: 'w-[10%] bg-wants' },
 ]
 
 const SHARES = ENVELOPES.map((e) => e.shareBp)
@@ -40,10 +40,10 @@ export function SplitPreview() {
           placeholder="0.00"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          className="mt-2 w-full rounded-xl border border-line bg-base px-4 py-3 text-center text-2xl font-semibold tabular-nums text-ink outline-none placeholder:text-ink-mute focus:border-honey"
+          className="mt-2 w-full rounded-xl border border-line bg-base px-4 py-3 text-center text-2xl font-semibold tabular-nums text-ink outline-none placeholder:text-ink-mute focus:border-accent"
         />
         {invalid && (
-          <p className="mt-2 text-center text-sm text-rose">
+          <p className="mt-2 text-center text-sm text-neg">
             Amounts take up to two decimals — centavos are the atom here.
           </p>
         )}
@@ -83,7 +83,7 @@ export function SplitPreview() {
           <p>Largest-remainder split · unit-tested · no floats anywhere.</p>
         )}
         <p className="mt-2">
-          <Link to="/" className="text-honey">
+          <Link to="/" className="text-accent">
             ← to your envelopes
           </Link>
         </p>

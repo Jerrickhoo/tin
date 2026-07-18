@@ -5,11 +5,11 @@ import { supabase } from './supabase'
 // Races (two devices, StrictMode double-effects) are absorbed by upsert +
 // ignoreDuplicates against the unique constraints — retries are no-ops.
 
-// §6 envelope identities: honey / sage / lilac
+// §6 envelope identities: violet / mint / orchid ("midnight violet" palette)
 const STARTER_ENVELOPES = [
-  { name: 'Needs', share_bp: 7000, sort_order: 0, color: '#E4A44C' },
-  { name: 'Savings', share_bp: 2000, sort_order: 1, color: '#A8C29A' },
-  { name: 'Wants', share_bp: 1000, sort_order: 2, color: '#C4A9D1' },
+  { name: 'Needs', share_bp: 7000, sort_order: 0, color: '#B49BF5' },
+  { name: 'Savings', share_bp: 2000, sort_order: 1, color: '#93CFA9' },
+  { name: 'Wants', share_bp: 1000, sort_order: 2, color: '#EFA9D6' },
 ]
 
 const STARTER_CATEGORIES: Record<string, { name: string; emoji: string }[]> = {

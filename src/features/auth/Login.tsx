@@ -30,7 +30,7 @@ export function Login() {
       footer={
         <p>
           New here?{' '}
-          <Link to="/signup" className="text-honey">
+          <Link to="/signup" className="text-accent">
             Create an account
           </Link>{' '}
           · <Link to="/split">Peek at the split math</Link>
@@ -56,7 +56,7 @@ export function Login() {
           onChange={(e) => setPassword(e.target.value)}
           className={fieldClass}
         />
-        {error && <p className="text-sm text-rose">{error}</p>}
+        {error && <p className="text-sm text-neg">{error}</p>}
         <button type="submit" disabled={busy} className={buttonClass}>
           {busy ? 'Logging in…' : 'Log in'}
         </button>

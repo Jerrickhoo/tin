@@ -27,14 +27,14 @@ export function ResetRequest() {
       footer={
         <p>
           Remembered it?{' '}
-          <Link to="/login" className="text-honey">
+          <Link to="/login" className="text-accent">
             Log in
           </Link>
         </p>
       }
     >
       {sent ? (
-        <p className="text-sm text-sage">
+        <p className="text-sm text-pos">
           If that account exists, a reset link is on its way. Open it on this device.
         </p>
       ) : (
@@ -48,7 +48,7 @@ export function ResetRequest() {
             onChange={(e) => setEmail(e.target.value)}
             className={fieldClass}
           />
-          {error && <p className="text-sm text-rose">{error}</p>}
+          {error && <p className="text-sm text-neg">{error}</p>}
           <button type="submit" disabled={busy} className={buttonClass}>
             {busy ? 'Sending…' : 'Send reset link'}
           </button>

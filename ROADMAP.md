@@ -532,30 +532,34 @@ Work top to bottom; nothing depends on anything below it.
 
 ---
 
-## 6. Design system — cozy dark
+## 6. Design system — midnight violet
 
-A dim room at night: warm espresso surfaces, cream text, honey accent. All body-text pairings clear WCAG AA against their backgrounds (contrast ratios noted).
+> Remade 2026-07-18 (v2). The original "cozy dark" was espresso/honey — too brown. Direction now follows the `theme reference/` folder (near-black neutral surfaces, hairline borders, one confident accent) plus the owner's call: dark + purple. Coziness lives in shape, spacing, and soft pastels — not warm browns.
+
+A dark room lit by one lamp: near-black violet surfaces, lavender light. All ratios below are **measured** (WCAG relative-luminance script, not eyeballed); every text token clears AA (4.5:1) on `bg-base`, `bg-surface`, *and* `bg-raised` — worst case is `text-muted` on `bg-raised` at 4.86:1.
 
 ### Palette
 
-| Token            | Hex       | Use                                  | Contrast on `bg-base` |
-| ---------------- | --------- | ------------------------------------ | --------------------- |
-| `bg-base`        | `#1D1814` | app background (deep espresso)       | —                     |
-| `bg-surface`     | `#272019` | cards                                | —                     |
-| `bg-raised`      | `#322921` | bottom sheets, modals                | —                     |
-| `border`         | `#40352A` | hairlines, dividers                  | —                     |
-| `text-primary`   | `#EDE3D4` | body & amounts (warm cream)          | ~13.3 : 1             |
-| `text-secondary` | `#B3A493` | labels, secondary                    | ~7.1 : 1              |
-| `text-muted`     | `#9A8875` | timestamps, hints                    | ~5.1 : 1              |
-| `accent`         | `#E4A44C` | primary buttons, focus rings (honey) | ~8.0 : 1              |
-| `on-accent`      | `#241A0E` | text on accent buttons               | ~7.8 : 1 on accent    |
-| `positive`       | `#A8C29A` | income, positive deltas (sage)       | ~8.9 : 1              |
-| `negative`       | `#E08A83` | expenses, red envelopes (dusty rose) | ~6.7 : 1              |
-| `env-needs`      | `#E4A44C` | Needs identity (honey)               | —                     |
-| `env-savings`    | `#A8C29A` | Savings identity (sage)              | —                     |
-| `env-wants`      | `#C4A9D1` | Wants identity (dusty lilac)         | ~8.1 : 1              |
+Token names in code are role-based (`src/styles/theme.css`) so a future restyle touches one file. §6-name → code-name mapping is commented in that file.
 
-Ratios are against `bg-base`; every text token also clears AA (4.5:1) on the lighter `bg-surface` cards — worst case is `text-muted` at ~4.7:1. Note `env-needs` deliberately shares the accent honey; if Needs cards ever read as "buttons," shift Needs to a deeper amber like `#D08F3E` and re-check contrast.
+| Token            | Hex       | Use                                     | Contrast on `bg-base` |
+| ---------------- | --------- | --------------------------------------- | --------------------- |
+| `bg-base`        | `#131118` | app background (violet-tinted near-black) | —                   |
+| `bg-surface`     | `#1C1923` | cards                                   | —                     |
+| `bg-raised`      | `#262230` | bottom sheets, modals                   | —                     |
+| `border`         | `#363044` | hairlines, dividers                     | —                     |
+| `text-primary`   | `#EAE6F2` | body & amounts (lavender-white)         | 15.25 : 1             |
+| `text-secondary` | `#AFA7C2` | labels, secondary                       | 8.14 : 1              |
+| `text-muted`     | `#948CA9` | timestamps, hints                       | 5.87 : 1              |
+| `accent`         | `#B49BF5` | primary buttons, focus rings, links (lavender) | 7.98 : 1       |
+| `on-accent`      | `#1D1530` | text on accent buttons                  | 7.44 : 1 on accent    |
+| `positive`       | `#93CFA9` | income, positive deltas (mint)          | 10.47 : 1             |
+| `negative`       | `#E4808A` | expenses, red envelopes (dusty rose)    | 6.92 : 1              |
+| `env-needs`      | `#B49BF5` | Needs identity (violet)                 | —                     |
+| `env-savings`    | `#93CFA9` | Savings identity (mint)                 | —                     |
+| `env-wants`      | `#EFA9D6` | Wants identity (orchid)                 | 10.09 : 1             |
+
+Note `env-needs` deliberately shares the accent lavender (same trade-off the honey palette made): Needs is the app's center of gravity. If Needs cards ever read as "buttons," shift Needs to a deeper violet like `#9A7FE0` and re-run the contrast script. `negative` (rose-red) vs `env-wants` (orchid-pink) are neighbors — keep negative for amounts/errors only, wants for identity dots/bars only, and they never sit side by side ambiguously.
 
 ### Type & shape
 

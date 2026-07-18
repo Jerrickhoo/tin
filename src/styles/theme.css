@@ -2,30 +2,36 @@
 @import '@fontsource-variable/inter';
 
 /*
- * Tin design tokens — "cozy dark" (ROADMAP §6).
+ * Tin design tokens — "midnight violet" (ROADMAP §6, remade 2026-07-18).
+ * A dark room lit by one lamp: near-black violet surfaces, lavender light.
+ * Token names are roles, not colors, so the next restyle touches only this file.
  * Mapping to §6 names:
  *   bg-base → base · bg-surface → surface · bg-raised → raised · border → line
  *   text-primary → ink · text-secondary → ink-soft · text-muted → ink-mute
- *   accent → honey · on-accent → on-honey · positive → sage · negative → rose
- *   env-needs → honey · env-savings → sage · env-wants → lilac
+ *   accent/on-accent · positive → pos · negative → neg
+ *   env-needs → needs · env-savings → savings · env-wants → wants
+ * All pairings verified ≥ 4.5:1 (AA) — see §6 for the measured ratios.
  */
 @theme {
   --font-sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
 
-  --color-base: #1d1814;
-  --color-surface: #272019;
-  --color-raised: #322921;
-  --color-line: #40352a;
+  --color-base: #131118;
+  --color-surface: #1c1923;
+  --color-raised: #262230;
+  --color-line: #363044;
 
-  --color-ink: #ede3d4;
-  --color-ink-soft: #b3a493;
-  --color-ink-mute: #9a8875;
+  --color-ink: #eae6f2;
+  --color-ink-soft: #afa7c2;
+  --color-ink-mute: #948ca9;
 
-  --color-honey: #e4a44c;
-  --color-on-honey: #241a0e;
-  --color-sage: #a8c29a;
-  --color-rose: #e08a83;
-  --color-lilac: #c4a9d1;
+  --color-accent: #b49bf5;
+  --color-on-accent: #1d1530;
+  --color-pos: #93cfa9;
+  --color-neg: #e4808a;
+
+  --color-needs: #b49bf5;
+  --color-savings: #93cfa9;
+  --color-wants: #efa9d6;
 }
 
 body {

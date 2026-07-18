@@ -1,10 +1,10 @@
 import type { ReactNode } from 'react'
 
 export const fieldClass =
-  'w-full rounded-xl border border-line bg-base px-4 py-3 text-ink outline-none placeholder:text-ink-mute focus:border-honey'
+  'w-full rounded-xl border border-line bg-base px-4 py-3 text-ink outline-none placeholder:text-ink-mute focus:border-accent'
 
 export const buttonClass =
-  'w-full rounded-xl bg-honey px-4 py-3 font-semibold text-on-honey transition-opacity disabled:opacity-50'
+  'w-full rounded-xl bg-accent px-4 py-3 font-semibold text-on-accent transition-opacity disabled:opacity-50'
 
 export function AuthShell({
   title,

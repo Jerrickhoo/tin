@@ -73,7 +73,7 @@ export function Home() {
         </button>
       </header>
 
-      {error && <p className="text-sm text-rose">{error}</p>}
+      {error && <p className="text-sm text-neg">{error}</p>}
 
       {!cards && !error && <p className="text-ink-mute">Opening the tin…</p>}
 
@@ -87,13 +87,13 @@ export function Home() {
               <div className="flex items-center gap-3">
                 <span
                   className="size-2.5 rounded-full"
-                  style={{ backgroundColor: card.color ?? '#B3A493' }}
+                  style={{ backgroundColor: card.color ?? '#AFA7C2' }}
                 />
                 <span className="font-medium">{card.name}</span>
                 <span className="text-sm text-ink-mute">{card.share_bp / 100}%</span>
               </div>
               <span
-                className={`text-lg font-semibold tabular-nums ${card.balanceCentavos < 0 ? 'text-rose' : ''}`}
+                className={`text-lg font-semibold tabular-nums ${card.balanceCentavos < 0 ? 'text-neg' : ''}`}
               >
                 {formatPHP(card.balanceCentavos)}
               </span>
@@ -105,7 +105,7 @@ export function Home() {
       <footer className="mt-auto text-center text-sm text-ink-mute">
         <p>
           Logged in as {session?.user.email} · The Add button arrives in Phase 3 ·{' '}
-          <Link to="/split" className="text-honey">
+          <Link to="/split" className="text-accent">
             split preview
           </Link>
         </p>
