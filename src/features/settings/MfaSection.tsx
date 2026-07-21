@@ -81,7 +81,7 @@ export function MfaSection() {
   }
 
   return (
-    <section className="rounded-2xl border border-line bg-surface p-4">
+    <section className="card p-4">
       <h2 className="font-medium">Two-factor authentication</h2>
 
       {view === 'loading' && <p className="mt-1 text-sm text-ink-mute">Checking…</p>}

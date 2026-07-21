@@ -63,7 +63,7 @@ export function Recurring() {
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-6 py-8">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-semibold tracking-tight">Recurring</h1>
+        <h1 className="font-display text-[1.75rem] font-bold tracking-tight">Recurring</h1>
         <button
           type="button"
           onClick={() => setEditing('new')}
@@ -90,10 +90,7 @@ export function Recurring() {
         const label =
           template.note ?? (template.kind === 'income' ? 'Income' : (category?.name ?? 'Expense'))
         return (
-          <div
-            key={template.id}
-            className={`rounded-2xl border border-line bg-surface p-4 ${template.paused_at ? 'opacity-60' : ''}`}
-          >
+          <div key={template.id} className={`card p-4 ${template.paused_at ? 'opacity-60' : ''}`}>
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-medium">
@@ -251,7 +248,7 @@ function TemplateSheet({
         {template ? 'Edit template' : 'New recurring template'}
       </h2>
 
-      <div className="mb-3 flex gap-1 rounded-xl border border-line bg-surface p-1">
+      <div className="mb-3 flex gap-1 rounded-xl border border-line/70 bg-base/60 p-1">
         {(['expense', 'income'] as const).map((k) => (
           <button
             key={k}
@@ -286,7 +283,7 @@ function TemplateSheet({
                 className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm ${
                   categoryId === cat.id
                     ? 'border-accent bg-raised font-semibold'
-                    : 'border-line bg-surface'
+                    : 'border-line bg-base/40'
                 }`}
               >
                 <span>{cat.emoji}</span>

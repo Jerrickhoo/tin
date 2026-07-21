@@ -453,55 +453,55 @@ Work top to bottom; nothing depends on anything below it.
 
 **Phase 0 — Hello, Tin**
 
-- [ ] 0.1 Create GitHub repo `tin`; init Vite React-TS app
-- [ ] 0.2 Add Tailwind, ESLint, Prettier, Vitest
-- [ ] 0.3 `.gitignore` with `.env`; commit `.env.example`
-- [ ] 0.4 `public/_headers` + `public/_redirects`
-- [ ] 0.5 Connect Netlify → auto-deploy `main`; verify live URL
-- [ ] 0.6 Themed hello page with the §6 background/text tokens (first taste of cozy)
+- [x] 0.1 Create GitHub repo `tin`; init Vite React-TS app
+- [x] 0.2 Add Tailwind, ESLint, Prettier, Vitest
+- [x] 0.3 `.gitignore` with `.env`; commit `.env.example`
+- [x] 0.4 `public/_headers` + `public/_redirects`
+- [x] 0.5 Connect Netlify → auto-deploy `main`; verify live URL
+- [x] 0.6 Themed hello page with the §6 background/text tokens (first taste of cozy)
 
 **Phase 1 — Money brain**
 
-- [ ] 1.1 `money.ts` (+tests: format, parse, reject bad input)
-- [ ] 1.2 `split.ts` (+tests: ₱0.01, ₱0.03, ₱1,234.57, ₱888,888,888.88, 10k-random sum invariant, tie-break determinism)
-- [ ] 1.3 `dates.ts` (+tests: UTC/Manila month boundary both directions)
-- [ ] 1.4 Deployed split-preview screen
+- [x] 1.1 `money.ts` (+tests: format, parse, reject bad input)
+- [x] 1.2 `split.ts` (+tests: ₱0.01, ₱0.03, ₱1,234.57, ₱888,888,888.88, 10k-random sum invariant, tie-break determinism)
+- [x] 1.3 `dates.ts` (+tests: UTC/Manila month boundary both directions)
+- [x] 1.4 Deployed split-preview screen
 
 **Phase 2 — Accounts & vault**
 
 - [x] 2.1 Create Supabase project (leaked-password protection: Pro-only, skipped)
-- [ ] 2.2 Write & apply `001_core.sql`; commit it
-- [ ] 2.3 Netlify env vars (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`); local `.env`
-- [ ] 2.4 Auth screens + session handling + route guard + password-reset flow (redirect URL allowlisted in Supabase)
-- [ ] 2.5 First-run seeding: profile row + 3 envelopes (7000/2000/1000 bp) + starter categories, idempotent
-- [ ] 2.6 `rls-probe.ts`: second account (dashboard-created, auto-confirmed) cannot read/write first account's rows — **passes**
-- [ ] 2.7 Logout works (cache-wipe hook stubbed for Phase 6)
+- [x] 2.2 Write & apply `001_core.sql`; commit it
+- [x] 2.3 Netlify env vars (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`); local `.env`
+- [x] 2.4 Auth screens + session handling + route guard + password-reset flow (redirect URL allowlisted in Supabase)
+- [x] 2.5 First-run seeding: profile row + 3 envelopes (7000/2000/1000 bp) + starter categories, idempotent
+- [x] 2.6 `rls-probe.ts`: second account (dashboard-created, auto-confirmed) cannot read/write first account's rows — **passes**
+- [x] 2.7 Logout works (cache-wipe hook stubbed for Phase 6)
 
 **Phase 3 — The ledger ★**
 
-- [ ] 3.1 Home: balance cards from `envelope_balances` + bottom nav + Add button
-- [ ] 3.2 Expense bottom sheet: keypad-first, category chips, note, editable `occurred_at` — measure: ≤2 taps, <5 s
-- [ ] 3.3 Income flow: amount → live split preview → 3-row insert w/ shared `group_id`
-- [ ] 3.4 Onboarding opening balances (`adjustment` entries)
-- [ ] 3.5 Timeline grouped by Manila day; group legs collapsed into one item; entry detail
-- [ ] 3.6 Void with reason — always the whole `group_id`, never a single leg; "Fix" = void + prefilled re-entry
-- [ ] 3.7 Transfer flow + one-tap "cover from…" on red envelopes
-- [ ] 3.8 Export JSON + CSV from Settings
-- [ ] 3.9 PWA manifest + icons (installable; offline comes later)
-- [ ] 3.10 **Start using Tin daily. This is the finish line for “usable.”**
+- [x] 3.1 Home: balance cards from `envelope_balances` + bottom nav + Add button
+- [x] 3.2 Expense bottom sheet: keypad-first, category chips, note, editable `occurred_at` — measure: ≤2 taps, <5 s
+- [x] 3.3 Income flow: amount → live split preview → 3-row insert w/ shared `group_id`
+- [x] 3.4 Onboarding opening balances (`adjustment` entries)
+- [x] 3.5 Timeline grouped by Manila day; group legs collapsed into one item; entry detail
+- [x] 3.6 Void with reason — always the whole `group_id`, never a single leg; "Fix" = void + prefilled re-entry
+- [x] 3.7 Transfer flow + one-tap "cover from…" on red envelopes
+- [x] 3.8 Export JSON + CSV from Settings
+- [x] 3.9 PWA manifest + icons (installable; offline comes later)
+- [x] 3.10 **Start using Tin daily. This is the finish line for “usable.”**
 
 **Phase 4 — Analytics**
 
-- [ ] 4.1 Month picker on Manila boundaries
-- [ ] 4.2 Income vs spending + net for month (transfers excluded from totals)
-- [ ] 4.3 Per-envelope and per-category breakdowns (CSS/SVG bars)
-- [ ] 4.4 Split adherence: actual mix vs plan
+- [x] 4.1 Month picker on Manila boundaries
+- [x] 4.2 Income vs spending + net for month (transfers excluded from totals)
+- [x] 4.3 Per-envelope and per-category breakdowns (CSS/SVG bars)
+- [x] 4.4 Split adherence: actual mix vs plan
 
 **Phase 5 — Recurring**
 
-- [ ] 5.1 Catch-up poster logic: compute due dates from templates (table already shipped in `001_core.sql`), Manila-correct, clamp day 29–31 to month end; deterministic UUIDv5 posting IDs; income templates post the full split
-- [ ] 5.2 On-open catch-up with confirm/undo toast
-- [ ] 5.3 Manage screen (add/edit/pause/delete)
+- [x] 5.1 Catch-up poster logic: compute due dates from templates (table already shipped in `001_core.sql`), Manila-correct, clamp day 29–31 to month end; deterministic UUIDv5 posting IDs; income templates post the full split
+- [x] 5.2 On-open catch-up with confirm/undo toast
+- [x] 5.3 Manage screen (add/edit/pause/delete)
 
 **Phase 6 — PWA + offline** _(done 2026-07-19)_
 
@@ -535,6 +535,8 @@ Work top to bottom; nothing depends on anything below it.
 ## 6. Design system — midnight violet
 
 > Remade 2026-07-18 (v2). The original "cozy dark" was espresso/honey — too brown. Direction now follows the `theme reference/` folder (near-black neutral surfaces, hairline borders, one confident accent) plus the owner's call: dark + purple. Coziness lives in shape, spacing, and soft pastels — not warm browns.
+>
+> **v3, 2026-07-22 — relit.** v2 set correct colours and then used them flatly: every surface in the app was the same `rounded-2xl border bg-surface` recipe, so six screens read as one generic dark dashboard. v3 keeps the colors and adds the three things that were missing — a light source, depth, and texture — plus a display face. The measured-contrast rule is unchanged and still enforced by `npm run check:contrast`.
 
 A dark room lit by one lamp: near-black violet surfaces, lavender light. All ratios below are **measured** (WCAG relative-luminance script, not eyeballed); every text token clears AA (4.5:1) on `bg-base`, `bg-surface`, *and* `bg-raised` — worst case is `text-muted` on `bg-raised` at 4.86:1.
 
@@ -544,8 +546,8 @@ Token names in code are role-based (`src/styles/theme.css`) so a future restyle 
 
 | Token            | Hex       | Use                                     | Contrast on `bg-base` |
 | ---------------- | --------- | --------------------------------------- | --------------------- |
-| `bg-base`        | `#131118` | app background (violet-tinted near-black) | —                   |
-| `bg-surface`     | `#1C1923` | cards                                   | —                     |
+| `bg-base`        | `#100E15` | app background (violet-tinted near-black) | —                   |
+| `bg-surface`     | `#1B1823` | cards                                   | —                     |
 | `bg-raised`      | `#262230` | bottom sheets, modals                   | —                     |
 | `border`         | `#363044` | hairlines, dividers                     | —                     |
 | `text-primary`   | `#EAE6F2` | body & amounts (lavender-white)         | 15.25 : 1             |
@@ -559,11 +561,26 @@ Token names in code are role-based (`src/styles/theme.css`) so a future restyle 
 | `env-savings`    | `#93CFA9` | Savings identity (mint)                 | —                     |
 | `env-wants`      | `#EFA9D6` | Wants identity (orchid)                 | 10.09 : 1             |
 
+v3 darkened `bg-base` (`#131118` → `#100E15`) and `bg-surface` (`#1C1923` → `#1B1823`) so the lamp has something to glow against; every ratio went **up** and the 4.86:1 floor is untouched because `bg-raised` — where that floor lives — was deliberately left alone. `theme-color` in `index.html`, `manifest.webmanifest`, `favicon.svg` and `scripts/generate-icons.mjs` all track `bg-base`; change them together.
+
+**Known gap — envelope colors under color-vision deficiency.** Run through a CVD validator against `bg-surface`, the three envelope identity colors fail adjacent-pair separation: `env-savings` (mint) ↔ `env-wants` (orchid) sit at **ΔE 5.5 under deuteranopia** (normal vision is a comfortable 18.2). Red-green colorblind viewers cannot reliably tell a Savings bar from a Wants bar by hue. This is **mitigated, not fixed**: identity is never carried by color alone anywhere in the app — every dot, meter and chip is immediately adjacent to the envelope's name in text, which is the sanctioned secondary encoding. Fixing it properly means re-stepping the palette *and* migrating the `color` column on existing `envelopes` rows, so it's a deliberate decision rather than a drive-by change. Amber was tried as a Wants replacement and is worse — it collides with mint for *normal* vision (ΔE 13.1, below the 15 floor). A workable direction if it's ever picked up: spread the three on **lightness** as well as hue, not hue alone.
+
 Note `env-needs` deliberately shares the accent lavender (same trade-off the honey palette made): Needs is the app's center of gravity. If Needs cards ever read as "buttons," shift Needs to a deeper violet like `#9A7FE0` and re-run the contrast script. `negative` (rose-red) vs `env-wants` (orchid-pink) are neighbors — keep negative for amounts/errors only, wants for identity dots/bars only, and they never sit side by side ambiguously.
+
+### Light, depth, texture (v3)
+
+The three layers that turned "correct colors, flat screens" into a room. All defined once in `src/styles/theme.css`; screens compose them, never re-roll them.
+
+- **The lamp** — two fixed radial gradients on `body::before`, high and slightly left. Radii are *smaller than the viewport* (26rem/20rem) on purpose: the first attempt used 80rem, which on a 390px phone has no visible falloff and reads as flat grey wash. The falloff **is** the effect.
+- **The grain** — an inline `feTurbulence` SVG data URI on `body::after` at 0.22 opacity. Stops large dark areas reading as switched-off OLED. Costs one data URI, no request; allowed by the existing `img-src 'self' data:` CSP.
+- **`.card`** — the single surface recipe, replacing the repeated `rounded-2xl border border-line bg-surface` literal. Lit from above: inset top highlight + ambient shadow, and *slightly translucent* so the grain reads through. Stays darker than `bg-raised`, so AA holds. `.sheet-surface` is the same material one step brighter, for sheets and toasts.
+- **`.meter` / `.meter-fill` / `.meter-plan`** — an envelope's balance as a share of all funded money, with a tick at its planned share. Promotes plan-vs-actual from a buried Insights panel to the Home glance: the gap between fill and tick *is* the answer. The tick is light-core-on-dark-halo because it lands on the empty track when you're under plan and on top of the colored fill when you're over — a flat grey tick vanishes exactly when being over plan is worth noticing.
+- **`.press`** — 120 ms scale/brightness on tap. Everything above is disabled under `prefers-reduced-motion`.
 
 ### Type & shape
 
-- **Typeface:** Inter, self-hosted via Fontsource (CSP-friendly, no external requests), fallback `system-ui`. Coziness comes from color, spacing, and rounded shapes — not a novelty font. All amounts use `font-variant-numeric: tabular-nums` so columns of money align. Optional garnish later: Nunito Sans for headings.
+- **Typeface:** Inter for body, self-hosted via Fontsource (CSP-friendly, no external requests), fallback `system-ui`. All amounts use `font-variant-numeric: tabular-nums` so columns of money align.
+- **Display face (v3):** Nunito Variable (`--font-display`) for headings, envelope names and money — the rounded terminals do the cozying Inter deliberately won't. **Latin subset only, declared by hand** in `theme.css` rather than importing the Fontsource entrypoint: that entrypoint ships cyrillic/cyrillic-ext/vietnamese/latin-ext too and put ~124 KB of glyphs Tin will never render into the service worker precache. Latin covers English and Filipino (ñ is in U+0000–00FF). 39 KB instead of 124 KB. *Inter is still imported whole — trimming it the same way is a further ~130 KB of precache, unclaimed.*
 - **Scale (mobile-first, px/line-height):** balance hero 34/40 semibold · amount-lg 28/34 semibold · title 20/28 semibold · body 16/24 · secondary 14/20 · caption 12/16.
 - **Shape:** 16 px card radius, 12 px buttons, 24 px top radius on bottom sheets; min 44 px tap targets; bottom nav + Add button in the thumb zone.
 - **Motion:** 150–200 ms ease-out on sheets; none on data updates (numbers just change — it's a ledger, not a slot machine).

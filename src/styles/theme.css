@@ -1,22 +1,51 @@
 @import 'tailwindcss';
 @import '@fontsource-variable/inter';
 
+/* Nunito, latin subset only — declared by hand rather than importing the
+ * Fontsource entrypoint, which ships cyrillic/vietnamese/latin-ext too and put
+ * ~124 KB of glyphs this app will never render into the service worker's
+ * precache. Headings are the only consumer; latin covers English and Filipino
+ * (ñ lives in U+0000-00FF). Same self-hosted file, so still CSP-clean.
+ * Range copied verbatim from the package's own wght.css latin block. */
+@font-face {
+  font-family: 'Nunito Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 1000;
+  src: url('@fontsource-variable/nunito/files/nunito-latin-wght-normal.woff2')
+    format('woff2-variations');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 /*
- * Tin design tokens — "midnight violet" (ROADMAP §6, remade 2026-07-18).
- * A dark room lit by one lamp: near-black violet surfaces, lavender light.
- * Token names are roles, not colors, so the next restyle touches only this file.
+ * Tin design tokens — "midnight violet, one lamp" (ROADMAP §6, relit 2026-07-22).
+ *
+ * v2 set the palette; v3 gives it a light source, depth and texture. The rules
+ * that survived unchanged: every text token still clears AA on base/surface/
+ * raised (npm run check:contrast proves it from this file), and no asset is
+ * fetched off-origin — fonts are self-hosted via Fontsource, the grain is an
+ * inline SVG data URI, both CSP-clean.
+ *
  * Mapping to §6 names:
  *   bg-base → base · bg-surface → surface · bg-raised → raised · border → line
  *   text-primary → ink · text-secondary → ink-soft · text-muted → ink-mute
  *   accent/on-accent · positive → pos · negative → neg
  *   env-needs → needs · env-savings → savings · env-wants → wants
- * All pairings verified ≥ 4.5:1 (AA) — see §6 for the measured ratios.
+ *
+ * Surfaces darkened a touch from v2 so the lamp has something to glow against;
+ * `raised` is untouched because ink-mute-on-raised (4.86:1) is the AA floor of
+ * the whole system. Text/accent hexes are frozen — they're measured, not taste.
  */
 @theme {
   --font-sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* Nunito's rounded terminals do the cozying that Inter deliberately won't.
+     Headings and money only — never body copy, never small text. */
+  --font-display: 'Nunito Variable', 'Inter Variable', system-ui, sans-serif;
 
-  --color-base: #131118;
-  --color-surface: #1c1923;
+  --color-base: #100e15;
+  --color-surface: #1b1823;
   --color-raised: #262230;
   --color-line: #363044;
 
@@ -41,12 +70,191 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* §6 motion: 150–200 ms ease-out on sheets; none on data updates */
+/* ============================================================
+   The lamp + the grain
+   Two fixed layers under the app: a warm violet bloom falling
+   off toward the edges, and a fine noise wash so large dark
+   areas read as paper-in-lamplight instead of switched-off OLED.
+   Both are inert (pointer-events:none) and sit below #root.
+   ============================================================ */
+
+body::before,
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* The lamp: one source, high and slightly left, like a desk light.
+   Radii are deliberately smaller than the viewport — a gradient wider than the
+   screen has no visible falloff and just reads as flat grey wash. The whole
+   effect is the falloff. Mid-stops keep the edge from banding on OLED. */
+body::before {
+  background:
+    radial-gradient(
+      26rem 20rem at 16% -4%,
+      rgb(182 152 255 / 0.3),
+      rgb(160 130 240 / 0.09) 45%,
+      transparent 72%
+    ),
+    radial-gradient(20rem 16rem at 96% 6%, rgb(239 169 214 / 0.1), transparent 65%);
+}
+
+/* the grain: feTurbulence, inlined so nothing leaves the origin */
+body::after {
+  opacity: 0.22;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.42'/%3E%3C/svg%3E");
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+/* ============================================================
+   Surfaces
+   One recipe, used everywhere, so "a card" is a single decision.
+   Lit from above: a hairline highlight on the top edge, ambient
+   shadow below. Slightly translucent so the grain reads through
+   — that's what stops six identical rectangles from looking
+   printed on. Stays darker than `raised`, so AA holds.
+   ============================================================ */
+
+.card {
+  position: relative;
+  border-radius: 1.25rem;
+  border: 1px solid var(--color-line);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.04), rgb(255 255 255 / 0) 45%),
+    color-mix(in srgb, var(--color-surface) 88%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.06),
+    0 10px 26px -14px rgb(0 0 0 / 0.9);
+}
+
+/* the same material, one step brighter — sheets and modals */
+.sheet-surface {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0) 40%), var(--color-raised);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    0 -18px 50px -12px rgb(0 0 0 / 0.85);
+}
+
+/* pressable things get a little physical give */
+.press {
+  transition:
+    transform 120ms ease-out,
+    filter 120ms ease-out;
+}
+.press:active {
+  transform: scale(0.97);
+  filter: brightness(1.08);
+}
+
+/* ============================================================
+   Level meters
+   An envelope's balance as a share of all the money, with a tick
+   marking where the 70/20/10 plan says that share should be.
+   Plan-vs-actual was buried in Insights; on a meter it's readable
+   without reading — the gap between fill and tick IS the answer.
+   Inset track + bright leading edge give it depth at 10px tall.
+   ============================================================ */
+
+.meter {
+  position: relative;
+  height: 0.625rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgb(0 0 0 / 0.4);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.55);
+}
+
+.meter-fill {
+  height: 100%;
+  border-radius: 999px;
+  position: relative;
+  transition: width 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* bright leading edge — catches the lamp, keeps the fill from reading flat */
+.meter-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto auto;
+  width: 0.1875rem;
+  height: 100%;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.55);
+}
+
+/* Plan marker — where this envelope's share says the level should sit.
+   Light core + dark halo, because the tick lands on the empty track when
+   you're under plan and on top of the colored fill when you're over it.
+   A flat grey tick disappears into a mint or lavender fill exactly when
+   being over plan is the thing worth noticing. */
+.meter-plan {
+  position: absolute;
+  top: -0.125rem;
+  bottom: -0.125rem;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--color-ink);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.6);
+}
+
+/* ============================================================
+   Motion — §6: 150–200 ms ease-out on sheets, none on data.
+   Numbers still just change. It's a ledger, not a slot machine.
+   ============================================================ */
+
 @keyframes sheet-in {
   from {
     transform: translateY(100%);
   }
 }
 .sheet-in {
-  animation: sheet-in 180ms ease-out;
+  animation: sheet-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+.scrim-in {
+  animation: scrim-in 200ms ease-out;
+}
+
+/* the lamp breathes, very slowly, only where it won't distract */
+@keyframes glow-drift {
+  50% {
+    opacity: 0.72;
+  }
+}
+.glow-drift {
+  animation: glow-drift 14s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-in,
+  .scrim-in,
+  .glow-drift {
+    animation: none;
+  }
+  .meter-fill {
+    transition: none;
+  }
+  .press:active {
+    transform: none;
+  }
+}
+
+/* focus that matches the lamp rather than the browser default */
+:where(a, button, input, select, textarea):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 0.75rem;
 }

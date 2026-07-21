@@ -88,15 +88,15 @@ export function Settings() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-6 py-8">
-      <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
+      <h1 className="font-display text-[1.75rem] font-bold tracking-tight">Settings</h1>
 
-      <section className="rounded-2xl border border-line bg-surface p-4">
-        <h2 className="font-medium">Account</h2>
+      <section className="card p-4">
+        <h2 className="font-display font-bold">Account</h2>
         <p className="mt-1 text-sm text-ink-soft">{session?.user.email}</p>
       </section>
 
-      <section className="rounded-2xl border border-line bg-surface p-4">
-        <h2 className="font-medium">Export — you are never locked in</h2>
+      <section className="card p-4">
+        <h2 className="font-display font-bold">Export — you are never locked in</h2>
         <p className="mt-1 mb-3 text-sm text-ink-soft">
           Full ledger, voided entries included. Make it a monthly habit; the free tier keeps no
           backups for you.
@@ -130,8 +130,8 @@ export function Settings() {
 
       <MfaSection />
 
-      <section className="rounded-2xl border border-line bg-surface p-4">
-        <h2 className="font-medium">Recurring</h2>
+      <section className="card p-4">
+        <h2 className="font-display font-bold">Recurring</h2>
         <p className="mt-1 text-sm text-ink-soft">
           Rent, allowance, subscriptions — they log themselves on app open.
         </p>
@@ -140,8 +140,8 @@ export function Settings() {
         </Link>
       </section>
 
-      <section className="rounded-2xl border border-line bg-surface p-4">
-        <h2 className="font-medium">Extras</h2>
+      <section className="card p-4">
+        <h2 className="font-display font-bold">Extras</h2>
         <p className="mt-1 text-sm">
           <Link to="/split" className="text-accent">
             Split playground

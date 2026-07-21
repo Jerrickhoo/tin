@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useLedger, useToast } from '../../app-context'
 import {
   fetchCategories,
@@ -71,25 +71,25 @@ export function Insights() {
   const maxTopLine = Math.max(summary.incomeCentavos, summary.spendingCentavos)
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-6 py-8">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-semibold tracking-tight">Insights</h1>
-        <div className="flex items-center gap-1">
+    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-5 py-7">
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="font-display text-[1.75rem] font-bold tracking-tight">Insights</h1>
+        <div className="flex items-center gap-0.5 rounded-full border border-line/70 bg-surface/60 p-0.5">
           <button
             type="button"
             aria-label="Previous month"
             onClick={() => setMonthKey(prevMonthKey(monthKey))}
-            className="size-9 rounded-xl border border-line text-ink-soft"
+            className="press size-8 rounded-full text-ink-soft"
           >
             ‹
           </button>
-          <span className="w-32 text-center text-sm font-medium">{monthLabel(monthKey)}</span>
+          <span className="w-24 text-center text-xs font-semibold">{monthLabel(monthKey)}</span>
           <button
             type="button"
             aria-label="Next month"
             disabled={monthKey === currentMonth}
             onClick={() => setMonthKey(nextMonthKey(monthKey))}
-            className="size-9 rounded-xl border border-line text-ink-soft disabled:opacity-30"
+            className="press size-8 rounded-full text-ink-soft disabled:opacity-25"
           >
             ›
           </button>
@@ -99,43 +99,54 @@ export function Insights() {
       {!rows && <p className="text-ink-mute">Counting the centavos…</p>}
 
       {rows && rows.length === 0 && (
-        <p className="text-ink-soft">
-          No entries this month{summary.adjustmentNetCentavos === 0 ? '' : ''} — nothing to chart
-          yet.
-        </p>
+        <div className="card px-5 py-8 text-center">
+          <p className="font-display text-lg font-bold">Nothing this month</p>
+          <p className="mt-1.5 text-sm text-ink-soft">No entries yet — nothing to chart.</p>
+        </div>
       )}
 
       {rows && rows.length > 0 && (
         <>
-          <section className="rounded-2xl border border-line bg-surface p-4">
-            <div className="flex flex-col gap-3">
-              <BarRow
-                label="Income"
-                value={summary.incomeCentavos}
-                max={maxTopLine}
-                colorClass="bg-pos"
-                amountClass="text-pos"
-                amountText={`+${formatPHP(summary.incomeCentavos)}`}
-              />
-              <BarRow
-                label="Spending"
-                value={summary.spendingCentavos}
-                max={maxTopLine}
-                colorClass="bg-neg"
-                amountClass="text-neg"
-                amountText={`−${formatPHP(summary.spendingCentavos)}`}
-              />
-              <div className="flex items-center justify-between border-t border-line pt-2">
-                <span className="text-sm text-ink-soft">Net (transfers excluded)</span>
-                <span
-                  className={`font-semibold tabular-nums ${summary.netCentavos < 0 ? 'text-neg' : 'text-pos'}`}
-                >
-                  {summary.netCentavos >= 0 ? '+' : ''}
-                  {formatPHP(summary.netCentavos)}
-                </span>
+          {/* Net is the headline, so it gets hero treatment rather than a third
+              bar. Income and spending are the supporting magnitudes. */}
+          <section className="card overflow-hidden px-5 py-5">
+            <span
+              aria-hidden
+              className={`pointer-events-none absolute -top-20 -right-8 size-48 rounded-full blur-3xl ${
+                summary.netCentavos < 0 ? 'bg-neg/15' : 'bg-pos/15'
+              }`}
+            />
+            <div className="relative">
+              <p className="text-sm text-ink-soft">Net this month</p>
+              <p
+                className={`mt-1 font-display text-[2.25rem] leading-none font-bold tracking-tight tabular-nums ${
+                  summary.netCentavos < 0 ? 'text-neg' : 'text-pos'
+                }`}
+              >
+                {summary.netCentavos >= 0 ? '+' : ''}
+                {formatPHP(summary.netCentavos)}
+              </p>
+              <p className="mt-1.5 text-xs text-ink-mute">transfers excluded — they net to zero</p>
+
+              <div className="mt-4 flex flex-col gap-3 border-t border-line/70 pt-4">
+                <BarRow
+                  label="Income"
+                  value={summary.incomeCentavos}
+                  max={maxTopLine}
+                  fill="var(--color-pos)"
+                  amountText={`+${formatPHP(summary.incomeCentavos)}`}
+                />
+                <BarRow
+                  label="Spending"
+                  value={summary.spendingCentavos}
+                  max={maxTopLine}
+                  fill="var(--color-neg)"
+                  amountText={`−${formatPHP(summary.spendingCentavos)}`}
+                />
               </div>
+
               {summary.adjustmentNetCentavos !== 0 && (
-                <p className="text-sm text-ink-mute">
+                <p className="mt-3 text-xs text-ink-mute">
                   Adjustments: {summary.adjustmentNetCentavos > 0 ? '+' : ''}
                   {formatPHP(summary.adjustmentNetCentavos)} (opening balances & corrections)
                 </p>
@@ -143,100 +154,102 @@ export function Insights() {
             </div>
           </section>
 
-          <section className="rounded-2xl border border-line bg-surface p-4">
-            <h2 className="mb-3 font-medium">Spending mix vs the plan</h2>
-            <div className="flex flex-col gap-3">
+          <Panel title="Spending mix vs the plan" hint="bar = actual share · tick = plan">
+            <div className="flex flex-col gap-3.5">
               {adherence.map((row) => {
                 const env = envelopes.find((e) => e.id === row.envelopeId)
                 if (!env) return null
+                const color = env.color ?? '#AFA7C2'
                 return (
                   <div key={row.envelopeId}>
-                    <div className="mb-1 flex justify-between text-sm">
-                      <span className="flex items-center gap-2">
-                        <span
-                          className="size-2 rounded-full"
-                          style={{ backgroundColor: env.color ?? '#AFA7C2' }}
-                        />
-                        {env.name}
+                    <div className="mb-1.5 flex items-baseline justify-between gap-2 text-sm">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <Dot color={color} />
+                        <span className="truncate">{env.name}</span>
                       </span>
-                      <span className="tabular-nums text-ink-soft">
+                      {/* Values wear ink, not the series color — the dot
+                          carries identity (dataviz: text tokens for text). */}
+                      <span className="shrink-0 tabular-nums text-ink-soft">
                         {row.actualBp === null ? '—' : `${(row.actualBp / 100).toFixed(0)}%`}
-                        <span className="text-ink-mute"> vs {row.planBp / 100}%</span>
+                        <span className="text-ink-mute"> of {row.planBp / 100}%</span>
                       </span>
                     </div>
-                    <div className="relative h-2 overflow-hidden rounded-full bg-base">
+                    <div className="meter">
                       <div
-                        className="h-full rounded-full"
+                        className="meter-fill"
                         style={{
                           width: `${Math.min((row.actualBp ?? 0) / 100, 100)}%`,
-                          backgroundColor: env.color ?? '#AFA7C2',
+                          background: `linear-gradient(90deg, ${color}99, ${color})`,
                         }}
                       />
-                      <div
-                        className="absolute top-0 h-full w-0.5 bg-ink-soft"
-                        style={{ left: `${row.planBp / 100}%` }}
-                        title={`plan ${row.planBp / 100}%`}
-                      />
+                      <span className="meter-plan" style={{ left: `${row.planBp / 100}%` }} />
                     </div>
                   </div>
                 )
               })}
             </div>
-            <p className="mt-2 text-xs text-ink-mute">
-              bar = actual share of spending · tick = plan
-            </p>
-          </section>
+          </Panel>
 
-          <section className="rounded-2xl border border-line bg-surface p-4">
-            <h2 className="mb-3 font-medium">Envelope flows (transfers count here)</h2>
-            <div className="flex flex-col gap-2">
+          <Panel title="Envelope flows" hint="transfers count here">
+            <div className="flex flex-col gap-2.5">
               {envelopes.map((env) => {
                 const flow = summary.perEnvelope.get(env.id)
                 if (!flow) return null
                 return (
-                  <div key={env.id} className="flex items-center justify-between text-sm">
-                    <span className="flex items-center gap-2">
-                      <span
-                        className="size-2 rounded-full"
-                        style={{ backgroundColor: env.color ?? '#AFA7C2' }}
-                      />
-                      {env.name}
+                  <div key={env.id} className="flex items-center justify-between gap-2 text-sm">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <Dot color={env.color ?? '#AFA7C2'} />
+                      <span className="truncate">{env.name}</span>
                     </span>
-                    <span className="tabular-nums">
-                      <span className="text-pos">+{formatPHP(flow.inflowCentavos)}</span>{' '}
+                    <span className="shrink-0 tabular-nums">
+                      <span className="text-pos">+{formatPHP(flow.inflowCentavos)}</span>
+                      <span className="mx-1 text-ink-mute">/</span>
                       <span className="text-neg">−{formatPHP(flow.outflowCentavos)}</span>
                     </span>
                   </div>
                 )
               })}
             </div>
-          </section>
+          </Panel>
 
           {categoryRows.length > 0 && (
-            <section className="rounded-2xl border border-line bg-surface p-4">
-              <h2 className="mb-3 font-medium">Where it went</h2>
+            <Panel title="Where it went" hint="ranked by spend">
               <div className="flex flex-col gap-3">
                 {categoryRows.map(([categoryId, spent]) => {
                   const category = categoriesById.get(categoryId)
                   return (
                     <div key={categoryId}>
-                      <div className="mb-1 flex justify-between text-sm">
-                        <span>
-                          {category ? `${category.emoji ?? ''} ${category.name}`.trim() : 'Unknown'}
+                      <div className="mb-1.5 flex items-baseline justify-between gap-2 text-sm">
+                        <span className="min-w-0 truncate">
+                          {category ? (
+                            <>
+                              <span aria-hidden>{category.emoji} </span>
+                              {category.name}
+                            </>
+                          ) : (
+                            'Unknown'
+                          )}
                         </span>
-                        <span className="tabular-nums text-ink-soft">{formatPHP(spent)}</span>
+                        <span className="shrink-0 tabular-nums text-ink-soft">
+                          {formatPHP(spent)}
+                        </span>
                       </div>
-                      <div className="h-2 overflow-hidden rounded-full bg-base">
+                      {/* One series, one hue — magnitude only, so no legend. */}
+                      <div className="meter">
                         <div
-                          className="h-full rounded-full bg-accent"
-                          style={{ width: `${(spent / maxCategory) * 100}%` }}
+                          className="meter-fill"
+                          style={{
+                            width: `${(spent / maxCategory) * 100}%`,
+                            background:
+                              'linear-gradient(90deg, color-mix(in srgb, var(--color-accent) 55%, transparent), var(--color-accent))',
+                          }}
                         />
                       </div>
                     </div>
                   )
                 })}
               </div>
-            </section>
+            </Panel>
           )}
         </>
       )}
@@ -244,31 +257,51 @@ export function Insights() {
   )
 }
 
+function Dot({ color }: { color: string }) {
+  return (
+    <span
+      aria-hidden
+      className="size-2 shrink-0 rounded-full"
+      style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}66` }}
+    />
+  )
+}
+
+function Panel({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
+  return (
+    <section className="card px-4 py-4">
+      <div className="mb-3.5 flex items-baseline justify-between gap-2">
+        <h2 className="font-display font-bold">{title}</h2>
+        {hint && <span className="shrink-0 text-[0.6875rem] text-ink-mute">{hint}</span>}
+      </div>
+      {children}
+    </section>
+  )
+}
+
 function BarRow({
   label,
   value,
   max,
-  colorClass,
-  amountClass,
+  fill,
   amountText,
 }: {
   label: string
   value: number
   max: number
-  colorClass: string
-  amountClass: string
+  fill: string
   amountText: string
 }) {
   return (
     <div>
-      <div className="mb-1 flex justify-between text-sm">
+      <div className="mb-1.5 flex items-baseline justify-between gap-2 text-sm">
         <span className="text-ink-soft">{label}</span>
-        <span className={`font-semibold tabular-nums ${amountClass}`}>{amountText}</span>
+        <span className="font-semibold tabular-nums text-ink">{amountText}</span>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-base">
+      <div className="meter">
         <div
-          className={`h-full rounded-full ${colorClass}`}
-          style={{ width: max === 0 ? '0%' : `${(value / max) * 100}%` }}
+          className="meter-fill"
+          style={{ width: max === 0 ? '0%' : `${(value / max) * 100}%`, background: fill }}
         />
       </div>
     </div>

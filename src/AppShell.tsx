@@ -13,14 +13,7 @@ import { ensureSeeded } from './db/seed'
 import { runCatchUp } from './db/recurring'
 import { voidGroup } from './db/entries'
 import { openForUser } from './db/dexie'
-import {
-  getSyncSnapshot,
-  isOffline,
-  kickSync,
-  startSync,
-  subscribeSync,
-  syncNow,
-} from './db/sync'
+import { getSyncSnapshot, isOffline, kickSync, startSync, subscribeSync, syncNow } from './db/sync'
 import { useSession } from './features/auth/useSession'
 
 // PWA shortcut deep link (ROADMAP 6.7): long-press the icon → /?add=expense.
@@ -131,10 +124,10 @@ export function AppShell() {
             {toasts.map((t) => (
               <div
                 key={t.id}
-                className={`pointer-events-auto flex items-center gap-3 rounded-xl border px-4 py-2 text-sm shadow-lg shadow-black/40 ${
+                className={`sheet-in pointer-events-auto flex items-center gap-3 rounded-2xl border px-4 py-2.5 text-sm shadow-xl shadow-black/50 backdrop-blur-md ${
                   t.kind === 'error'
-                    ? 'border-neg/40 bg-raised text-neg'
-                    : 'border-line bg-raised text-ink'
+                    ? 'border-neg/40 bg-raised/95 text-neg'
+                    : 'border-line bg-raised/95 text-ink'
                 }`}
               >
                 <span>{t.message}</span>
@@ -179,10 +172,10 @@ function SyncPill() {
     <button
       type="button"
       onClick={() => kickSync()}
-      className={`fixed inset-x-0 top-3 z-40 mx-auto w-fit rounded-full border px-3 py-1 text-xs shadow-lg shadow-black/40 ${
+      className={`press fixed inset-x-0 top-3 z-40 mx-auto w-fit rounded-full border px-3.5 py-1.5 text-xs shadow-lg shadow-black/50 backdrop-blur-md ${
         snap.lastError && snap.online
-          ? 'border-neg/40 bg-raised text-neg'
-          : 'border-line bg-raised text-ink-soft'
+          ? 'border-neg/40 bg-raised/90 text-neg'
+          : 'border-line bg-raised/90 text-ink-soft'
       }`}
     >
       {text}

@@ -57,10 +57,7 @@ export function SplitPreview() {
 
       <section className="flex flex-col gap-3">
         {ENVELOPES.map((env, i) => (
-          <div
-            key={env.name}
-            className="flex items-center justify-between rounded-2xl border border-line bg-surface px-4 py-3"
-          >
+          <div key={env.name} className="card flex items-center justify-between px-4 py-3">
             <div className="flex items-center gap-3">
               <span className={`size-2.5 rounded-full ${env.dot}`} />
               <span className="font-medium">{env.name}</span>

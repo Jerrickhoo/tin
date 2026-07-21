@@ -72,7 +72,19 @@ export function History() {
       if (list) list.push(g)
       else byDay.set(key, [g])
     }
-    return [...byDay.entries()]
+    // A day's net, so scrolling answers "was this a bad day?" without adding up
+    // cards by eye. Transfers net to zero inside a day and voided groups are
+    // already excluded from balances — both stay out of the number.
+    return [...byDay.entries()].map(([key, list]) => {
+      const net = list.reduce(
+        (sum, g) =>
+          g.voided || g.kind === 'transfer' || g.kind === 'adjustment'
+            ? sum
+            : sum + g.totalCentavos,
+        0,
+      )
+      return { key, groups: list, net }
+    })
   }, [rows])
 
   async function onVoid(group: LedgerGroup, reason: string) {
@@ -124,20 +136,34 @@ export function History() {
   }
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-6 py-8">
-      <h1 className="text-3xl font-semibold tracking-tight">History</h1>
+    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-5 px-5 py-7">
+      <h1 className="font-display text-[1.75rem] font-bold tracking-tight">History</h1>
 
       {!rows && <p className="text-ink-mute">Reading the ledger…</p>}
       {rows && rows.length === 0 && (
-        <p className="text-ink-soft">
-          Nothing yet. Tap <span className="font-semibold text-accent">+</span> and log your first
-          entry — future you says thanks.
-        </p>
+        <div className="card px-5 py-8 text-center">
+          <p className="font-display text-lg font-bold">Nothing here yet</p>
+          <p className="mt-1.5 text-sm text-ink-soft">
+            Tap <span className="font-semibold text-accent">+</span> and log your first entry —
+            future you says thanks.
+          </p>
+        </div>
       )}
 
-      {days.map(([dayKey, groups]) => (
-        <section key={dayKey}>
-          <h2 className="mb-2 text-sm font-medium text-ink-mute">{dayLabel(dayKey)}</h2>
+      {days.map(({ key, groups, net }) => (
+        <section key={key}>
+          {/* Sticky so you always know which day you're scrolling through. */}
+          <div className="sticky top-0 z-10 -mx-1 mb-2 flex items-baseline justify-between bg-base/85 px-1 py-1.5 backdrop-blur-sm">
+            <h2 className="text-sm font-semibold text-ink-soft">{dayLabel(key)}</h2>
+            {net !== 0 && (
+              <span
+                className={`text-xs tabular-nums ${net < 0 ? 'text-neg' : 'text-pos'} opacity-80`}
+              >
+                {net > 0 ? '+' : ''}
+                {formatPHP(net)}
+              </span>
+            )}
+          </div>
           <div className="flex flex-col gap-2">
             {groups.map((group) => (
               <GroupCard
@@ -187,46 +213,72 @@ function GroupCard({
   let subtitle: string
   let amountClass: string
   let amountText = formatPHP(group.totalCentavos)
+  // A round tinted tile carrying the category emoji (or a glyph for the
+  // money-shaped kinds) — the fastest way to scan a long ledger is by shape
+  // and color, not by reading every title.
+  let glyph: string
+  let tint: string
   if (group.kind === 'expense') {
-    title = category ? `${category.emoji ?? ''} ${category.name}`.trim() : 'Expense'
-    subtitle = envelopes.get(leg0.envelope_id)?.name ?? ''
+    const env = envelopes.get(leg0.envelope_id)
+    title = category?.name ?? 'Expense'
+    subtitle = env?.name ?? ''
     amountClass = 'text-neg'
+    glyph = category?.emoji ?? '•'
+    tint = env?.color ?? '#AFA7C2'
   } else if (group.kind === 'income') {
     title = 'Income'
     subtitle = `split across ${group.legs.length} envelopes`
     amountClass = 'text-pos'
     amountText = `+${amountText}`
+    glyph = '↓'
+    tint = '#93CFA9'
   } else if (group.kind === 'transfer') {
     title = 'Transfer'
     subtitle = `${envelopes.get(from?.envelope_id ?? '')?.name ?? '?'} → ${envelopes.get(to?.envelope_id ?? '')?.name ?? '?'}`
     amountClass = 'text-ink-soft'
+    glyph = '⇄'
+    tint = '#B49BF5'
   } else {
     title = group.note === 'Opening balance' ? 'Opening balance' : 'Adjustment'
     subtitle = `${group.legs.length} envelope${group.legs.length > 1 ? 's' : ''}`
     amountClass = group.totalCentavos < 0 ? 'text-neg' : 'text-ink-soft'
     if (group.totalCentavos > 0) amountText = `+${amountText}`
+    glyph = '⚖'
+    tint = '#948CA9'
   }
 
   return (
-    <div
-      className={`rounded-2xl border border-line bg-surface ${group.voided ? 'opacity-50' : ''}`}
-    >
-      <button type="button" onClick={onToggle} className="w-full px-4 py-3 text-left">
-        <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0">
+    <div className={`card overflow-hidden ${group.voided ? 'opacity-45' : ''}`}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        className="w-full px-3.5 py-3 text-left"
+      >
+        <div className="flex items-center gap-3">
+          <span
+            aria-hidden
+            className="flex size-9 shrink-0 items-center justify-center rounded-full text-base"
+            style={{ backgroundColor: `${tint}1f`, border: `1px solid ${tint}3d`, color: tint }}
+          >
+            {glyph}
+          </span>
+          <div className="min-w-0 flex-1">
             <p className={`truncate font-medium ${group.voided ? 'line-through' : ''}`}>{title}</p>
-            <p className="truncate text-sm text-ink-mute">
+            <p className="truncate text-xs text-ink-mute">
               {group.voided ? 'voided · ' : ''}
               {subtitle}
               {group.note && group.kind !== 'adjustment' ? ` · ${group.note}` : ''}
             </p>
           </div>
-          <span className={`shrink-0 font-semibold tabular-nums ${amountClass}`}>{amountText}</span>
+          <span className={`shrink-0 font-display font-bold tabular-nums ${amountClass}`}>
+            {amountText}
+          </span>
         </div>
       </button>
 
       {expanded && (
-        <div className="border-t border-line px-4 py-3 text-sm">
+        <div className="border-t border-line/70 bg-base/30 px-4 py-3 text-sm">
           <div className="flex flex-col gap-1">
             {group.legs.map((leg) => (
               <div key={leg.id} className="flex justify-between text-ink-soft">
@@ -235,12 +287,12 @@ function GroupCard({
               </div>
             ))}
           </div>
-          <p className="mt-2 text-ink-mute">
+          <p className="mt-2 text-xs text-ink-mute">
             {manilaTime.format(new Date(group.occurredAt))} Manila
             {group.note ? ` · ${group.note}` : ''}
           </p>
           {group.voided && leg0.void_reason && (
-            <p className="mt-1 text-ink-mute">void reason: {leg0.void_reason}</p>
+            <p className="mt-1 text-xs text-ink-mute">void reason: {leg0.void_reason}</p>
           )}
 
           {!group.voided && (
@@ -250,7 +302,7 @@ function GroupCard({
                   <button
                     type="button"
                     onClick={() => onFix(group)}
-                    className="rounded-xl border border-line px-3 py-1.5 text-accent"
+                    className="press min-h-9 rounded-xl border border-line px-3.5 py-1.5 font-medium text-accent"
                   >
                     Fix
                   </button>
@@ -258,7 +310,8 @@ function GroupCard({
                 <button
                   type="button"
                   onClick={() => setVoidOpen(!voidOpen)}
-                  className="rounded-xl border border-line px-3 py-1.5 text-neg"
+                  aria-expanded={voidOpen}
+                  className="press min-h-9 rounded-xl border border-line px-3.5 py-1.5 font-medium text-neg"
                 >
                   Void…
                 </button>
@@ -267,6 +320,7 @@ function GroupCard({
                 <div className="flex gap-2">
                   <input
                     placeholder="Why? (kept in the ledger)"
+                    aria-label="Void reason"
                     value={reason}
                     onChange={(e) => setReason(e.target.value)}
                     className="min-w-0 flex-1 rounded-xl border border-line bg-base px-3 py-1.5 text-ink outline-none placeholder:text-ink-mute focus:border-accent"
@@ -274,7 +328,7 @@ function GroupCard({
                   <button
                     type="button"
                     onClick={() => onVoid(group, reason)}
-                    className="shrink-0 rounded-xl bg-neg/20 px-3 py-1.5 font-medium text-neg"
+                    className="press shrink-0 rounded-xl bg-neg/20 px-3 py-1.5 font-semibold text-neg"
                   >
                     Void group
                   </button>

@@ -14,12 +14,12 @@ const jar = `
 `
 
 const anySvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="100" fill="#131118"/>${jar}
+  <rect width="512" height="512" rx="100" fill="#100E15"/>${jar}
 </svg>`
 
 // maskable: full-bleed background, art scaled into the 80% safe zone
 const maskableSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" fill="#131118"/>
+  <rect width="512" height="512" fill="#100E15"/>
   <g transform="translate(51.2 51.2) scale(0.8)">${jar}</g>
 </svg>`
 
