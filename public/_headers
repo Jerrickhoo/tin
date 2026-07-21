@@ -1,10 +1,24 @@
-# Baseline security headers (ROADMAP §3). CSP tightens further in Phase 7.
+# Security headers (ROADMAP §3, tightened to a strict allowlist in Phase 7 / 7.2).
+#
+# CSP notes — everything here is self + the one Supabase origin, nothing wider:
+#  - script-src 'self'      : no inline scripts exist (verified); the only <script>
+#                             is the bundled module. This is the directive that
+#                             actually matters, and it stays strict.
+#  - connect-src            : REST/Auth only. wss:// dropped — Tin uses delta-pull,
+#                             never Supabase Realtime, so a websocket origin was
+#                             dead allowance.
+#  - style-src 'unsafe-inline': REQUIRED, not sloppiness — dynamic inline style=
+#                             on analytics bars, the bottom-sheet transform, and
+#                             the envelope colour dots rely on it. Script is the
+#                             real injection target and script-src stays locked.
+#  - img-src 'self' data:   : PWA icons + the TOTP enrollment QR (an SVG data-URI
+#                             from supabase.auth.mfa.enroll) need data:.
 /*
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()
-  Content-Security-Policy: default-src 'self'; connect-src 'self' https://kchmvvjyysitfvbylwpo.supabase.co wss://kchmvvjyysitfvbylwpo.supabase.co; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
+  Content-Security-Policy: default-src 'self'; script-src 'self'; connect-src 'self' https://kchmvvjyysitfvbylwpo.supabase.co; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests
 
 # The service worker must never be served stale — a cached-forever sw.js
 # would pin users to an old app shell (ROADMAP 6.1).

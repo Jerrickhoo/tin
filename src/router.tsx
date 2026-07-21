@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 import { SessionProvider } from './features/auth/SessionProvider'
 import { RequireAuth } from './features/auth/RequireAuth'
+import { MfaGate } from './features/auth/MfaGate'
 import { Login } from './features/auth/Login'
 import { Signup } from './features/auth/Signup'
 import { ResetRequest } from './features/auth/ResetRequest'
@@ -21,7 +22,9 @@ export function AppRouter() {
           <Route
             element={
               <RequireAuth>
-                <AppShell />
+                <MfaGate>
+                  <AppShell />
+                </MfaGate>
               </RequireAuth>
             }
           >

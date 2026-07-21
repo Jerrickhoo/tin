@@ -1,0 +1,34 @@
+# Supabase keep-alive (ROADMAP §0 / 7.3). Free-tier projects pause after 7 days
+# idle; a REST hit counts as activity. Belt-and-suspenders: daily dogfooding
+# already keeps it awake — this covers exam weeks and holidays when you don't
+# open the app. Costs ₱0.
+#
+# ACTIVATION (this file is inert until then):
+#   1. Push this repo to GitHub (no remote exists yet).
+#   2. Settings → Secrets and variables → Actions, add:
+#        SUPABASE_URL       = https://kchmvvjyysitfvbylwpo.supabase.co
+#        SUPABASE_ANON_KEY  = <anon key from Supabase dashboard → Settings → API>
+#      (The anon key is already public in the JS bundle — RLS is what protects
+#       the data — so these are hygiene, not true secrets. Never the service_role key.)
+#   3. Actions tab → run "supabase-keepalive" once via "Run workflow" to confirm.
+#
+# Note: GitHub disables scheduled workflows after 60 days of REPO inactivity.
+# Daily commits keep it live; if the project ever goes cold, move this ping to a
+# Cloudflare Worker cron (also free).
+name: supabase-keepalive
+
+on:
+  schedule:
+    - cron: '0 21 */3 * *' # 05:00 Manila, every 3rd day
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping REST endpoint
+        run: |
+          curl -sf "${{ secrets.SUPABASE_URL }}/rest/v1/envelopes?select=id&limit=1" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -o /dev/null

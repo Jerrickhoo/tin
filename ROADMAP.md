@@ -513,14 +513,14 @@ Work top to bottom; nothing depends on anything below it.
 - [x] 6.6 Logout wipes Dexie + outbox + SW caches (warn if outbox non-empty)
 - [x] 6.7 PWA shortcut → Add expense; airplane-mode end-to-end test (headless-Edge Playwright: offline reload from SW → offline expense queued → reconnect → outbox drained → logout wipe verified)
 
-**Phase 7 — Hardening**
+**Phase 7 — Hardening** _(built 2026-07-22)_
 
-- [ ] 7.1 TOTP MFA enroll + challenge
-- [ ] 7.2 CSP tightened to strict allowlist
-- [ ] 7.3 Keep-alive workflow + repo secrets
-- [ ] 7.4 Error boundary; failure-path audit
-- [ ] 7.5 Lighthouse a11y/PWA pass; AA contrast verification
-- [ ] 7.6 Monthly export reminder set up
+- [x] 7.1 TOTP MFA enroll + challenge — opt-in, not enforced (solo account, no admin to reset a lost factor; RLS + strong password stay the boundary). Enroll/manage in Settings (`MfaSection`); login-time gate (`MfaGate` inside `RequireAuth`) steps up aal1→aal2; helpers in `features/auth/mfa.ts`; fails **open** offline so the local-first app still opens. **Needs the user to verify end-to-end on a real authenticator.**
+- [x] 7.2 CSP tightened to strict allowlist — dropped dead `wss://` (Tin never uses Realtime); added explicit `script-src 'self'`, `object-src 'none'`, `frame-src 'none'`, `worker-src`/`manifest-src`/`font-src 'self'`, `upgrade-insecure-requests`. `style-src 'unsafe-inline'` + `img-src data:` kept (inline widths/transforms; PWA icons + MFA QR) with reasons in `public/_headers`.
+- [~] 7.3 Keep-alive workflow — `.github/workflows/keepalive.yml` written & ready. **BLOCKED: inert until the repo is pushed to GitHub and `SUPABASE_URL`/`SUPABASE_ANON_KEY` secrets are set** (steps in the file header). No GitHub repo exists yet.
+- [x] 7.4 Error boundary + failure-path audit — `ErrorBoundary` wraps the app in `main.tsx`; audit found & fixed one silent path (`Settings.logout` now toasts on wipe/sign-out failure). All other async paths already toast.
+- [~] 7.5 a11y/PWA/perf — AA contrast **verified & scripted** (`npm run check:contrast`, all pairings pass, worst 4.86:1); new MFA inputs labeled; PWA criteria met (manifest/icons/SW). **Full browser Lighthouse run still to be done by the user** (needs a real Chrome). Note: bundle 607 KB raw / 177 KB gzip — SW-cached after first load; route code-splitting deferred as not worth the Suspense/offline risk pre-dogfood.
+- [x] 7.6 Monthly export reminder — localStorage "last export" nudge in Settings (`lib/exportReminder.ts`, unit-tested), **not** a self-pointed recurring template (that would post fake money rows into the ledger it's meant to back up).
 
 **Phase 8 — GCash importer (optional)**
 

@@ -11,7 +11,9 @@ import {
 } from '../../db/entries'
 import { entriesToCsv, entriesToJson } from '../../lib/export'
 import { manilaDayKey } from '../../lib/dates'
+import { exportReminderStatus, getLastExport, recordExport } from '../../lib/exportReminder'
 import { useSession } from '../auth/useSession'
+import { MfaSection } from './MfaSection'
 
 function downloadFile(name: string, content: string, type: string) {
   const url = URL.createObjectURL(new Blob([content], { type }))
@@ -26,6 +28,8 @@ export function Settings() {
   const { session } = useSession()
   const toast = useToast()
   const [busy, setBusy] = useState<'json' | 'csv' | null>(null)
+  const [lastExport, setLastExport] = useState<string | null>(() => getLastExport())
+  const reminder = exportReminderStatus(lastExport, new Date())
 
   async function exportAs(kind: 'json' | 'csv') {
     setBusy(kind)
@@ -49,6 +53,8 @@ export function Settings() {
         }
         downloadFile(`tin-export-${day}.csv`, entriesToCsv(entries, maps, manilaDayKey), 'text/csv')
       }
+      recordExport()
+      setLastExport(getLastExport())
       toast.show(`Exported ${entries.length} entries — your data outlives any backend`)
     } catch (err) {
       toast.show(err instanceof Error ? err.message : String(err), 'error')
@@ -59,16 +65,25 @@ export function Settings() {
 
   async function logout() {
     // ROADMAP 6.6: unsynced writes die with the wipe — never silently
-    const pending = await outboxCount()
-    if (pending > 0) {
-      const ok = window.confirm(
-        `${pending} write${pending === 1 ? '' : 's'} haven't reached the server yet ` +
-          `(you're probably offline). Logging out deletes them from this device forever. Log out anyway?`,
+    try {
+      const pending = await outboxCount()
+      if (pending > 0) {
+        const ok = window.confirm(
+          `${pending} write${pending === 1 ? '' : 's'} haven't reached the server yet ` +
+            `(you're probably offline). Logging out deletes them from this device forever. Log out anyway?`,
+        )
+        if (!ok) return
+      }
+      await wipeLocalCaches()
+      await supabase.auth.signOut()
+    } catch (err) {
+      // 7.4 audit: a failed wipe/sign-out must not fail silently — a half-wiped
+      // session on a shared laptop is exactly what 6.6 exists to prevent
+      toast.show(
+        `Logout didn't finish cleanly: ${err instanceof Error ? err.message : String(err)}`,
+        'error',
       )
-      if (!ok) return
     }
-    await wipeLocalCaches()
-    await supabase.auth.signOut()
   }
 
   return (
@@ -86,6 +101,13 @@ export function Settings() {
           Full ledger, voided entries included. Make it a monthly habit; the free tier keeps no
           backups for you.
         </p>
+        {reminder.due ? (
+          <p className="mb-3 rounded-xl border border-accent/40 bg-raised px-3 py-2 text-sm text-accent">
+            {reminder.message}
+          </p>
+        ) : (
+          <p className="mb-3 text-xs text-ink-mute">{reminder.message}</p>
+        )}
         <div className="flex gap-2">
           <button
             type="button"
@@ -105,6 +127,8 @@ export function Settings() {
           </button>
         </div>
       </section>
+
+      <MfaSection />
 
       <section className="rounded-2xl border border-line bg-surface p-4">
         <h2 className="font-medium">Recurring</h2>
