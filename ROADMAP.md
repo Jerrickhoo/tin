@@ -520,6 +520,14 @@ Work top to bottom; nothing depends on anything below it.
 - [x] 7.3 Keep-alive workflow — `.github/workflows/keepalive.yml` live on GitHub (repo `Jerrickhoo/tin`, private). Repo secrets `SUPABASE_URL` + `SUPABASE_ANON_KEY` set; workflow run confirmed green 2026-07-22. Self-pings the REST endpoint every 3 days from now on.
 - [x] 7.4 Error boundary + failure-path audit — `ErrorBoundary` wraps the app in `main.tsx`; audit found & fixed one silent path (`Settings.logout` now toasts on wipe/sign-out failure). All other async paths already toast.
 - [x] 7.5 a11y/PWA/perf — **Lighthouse (mobile, prod /login, LH 13.3.0): Performance 99 · Accessibility 100 · Best Practices 100.** AA contrast also scripted (`npm run check:contrast`, worst 4.86:1); new MFA inputs labeled; PWA installability verified via Application tab (manifest + SW; Chrome dropped LH's PWA category). Only perf note is "reduce unused JS ~119 KiB" = the deferred bundle split — a non-issue on an SW-cached app.
+
+  **Re-measured after theme v3 (2026-07-22, LH 13.2.0, Moto G Power / Slow 4G, prod, incognito): Performance 93 · Accessibility 100 · Best Practices 100.** The 6-point drop was entirely **LCP 3.0 s** against FCP 1.9 s — that gap is text painting in the fallback face and re-painting when Nunito lands, because a font isn't discoverable until the CSS has downloaded and parsed. Fixed by a ~30-line `preloadLatinFonts()` plugin in `vite.config.ts` that emits `<link rel="preload">` for the two `*-latin-wght-normal` woff2 files (content-hashed, so generated from the bundle). **Needs one more clean run to confirm the recovery.**
+
+  Two measurement traps worth writing down, both cost an evening once:
+  - **Run it in incognito.** A normal-profile run scored 68 with TBT 3,080 ms and claimed "1,810 KiB unused JS" — against a 613 KB bundle, which is arithmetically impossible. That was extension code, not Tin. Incognito: TBT 20 ms.
+  - **Run it on `/login`, not `/`.** With a session, `/` boots Dexie, the sync loop, seeding and the catch-up poster — a completely different workload from the static login screen these numbers describe. (Logged out, `/` redirects to `/login`, so incognito happens to be comparable.)
+
+  Verified while wiring the preload: only the two latin faces are ever fetched for latin text — the ext/cyrillic/vietnamese subsets never download. So trimming Inter to latin (still unclaimed) shrinks the **SW precache**, not the critical path; it will not move LCP.
 - [x] 7.6 Monthly export reminder — localStorage "last export" nudge in Settings (`lib/exportReminder.ts`, unit-tested), **not** a self-pointed recurring template (that would post fake money rows into the ledger it's meant to back up).
 
 **Phase 8 — GCash importer (optional)**
