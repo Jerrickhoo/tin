@@ -49,7 +49,7 @@ export function BottomSheet({
         type="button"
         aria-label="Close"
         onClick={onClose}
-        className="scrim-in absolute inset-0 bg-black/65 backdrop-blur-[3px]"
+        className="scrim-in absolute inset-0 bg-black/65"
       />
       <div
         role="dialog"
@@ -57,7 +57,7 @@ export function BottomSheet({
         className="sheet-in sheet-surface absolute inset-x-0 bottom-0 mx-auto max-h-[88dvh] w-full max-w-sm overflow-y-auto rounded-t-[1.75rem] border-t border-line/80 p-5 pb-[max(2rem,env(safe-area-inset-bottom))] md:relative md:inset-auto md:max-h-[85dvh] md:rounded-[1.5rem] md:border md:p-6 md:pb-6 md:shadow-2xl md:shadow-black/60"
       >
         {/* the drag handle is a touch affordance; it means nothing to a cursor */}
-        <div className="mx-auto mb-4 h-1 w-9 rounded-full bg-ink-mute/40 md:hidden" />
+        <div className="mx-auto mb-4 h-1 w-9 bg-ink-mute/40 md:hidden" />
         {children}
       </div>
     </div>

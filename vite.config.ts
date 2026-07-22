@@ -5,7 +5,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 /**
- * Preload the two latin font faces the app actually paints with.
+ * Preload the two font faces that paint first.
  *
  * Without this the browser can't know a font exists until it has downloaded
  * and parsed the CSS, which puts a full extra round-trip in front of the
@@ -14,13 +14,17 @@ import { VitePWA } from 'vite-plugin-pwa'
  * and then re-painting when the real one finally lands. LCP is 25% of the
  * Lighthouse performance score.
  *
- * Only `*-latin-wght-normal` is preloaded — never the ext/cyrillic/vietnamese
- * subsets, which the browser correctly declines to fetch for latin text and
- * which would just contend for bandwidth on a slow link. Filenames are
- * content-hashed, so the tags are generated from the bundle rather than
- * hardcoded in index.html. `crossorigin` is required even same-origin:
- * fonts are always fetched in CORS mode, and without it the preload is
- * discarded and the file downloads twice.
+ * Only the 400 weights are preloaded, not all four faces. Pixelify 500/600 are
+ * real but secondary — preloading them would have them contend on a slow link
+ * with the two faces that actually paint the first screen. The hero balance,
+ * which is the LCP element, now needs no font download at all: it renders in
+ * the system numeric stack (see theme.css), so the critical path got shorter
+ * than it was under the previous theme.
+ *
+ * Filenames are content-hashed, so the tags are generated from the bundle
+ * rather than hardcoded in index.html. `crossorigin` is required even
+ * same-origin: fonts are always fetched in CORS mode, and without it the
+ * preload is discarded and the file downloads twice.
  */
 function preloadLatinFonts(): Plugin {
   return {
@@ -30,7 +34,7 @@ function preloadLatinFonts(): Plugin {
       order: 'post',
       handler(html, ctx) {
         const fonts = Object.keys(ctx.bundle ?? {}).filter((file) =>
-          /(?:inter|nunito)-latin-wght-normal-[\w-]+\.woff2$/.test(file),
+          /(?:press-start-2p-latin-400|pixelify-sans-latin-400)-normal-[\w-]+\.woff2$/.test(file),
         )
         return {
           html,

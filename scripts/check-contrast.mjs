@@ -1,4 +1,4 @@
-// WCAG contrast verifier for the midnight-violet palette (ROADMAP §6 / 7.5).
+// WCAG contrast verifier for the pixel-pastel palette (ROADMAP §6 / 7.5).
 // §6 claims every text token clears AA (4.5:1) on base/surface/raised — this
 // script proves it from the actual tokens in theme.css, so the claim can never
 // silently rot when a colour is nudged. Exits non-zero on any AA failure.
@@ -45,7 +45,7 @@ for (const fg of textRoles) {
 checks.push(['on-accent', 'accent', AA])
 
 let failures = 0
-console.log('\n  midnight-violet contrast (AA = 4.5:1)\n')
+console.log('\n  pixel-pastel contrast (AA = 4.5:1)\n')
 for (const [fg, bg, min] of checks) {
   if (!tokens[fg] || !tokens[bg]) {
     console.log(`  ✗ ${fg} on ${bg} — token missing from theme.css`)

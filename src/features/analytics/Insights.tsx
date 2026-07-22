@@ -73,13 +73,13 @@ export function Insights() {
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-5 py-7 md:max-w-4xl md:px-8 md:py-10">
       <div className="flex items-center justify-between gap-2">
-        <h1 className="font-display text-[1.75rem] font-bold tracking-tight">Insights</h1>
-        <div className="flex items-center gap-0.5 rounded-full border border-line/70 bg-surface/60 p-0.5">
+        <h1 className="font-display text-base">Insights</h1>
+        <div className="flex items-center gap-0.5 border border-line/70 bg-surface/60 p-0.5">
           <button
             type="button"
             aria-label="Previous month"
             onClick={() => setMonthKey(prevMonthKey(monthKey))}
-            className="press size-8 rounded-full text-ink-soft"
+            className="press size-8 text-ink-soft"
           >
             ‹
           </button>
@@ -89,7 +89,7 @@ export function Insights() {
             aria-label="Next month"
             disabled={monthKey === currentMonth}
             onClick={() => setMonthKey(nextMonthKey(monthKey))}
-            className="press size-8 rounded-full text-ink-soft disabled:opacity-25"
+            className="press size-8 text-ink-soft disabled:opacity-25"
           >
             ›
           </button>
@@ -100,7 +100,7 @@ export function Insights() {
 
       {rows && rows.length === 0 && (
         <div className="card px-5 py-8 text-center">
-          <p className="font-display text-lg font-bold">Nothing this month</p>
+          <p className="font-display text-xs leading-relaxed">Nothing this month</p>
           <p className="mt-1.5 text-sm text-ink-soft">No entries yet — nothing to chart.</p>
         </div>
       )}
@@ -110,16 +110,13 @@ export function Insights() {
           {/* Net is the headline, so it gets hero treatment rather than a third
               bar. Income and spending are the supporting magnitudes. */}
           <section className="card overflow-hidden px-5 py-5">
-            <span
-              aria-hidden
-              className={`pointer-events-none absolute -top-20 -right-8 size-48 rounded-full blur-3xl ${
-                summary.netCentavos < 0 ? 'bg-neg/15' : 'bg-pos/15'
-              }`}
-            />
+            {/* The blur-glow that sat here is gone — a soft radial is the least
+                pixel-native shape in the app. The sign is already carried by
+                the +/- and by pos/neg colour on the number itself. */}
             <div className="relative">
-              <p className="text-sm text-ink-soft">Net this month</p>
+              <p className="font-display text-[0.625rem] text-ink-soft">NET THIS MONTH</p>
               <p
-                className={`mt-1 font-display text-[2.25rem] leading-none font-bold tracking-tight tabular-nums ${
+                className={`mt-2 text-[2.25rem] leading-none font-bold tabular-nums ${
                   summary.netCentavos < 0 ? 'text-neg' : 'text-pos'
                 }`}
               >
@@ -262,13 +259,7 @@ export function Insights() {
 }
 
 function Dot({ color }: { color: string }) {
-  return (
-    <span
-      aria-hidden
-      className="size-2 shrink-0 rounded-full"
-      style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}66` }}
-    />
-  )
+  return <span aria-hidden className="size-2 shrink-0" style={{ backgroundColor: color }} />
 }
 
 function Panel({
@@ -285,7 +276,7 @@ function Panel({
   return (
     <section className={`card px-4 py-4 ${className}`}>
       <div className="mb-3.5 flex items-baseline justify-between gap-2">
-        <h2 className="font-display font-bold">{title}</h2>
+        <h2 className="font-display text-[0.6875rem] leading-relaxed">{title}</h2>
         {hint && <span className="shrink-0 text-[0.6875rem] text-ink-mute">{hint}</span>}
       </div>
       {children}

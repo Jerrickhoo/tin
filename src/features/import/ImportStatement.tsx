@@ -146,7 +146,7 @@ export function ImportStatement() {
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col gap-4 px-6 py-8 md:px-8 md:py-10 lg:max-w-3xl">
       <div className="flex items-baseline justify-between gap-3">
-        <h1 className="font-display text-[1.75rem] font-bold tracking-tight">Import</h1>
+        <h1 className="font-display text-base">Import</h1>
         <span className="text-sm text-ink-mute">
           {step === 'paste' ? 'Step 1 of 3' : step === 'map' ? 'Step 2 of 3' : 'Step 3 of 3'}
         </span>
@@ -235,7 +235,7 @@ function PasteStep({
   return (
     <>
       <section className="card p-4">
-        <h2 className="font-display font-bold">Paste your rows</h2>
+        <h2 className="font-display text-[0.6875rem] leading-relaxed">Paste your rows</h2>
         <p className="mt-1 text-sm text-ink-soft">
           Copy the transactions out of a spreadsheet, a CSV, or any table and paste them here.
           Everything happens on this device — nothing is uploaded.
@@ -324,7 +324,7 @@ function MapStep({
   return (
     <>
       <section className="card p-4">
-        <h2 className="font-display font-bold">What is each column?</h2>
+        <h2 className="font-display text-[0.6875rem] leading-relaxed">What is each column?</h2>
         <p className="mt-1 text-sm text-ink-soft">
           Date and amount are required. A reference number is worth mapping if you have one — it
           makes re-importing the same statement exactly safe.
@@ -357,7 +357,7 @@ function MapStep({
       </section>
 
       <section className="card p-4">
-        <h2 className="font-display font-bold">Two things I won't guess</h2>
+        <h2 className="font-display text-[0.6875rem] leading-relaxed">Two things I won't guess</h2>
 
         <p className="mt-3 text-sm text-ink-soft">
           Is <span className="font-mono text-ink">03/04/2026</span> the 3rd of April or the 4th of
@@ -403,7 +403,7 @@ function MapStep({
 
       {hasDate && hasAmount && (
         <section className="card p-4">
-          <h2 className="font-display font-bold">Preview</h2>
+          <h2 className="font-display text-[0.6875rem] leading-relaxed">Preview</h2>
           {preview.rows.length === 0 ? (
             <p className="mt-1 text-sm text-neg">
               Nothing readable yet — {preview.issues[0]?.reason ?? 'check the mapping'}
@@ -482,7 +482,7 @@ function ReviewStep({
   return (
     <>
       <section className="card p-4">
-        <h2 className="font-display font-bold">
+        <h2 className="font-display text-[0.6875rem] leading-relaxed">
           {counts.selected} of {counts.total} rows will be imported
         </h2>
         <p className="mt-1 text-sm text-ink-soft">
@@ -536,7 +536,7 @@ function ReviewStep({
 
       {issues.length > 0 && (
         <section className="card border-neg/40 p-4">
-          <h2 className="font-display font-bold text-neg">
+          <h2 className="font-display text-[0.6875rem] leading-relaxed text-neg">
             {issues.length} row{issues.length === 1 ? '' : 's'} couldn't be read
           </h2>
           <ul className="mt-1 flex flex-col gap-0.5 text-sm text-ink-soft">
@@ -672,7 +672,7 @@ function DraftCard({
               {envelope && (
                 <span className="flex shrink-0 items-center gap-1.5 text-sm text-ink-mute">
                   <span
-                    className="size-1.5 rounded-full"
+                    className="size-1.5"
                     style={{ backgroundColor: envelope.color ?? '#AFA7C2' }}
                   />
                   {envelope.name}

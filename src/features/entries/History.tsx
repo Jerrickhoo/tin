@@ -137,12 +137,12 @@ export function History() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-5 px-5 py-7 md:max-w-2xl md:px-8 md:py-10">
-      <h1 className="font-display text-[1.75rem] font-bold tracking-tight">History</h1>
+      <h1 className="font-display text-base">History</h1>
 
       {!rows && <p className="text-ink-mute">Reading the ledger…</p>}
       {rows && rows.length === 0 && (
         <div className="card px-5 py-8 text-center">
-          <p className="font-display text-lg font-bold">Nothing here yet</p>
+          <p className="font-display text-xs leading-relaxed">Nothing here yet</p>
           <p className="mt-1.5 text-sm text-ink-soft">
             Tap <span className="font-semibold text-accent">+</span> and log your first entry —
             future you says thanks.
@@ -153,7 +153,11 @@ export function History() {
       {days.map(({ key, groups, net }) => (
         <section key={key}>
           {/* Sticky so you always know which day you're scrolling through. */}
-          <div className="sticky top-0 z-10 -mx-1 mb-2 flex items-baseline justify-between bg-base/85 px-1 py-1.5 backdrop-blur-sm">
+          {/* Fully opaque. At 85% it was legible only because a backdrop-blur
+              was smearing the rows sliding underneath; without the blur,
+              translucency means entry text reads straight through the day
+              header it is supposed to be scrolling behind. */}
+          <div className="sticky top-0 z-10 -mx-1 mb-2 flex items-baseline justify-between border-b-2 border-line bg-base px-1 py-1.5">
             <h2 className="text-sm font-semibold text-ink-soft">{dayLabel(key)}</h2>
             {net !== 0 && (
               <span
@@ -258,7 +262,7 @@ function GroupCard({
         <div className="flex items-center gap-3">
           <span
             aria-hidden
-            className="flex size-9 shrink-0 items-center justify-center rounded-full text-base"
+            className="flex size-9 shrink-0 items-center justify-center text-base"
             style={{ backgroundColor: `${tint}1f`, border: `1px solid ${tint}3d`, color: tint }}
           >
             {glyph}
@@ -271,9 +275,7 @@ function GroupCard({
               {group.note && group.kind !== 'adjustment' ? ` · ${group.note}` : ''}
             </p>
           </div>
-          <span className={`shrink-0 font-display font-bold tabular-nums ${amountClass}`}>
-            {amountText}
-          </span>
+          <span className={`shrink-0 font-bold tabular-nums ${amountClass}`}>{amountText}</span>
         </div>
       </button>
 

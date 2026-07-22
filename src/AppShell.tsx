@@ -178,10 +178,10 @@ export function AppShell() {
             {toasts.map((t) => (
               <div
                 key={t.id}
-                className={`sheet-in pointer-events-auto flex items-center gap-3 rounded-2xl border px-4 py-2.5 text-sm shadow-xl shadow-black/50 backdrop-blur-md ${
+                className={`sheet-in pointer-events-auto flex items-center gap-3 border-2 px-4 py-2.5 text-sm shadow-[3px_3px_0_0_rgb(0_0_0/0.55)] ${
                   t.kind === 'error'
-                    ? 'border-neg/40 bg-raised/95 text-neg'
-                    : 'border-line bg-raised/95 text-ink'
+                    ? 'border-neg/40 bg-raised text-neg'
+                    : 'border-line bg-raised text-ink'
                 }`}
               >
                 <span>{t.message}</span>
@@ -228,7 +228,7 @@ function SyncPill() {
     <button
       type="button"
       onClick={() => kickSync()}
-      className={`press fixed inset-x-0 top-3 z-40 mx-auto w-fit rounded-full border px-3.5 py-1.5 text-xs shadow-lg shadow-black/50 backdrop-blur-md md:left-60 ${
+      className={`press fixed inset-x-0 top-3 z-40 mx-auto w-fit border px-3.5 py-1.5 text-xs shadow-lg shadow-black/50 md:left-60 ${
         snap.lastError && snap.online
           ? 'border-neg/40 bg-raised/90 text-neg'
           : 'border-line bg-raised/90 text-ink-soft'

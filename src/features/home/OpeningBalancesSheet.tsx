@@ -53,10 +53,7 @@ export function OpeningBalancesSheet({
         {envelopes.map((env) => (
           <label key={env.id} className="flex items-center gap-3">
             <span className="flex w-24 items-center gap-2 text-sm">
-              <span
-                className="size-2 rounded-full"
-                style={{ backgroundColor: env.color ?? '#AFA7C2' }}
-              />
+              <span className="size-2" style={{ backgroundColor: env.color ?? '#AFA7C2' }} />
               {env.name}
             </span>
             <input

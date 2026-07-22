@@ -63,7 +63,7 @@ export function Envelopes() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-6 py-8 md:max-w-2xl md:px-8 md:py-10">
-      <h1 className="font-display text-[1.75rem] font-bold tracking-tight">Envelopes</h1>
+      <h1 className="font-display text-base">Envelopes</h1>
 
       {!envelopes && <p className="text-ink-mute">Loading…</p>}
 
@@ -152,7 +152,7 @@ function SplitSection({
 
   return (
     <section className="card p-4">
-      <h2 className="font-display font-bold">The split</h2>
+      <h2 className="font-display text-[0.6875rem] leading-relaxed">The split</h2>
       <p className="mt-1 text-sm text-ink-soft">
         How each peso of income is divided. Changing this <strong>never rewrites history</strong> —
         past months keep the split they were logged under.
@@ -161,10 +161,7 @@ function SplitSection({
       <div className="mt-3 flex flex-col gap-2">
         {envelopes.map((env, i) => (
           <div key={env.id} className="flex items-center gap-3">
-            <span
-              className="size-2 shrink-0 rounded-full"
-              style={{ backgroundColor: env.color ?? '#AFA7C2' }}
-            />
+            <span className="size-2 shrink-0" style={{ backgroundColor: env.color ?? '#AFA7C2' }} />
             <button
               type="button"
               onClick={() => setRenaming(env)}
@@ -329,7 +326,7 @@ function CategoriesSection({
 
   return (
     <section className="card p-4">
-      <h2 className="font-display font-bold">Categories</h2>
+      <h2 className="font-display text-[0.6875rem] leading-relaxed">Categories</h2>
       <p className="mt-1 text-sm text-ink-soft">
         Each one belongs to a single envelope, so picking a category at entry time already picks the
         envelope.
@@ -340,10 +337,7 @@ function CategoriesSection({
         return (
           <div key={env.id} className="mt-4">
             <div className="flex items-center gap-2">
-              <span
-                className="size-1.5 rounded-full"
-                style={{ backgroundColor: env.color ?? '#AFA7C2' }}
-              />
+              <span className="size-1.5" style={{ backgroundColor: env.color ?? '#AFA7C2' }} />
               <h3 className="text-sm font-semibold text-ink-soft">{env.name}</h3>
             </div>
             <div className="mt-2 flex flex-wrap gap-2">

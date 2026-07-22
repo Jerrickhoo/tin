@@ -87,7 +87,7 @@ function StuckWrites() {
 
   return (
     <section className="card border-neg/40 p-4">
-      <h2 className="font-display font-bold text-neg">A write is stuck</h2>
+      <h2 className="font-display text-[0.6875rem] leading-relaxed text-neg">A write is stuck</h2>
       <p className="mt-1 text-sm text-ink-soft">
         {describeOp(row.payload)} {snap.pending > 1 ? `(and ${snap.pending - 1} behind it) ` : ''}
         {row.attempts === 1 ? 'has failed once' : `has failed ${row.attempts} times`}. Nothing else
@@ -196,17 +196,19 @@ export function Settings() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-6 py-8 md:max-w-3xl md:px-8 md:py-10">
-      <h1 className="font-display text-[1.75rem] font-bold tracking-tight">Settings</h1>
+      <h1 className="font-display text-base">Settings</h1>
 
       <section className="card p-4">
-        <h2 className="font-display font-bold">Account</h2>
+        <h2 className="font-display text-[0.6875rem] leading-relaxed">Account</h2>
         <p className="mt-1 text-sm text-ink-soft">{session?.user.email}</p>
       </section>
 
       <StuckWrites />
 
       <section className="card p-4">
-        <h2 className="font-display font-bold">Export — you are never locked in</h2>
+        <h2 className="font-display text-[0.6875rem] leading-relaxed">
+          Export — you are never locked in
+        </h2>
         <p className="mt-1 mb-3 text-sm text-ink-soft">
           Full ledger, voided entries included. Make it a monthly habit; the free tier keeps no
           backups for you.
@@ -244,7 +246,9 @@ export function Settings() {
           compromise, not a layout. They tile once there's room. */}
       <div className="grid gap-4 md:grid-cols-2">
         <section className="card p-4">
-          <h2 className="font-display font-bold">Envelopes &amp; categories</h2>
+          <h2 className="font-display text-[0.6875rem] leading-relaxed">
+            Envelopes &amp; categories
+          </h2>
           <p className="mt-1 text-sm text-ink-soft">
             Change the 70/20/10 split, rename envelopes, add or archive categories. Past entries are
             never re-allocated.
@@ -255,7 +259,7 @@ export function Settings() {
         </section>
 
         <section className="card p-4">
-          <h2 className="font-display font-bold">Recurring</h2>
+          <h2 className="font-display text-[0.6875rem] leading-relaxed">Recurring</h2>
           <p className="mt-1 text-sm text-ink-soft">
             Rent, allowance, subscriptions — they log themselves on app open.
           </p>
@@ -265,7 +269,7 @@ export function Settings() {
         </section>
 
         <section className="card p-4">
-          <h2 className="font-display font-bold">Import a statement</h2>
+          <h2 className="font-display text-[0.6875rem] leading-relaxed">Import a statement</h2>
           <p className="mt-1 text-sm text-ink-soft">
             Backfill old transactions from a pasted table or CSV. Read on this device, reviewed row
             by row, and never posted until you say so.
@@ -276,7 +280,7 @@ export function Settings() {
         </section>
 
         <section className="card p-4">
-          <h2 className="font-display font-bold">Extras</h2>
+          <h2 className="font-display text-[0.6875rem] leading-relaxed">Extras</h2>
           <p className="mt-1 text-sm">
             <Link to="/split" className="text-accent">
               Split playground

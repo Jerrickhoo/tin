@@ -49,7 +49,7 @@ export function SplitPreview() {
         )}
       </section>
 
-      <div className="flex h-2 overflow-hidden rounded-full border border-line">
+      <div className="flex h-2 overflow-hidden border border-line">
         {ENVELOPES.map((env) => (
           <div key={env.name} className={env.bar} />
         ))}
@@ -59,7 +59,7 @@ export function SplitPreview() {
         {ENVELOPES.map((env, i) => (
           <div key={env.name} className="card flex items-center justify-between px-4 py-3">
             <div className="flex items-center gap-3">
-              <span className={`size-2.5 rounded-full ${env.dot}`} />
+              <span className={`size-2.5 ${env.dot}`} />
               <span className="font-medium">{env.name}</span>
               <span className="text-sm text-ink-mute">{env.shareBp / 100}%</span>
             </div>

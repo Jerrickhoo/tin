@@ -1,99 +1,248 @@
 @import 'tailwindcss';
 
-/* Inter, latin subset only — same reasoning as Nunito below. The Fontsource
- * entrypoint also ships latin-ext/cyrillic/cyrillic-ext/greek/greek-ext/
- * vietnamese; none of them is ever FETCHED for this app's text, but all of
- * them were precached by the service worker, so an install paid ~130 KB for
- * glyphs Tin will never render. Trimming this does not move LCP (the latin
- * face was always the only one downloaded) — it shrinks the install.
- * Range copied verbatim from the package's own wght.css latin block. */
+/*
+ * Press Start 2P — headings only, and only SHORT ones.
+ *
+ * Self-hosted rather than linked from Google Fonts, which would have been the
+ * obvious move and would have broken in production only: `public/_headers`
+ * ships `default-src 'self'; font-src 'self'`, so a fonts.gstatic.com request
+ * is blocked by CSP — and blocked silently, in prod, after working perfectly
+ * in dev. Self-hosting also keeps the face inside the service worker precache,
+ * which is the whole reason Tin opens in a dead spot.
+ *
+ * This face is ~2.3x wider per character than Nunito was. It is never applied
+ * to a full sentence: app name, section titles, button labels. The hero
+ * balance deliberately does NOT use it — "₱1,234,567.89" in Press Start 2P
+ * overflows a 384px phone column outright.
+ *
+ * Range copied verbatim from the package's own latin.css.
+ */
 @font-face {
-  font-family: 'Inter Variable';
+  font-family: 'Press Start 2P';
   font-style: normal;
   font-display: swap;
-  font-weight: 100 900;
-  src: url('@fontsource-variable/inter/files/inter-latin-wght-normal.woff2')
-    format('woff2-variations');
-  unicode-range:
-    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
-    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-
-/* Nunito, latin subset only — declared by hand rather than importing the
- * Fontsource entrypoint, which ships cyrillic/vietnamese/latin-ext too and put
- * ~124 KB of glyphs this app will never render into the service worker's
- * precache. Headings are the only consumer; latin covers English and Filipino
- * (ñ lives in U+0000-00FF). Same self-hosted file, so still CSP-clean.
- * Range copied verbatim from the package's own wght.css latin block. */
-@font-face {
-  font-family: 'Nunito Variable';
-  font-style: normal;
-  font-display: swap;
-  font-weight: 200 1000;
-  src: url('@fontsource-variable/nunito/files/nunito-latin-wght-normal.woff2')
-    format('woff2-variations');
+  font-weight: 400;
+  src: url('@fontsource/press-start-2p/files/press-start-2p-latin-400-normal.woff2') format('woff2');
   unicode-range:
     U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
     U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
 /*
- * Tin design tokens — "midnight violet, one lamp" (ROADMAP §6, relit 2026-07-22).
+ * Pixelify Sans — body, labels, money. Real weights, which is why it beat
+ * VT323 for this slot: the JSX carries its hierarchy in `font-medium` (17
+ * uses), `font-semibold` (42) and `font-bold` (38). VT323 ships a single
+ * weight, so all 97 of those would have collapsed into one texture or into
+ * synthesized faux-bold. Pixel look, intact hierarchy.
  *
- * v2 set the palette; v3 gives it a light source, depth and texture. The rules
- * that survived unchanged: every text token still clears AA on base/surface/
- * raised (npm run check:contrast proves it from this file), and no asset is
- * fetched off-origin — fonts are self-hosted via Fontsource, the grain is an
- * inline SVG data URI, both CSP-clean.
+ * Latin only, same reasoning as the faces this replaced: the other subsets are
+ * never rendered for English/Filipino text but were being precached anyway.
+ * The three loaded weights are 24 KB against the 87 KB of Inter + Nunito they
+ * replace, so the pixel theme is the lighter install.
+ */
+@font-face {
+  font-family: 'Pixelify Sans';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url('@fontsource/pixelify-sans/files/pixelify-sans-latin-400-normal.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Pixelify Sans';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url('@fontsource/pixelify-sans/files/pixelify-sans-latin-500-normal.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Pixelify Sans';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url('@fontsource/pixelify-sans/files/pixelify-sans-latin-600-normal.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* No 700 face is loaded on purpose: the weight scale in @theme caps
+   `font-bold` at 600, so a 700 file would be 8 KB precached and never
+   painted. If the scale is ever raised, add the face back with it. */
+
+/*
+ * Tin design tokens — "pixel pastel" (ROADMAP §6, reskinned 2026-07-22).
  *
- * Mapping to §6 names:
+ * Replaces "midnight violet, one lamp". What carried over unchanged, because
+ * it was never about the hues:
+ *   - token names are role-based, so the ~360 utility usages in the JSX did
+ *     not have to be touched to restyle the app;
+ *   - every text token clears AA on base/surface/raised, proven from this file
+ *     by `npm run check:contrast` (worst pairing 5.19:1, up from 4.86:1);
+ *   - nothing is fetched off-origin — fonts self-hosted, textures are inline
+ *     SVG data URIs. CSP-clean.
+ *
+ * §6-name → code-name mapping (unchanged from midnight violet):
  *   bg-base → base · bg-surface → surface · bg-raised → raised · border → line
  *   text-primary → ink · text-secondary → ink-soft · text-muted → ink-mute
  *   accent/on-accent · positive → pos · negative → neg
  *   env-needs → needs · env-savings → savings · env-wants → wants
  *
- * Surfaces darkened a touch from v2 so the lamp has something to glow against;
- * `raised` is untouched because ink-mute-on-raised (4.86:1) is the AA floor of
- * the whole system. Text/accent hexes are frozen — they're measured, not taste.
+ * The base is deep plum, not black: a pure #000 backdrop makes pastels read as
+ * neon, which is the opposite of cozy. Every surface keeps a violet cast so the
+ * pastels sit ON something rather than glowing out of a void.
+ *
+ * The CVD gap documented in §6 survives this reskin unchanged — savings (mint)
+ * and wants (pink) still separate poorly under deuteranopia, and identity is
+ * still never carried by color alone anywhere in the app.
  */
 @theme {
-  --font-sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  /* Nunito's rounded terminals do the cozying that Inter deliberately won't.
-     Headings and money only — never body copy, never small text. */
-  --font-display: 'Nunito Variable', 'Inter Variable', system-ui, sans-serif;
+  /* Body. Pixel, but with real weights and a normal x-height. */
+  --font-sans: 'Pixelify Sans', ui-monospace, 'Segoe UI', system-ui, sans-serif;
+  /* Headings and short labels ONLY. See the @font-face note above. */
+  --font-display: 'Press Start 2P', 'Pixelify Sans', ui-monospace, system-ui, sans-serif;
 
-  --color-base: #100e15;
-  --color-surface: #1b1823;
-  --color-raised: #262230;
-  --color-line: #363044;
+  /*
+   * Money and any other digits. The one place the pixel aesthetic loses.
+   *
+   * Pixel faces disambiguate digits badly at a glance: 6/8/5 and 0/8 differ by
+   * one or two lit pixels, which is fine for a score counter and not fine for
+   * a balance you check ten times a day and act on. This is a ledger — a digit
+   * misread is the worst failure the UI can produce.
+   *
+   * A system monospace stack rather than a webfont, for three reasons: it
+   * downloads nothing, its digits are already fixed-width so the existing
+   * `tabular-nums` intent survives, and — the one that actually decided it —
+   * it renders `₱` (U+20B1) itself. Neither pixel face covers that codepoint,
+   * so before this change every amount in the app was a pixel-font number with
+   * a fallback-font peso sign glued to the front. Now the whole string comes
+   * from one family.
+   *
+   * Terminal type is also period-correct for the theme in a way a rounded sans
+   * would not have been: this reads as a readout, not as a break from it.
+   */
+  --font-numeric:
+    ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', 'Roboto Mono', Consolas, monospace;
 
-  --color-ink: #eae6f2;
-  --color-ink-soft: #afa7c2;
-  --color-ink-mute: #948ca9;
+  --color-base: #17131f;
+  --color-surface: #221b2e;
+  --color-raised: #2d2440;
+  --color-line: #3d3354;
 
-  --color-accent: #b49bf5;
-  --color-on-accent: #1d1530;
-  --color-pos: #93cfa9;
-  --color-neg: #e4808a;
+  --color-ink: #f2e9f7;
+  --color-ink-soft: #c4b3d6;
+  --color-ink-mute: #a294b8;
 
-  --color-needs: #b49bf5;
-  --color-savings: #93cfa9;
-  --color-wants: #efa9d6;
+  --color-accent: #c9a7ff;
+  --color-on-accent: #1e1030;
+  --color-pos: #a8e6cf;
+  --color-neg: #ff9aa2;
+
+  --color-needs: #c9a7ff;
+  --color-savings: #a8e6cf;
+  --color-wants: #ffb3d9;
+
+  /*
+   * Every corner in the app, squared from one place.
+   *
+   * There are 104 hardcoded `rounded-*` classes across 25 component files.
+   * None of them had to be edited: Tailwind v4 resolves `rounded-xl` to
+   * `var(--radius-xl)`, so zeroing the scale here squares the entire app and
+   * keeps the reskin a styling change rather than a 25-file diff.
+   *
+   * `rounded-full` is the one exception — v4 hardcodes it to
+   * `calc(infinity * 1px)` with no variable to override — so its 23 uses are
+   * handled per-case in the components (mostly envelope dots, which become
+   * pixel squares).
+   */
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
+  --radius-4xl: 0px;
+
+  /*
+   * Weight scale, shifted down one step.
+   *
+   * A pixel face has no optical weight axis — it gets bolder by adding whole
+   * pixels to every stem, so Pixelify's 700 is literally double the stem width
+   * of its 400 rather than the ~20% a variable sans would give you. The JSX
+   * asks for `font-bold` 38 times, `font-semibold` 42 and `font-medium` 17;
+   * at the face's own values that made most of the app read as solid blocks.
+   *
+   * Remapping here instead of editing 97 class names keeps hierarchy intact
+   * (three distinct steps survive: 400 / 500 / 600) while thinning everything.
+   * `bold` topping out at 600 is also why no 700 face is loaded below.
+   */
+  --font-weight-normal: 400;
+  --font-weight-medium: 400;
+  --font-weight-semibold: 500;
+  --font-weight-bold: 600;
+
+  /* One pixel unit. Border widths, shadow offsets and the scanline period are
+     all derived from this so the whole UI stays on a single grid. */
+  --px-unit: 2px;
 }
 
 body {
   background-color: var(--color-base);
   color: var(--color-ink);
   font-family: var(--font-sans);
+  /* The point of a pixel typeface is the hard edge. Anti-aliasing softens the
+     stair-steps into grey mush at exactly the sizes this app uses most. */
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: grayscale;
+  font-smooth: never;
+  text-rendering: optimizeSpeed;
+}
+
+/* Anything raster stays crisp when scaled — PWA icons, the MFA enrollment QR.
+   Vector SVG is excluded: `pixelated` on an SVG is either a no-op or, in some
+   engines, forces a low-res rasterization pass. */
+img,
+canvas {
+  image-rendering: pixelated;
+}
+
+/*
+ * Digits opt out of the pixel font, keyed on `tabular-nums`.
+ *
+ * This deliberately overloads a Tailwind utility, which is worth being
+ * explicit about. The justification is that the codebase already applies
+ * `tabular-nums` to exactly and only numeric content — all 26 uses are money,
+ * percentages, share inputs or the TOTP field, because it was authored for
+ * digit alignment. That makes it an accurate existing signal for "this is a
+ * number", and keying off it keeps the rule in one file instead of scattering
+ * a second class across 26 JSX sites where it would inevitably drift.
+ *
+ * If you ever want pixel digits back, delete this block — nothing else
+ * depends on it.
+ *
+ * Anti-aliasing is restored here against the body's `none`. Legibility is the
+ * entire point of the override, and a hinted monospace rendered with smoothing
+ * off is jagged rather than crisp — the hard-edge trick only flatters type
+ * that was drawn on a grid to begin with.
+ */
+.tabular-nums {
+  font-family: var(--font-numeric);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: auto;
+  font-smooth: always;
 }
 
 /* ============================================================
-   The lamp + the grain
-   Two fixed layers under the app: a warm violet bloom falling
-   off toward the edges, and a fine noise wash so large dark
-   areas read as paper-in-lamplight instead of switched-off OLED.
-   Both are inert (pointer-events:none) and sit below #root.
+   The screen
+   Two fixed layers under the app: a faint pastel bloom so the
+   dark plum doesn't read as switched-off, and a scanline wash
+   that turns it into a screen you're looking AT.
+   Both inert (pointer-events:none), both below #root.
    ============================================================ */
 
 body::before,
@@ -105,25 +254,27 @@ body::after {
   pointer-events: none;
 }
 
-/* The lamp: one source, high and slightly left, like a desk light.
-   Radii are deliberately smaller than the viewport — a gradient wider than the
-   screen has no visible falloff and just reads as flat grey wash. The whole
-   effect is the falloff. Mid-stops keep the edge from banding on OLED. */
+/* The bloom. Deliberately weaker than the lamp it replaces: a smooth gradient
+   is the least pixel-native thing on screen, so it earns its place only by
+   being nearly subliminal — enough to tint the corners, not enough to read as
+   a light source. The scanlines on top break it up into bands anyway, which is
+   what keeps it from looking like a smooth glow in a blocky UI. */
 body::before {
   background:
-    radial-gradient(
-      26rem 20rem at 16% -4%,
-      rgb(182 152 255 / 0.3),
-      rgb(160 130 240 / 0.09) 45%,
-      transparent 72%
-    ),
-    radial-gradient(20rem 16rem at 96% 6%, rgb(239 169 214 / 0.1), transparent 65%);
+    radial-gradient(30rem 22rem at 14% -6%, rgb(201 167 255 / 0.16), transparent 70%),
+    radial-gradient(22rem 18rem at 97% 4%, rgb(255 179 217 / 0.09), transparent 66%);
 }
 
-/* the grain: feTurbulence, inlined so nothing leaves the origin */
+/* Scanlines + dither, in one layer.
+   The scanline period is 3px, not 2px: at 2px it beats against the device
+   pixel grid on 1.5x and 2.5x DPR screens (most mid-range Android) and crawls
+   when you scroll. The dither is a 4x4 ordered-dot SVG at low opacity, which
+   is what stops large flat panels from banding. */
 body::after {
-  opacity: 0.22;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.42'/%3E%3C/svg%3E");
+  opacity: 0.5;
+  background-image:
+    repeating-linear-gradient(to bottom, rgb(0 0 0 / 0.13) 0 1px, transparent 1px 3px),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Crect width='1' height='1' x='0' y='0' fill='%23fff' opacity='0.05'/%3E%3Crect width='1' height='1' x='2' y='2' fill='%23fff' opacity='0.035'/%3E%3C/svg%3E");
 }
 
 #root {
@@ -133,62 +284,68 @@ body::after {
 
 /* ============================================================
    Surfaces
-   One recipe, used everywhere, so "a card" is a single decision.
-   Lit from above: a hairline highlight on the top edge, ambient
-   shadow below. Slightly translucent so the grain reads through
-   — that's what stops six identical rectangles from looking
-   printed on. Stays darker than `raised`, so AA holds.
+   One recipe: hard 2px border, no radius, and a solid offset
+   shadow instead of a blurred one. A blur is a lens; a pixel UI
+   is drawn, so depth comes from a shape displaced by whole
+   pixels — the same trick the era's sprites used.
    ============================================================ */
 
 .card {
   position: relative;
-  border-radius: 1.25rem;
-  border: 1px solid var(--color-line);
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 0.04), rgb(255 255 255 / 0) 45%),
-    color-mix(in srgb, var(--color-surface) 88%, transparent);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.06),
-    0 10px 26px -14px rgb(0 0 0 / 0.9);
+  border: var(--px-unit) solid var(--color-line);
+  background-color: var(--color-surface);
+  box-shadow: var(--px-unit) var(--px-unit) 0 0 rgb(0 0 0 / 0.55);
 }
 
 /* the same material, one step brighter — sheets and modals */
 .sheet-surface {
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0) 40%), var(--color-raised);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.08),
-    0 -18px 50px -12px rgb(0 0 0 / 0.85);
+  border: var(--px-unit) solid var(--color-line);
+  background-color: var(--color-raised);
+  box-shadow: 0 calc(var(--px-unit) * -2) 0 0 rgb(0 0 0 / 0.5);
 }
 
-/* pressable things get a little physical give */
+/* ============================================================
+   Pressables
+   The offset shadow is the whole affordance: at rest the control
+   floats 2px up-left of its own shadow, and pressing drops it
+   onto it. Replaces the old scale(0.97), which is a smooth
+   transform — it reads as rubbery next to hard-edged art, and
+   it resamples the glyph grid mid-animation, which makes pixel
+   text shimmer.
+   Transition is on `translate` only, and 60ms: a pixel button
+   should feel like a switch closing, not a spring.
+   ============================================================ */
+
 .press {
-  transition:
-    transform 120ms ease-out,
-    filter 120ms ease-out;
+  transition: translate 60ms steps(2, end);
 }
 .press:active {
-  transform: scale(0.97);
-  filter: brightness(1.08);
+  translate: var(--px-unit) var(--px-unit);
 }
 
-/* A pointer can hover; a thumb cannot. Everything above was built for touch,
-   where :active is the only feedback there is — which left the desktop build
-   with no way to tell a control from a label until you clicked it. Gated on
-   `hover: hover` so a touch device never gets a "stuck hover" after a tap. */
+/* Buttons that own a shadow lose it on press, so the whole thing reads as the
+   surface meeting the board. Applied via :where() so it never fights a more
+   specific shadow set in the JSX. */
+:where(.press):active {
+  box-shadow: none;
+}
+
+/* A pointer can hover; a thumb cannot. Gated on `hover: hover` so a touch
+   device never gets a stuck hover after a tap. */
 @media (hover: hover) {
   .press:hover {
-    filter: brightness(1.06);
+    filter: brightness(1.12);
   }
   .card-interactive {
     transition:
-      border-color 140ms ease-out,
-      background-color 140ms ease-out,
-      transform 140ms ease-out;
+      border-color 100ms steps(2, end),
+      box-shadow 100ms steps(2, end);
   }
   .card-interactive:hover {
-    border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-line));
-    transform: translateY(-1px);
+    border-color: var(--color-accent);
+    /* the card lifts by growing its shadow, not by moving — moving it would
+       drag the text off the pixel grid and blur it for the length of the hover */
+    box-shadow: calc(var(--px-unit) * 2) calc(var(--px-unit) * 2) 0 0 rgb(0 0 0 / 0.55);
   }
 }
 
@@ -196,56 +353,101 @@ body::after {
    Level meters
    An envelope's balance as a share of all the money, with a tick
    marking where the 70/20/10 plan says that share should be.
-   Plan-vs-actual was buried in Insights; on a meter it's readable
-   without reading — the gap between fill and tick IS the answer.
-   Inset track + bright leading edge give it depth at 10px tall.
+   Now a segmented bar: the fill is masked into discrete cells,
+   so it reads as a game resource gauge and — usefully — makes
+   small differences countable instead of merely visible.
    ============================================================ */
 
 .meter {
   position: relative;
-  height: 0.625rem;
-  border-radius: 999px;
+  height: 0.75rem;
   overflow: hidden;
-  background: rgb(0 0 0 / 0.4);
-  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.55);
+  background-color: rgb(0 0 0 / 0.45);
+  border: var(--px-unit) solid var(--color-line);
 }
 
 .meter-fill {
   height: 100%;
-  border-radius: 999px;
   position: relative;
-  transition: width 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  /* steps() rather than a smooth ease: the bar advances cell by cell */
+  transition: width 320ms steps(12, end);
 }
 
-/* bright leading edge — catches the lamp, keeps the fill from reading flat */
+/* The segmentation. A repeating hard-stop gradient punches 2px gutters into
+   the fill every 8px. It sits on the fill rather than over the whole track so
+   the empty part of the meter stays a clean dark slot. */
 .meter-fill::after {
   content: '';
   position: absolute;
-  inset: 0 0 auto auto;
-  width: 0.1875rem;
-  height: 100%;
-  border-radius: 999px;
-  background: rgb(255 255 255 / 0.55);
+  inset: 0;
+  background: repeating-linear-gradient(to right, transparent 0 6px, rgb(23 19 31 / 0.85) 6px 8px);
 }
 
 /* Plan marker — where this envelope's share says the level should sit.
    Light core + dark halo, because the tick lands on the empty track when
-   you're under plan and on top of the colored fill when you're over it.
-   A flat grey tick disappears into a mint or lavender fill exactly when
-   being over plan is the thing worth noticing. */
+   you're under plan and on top of the colored fill when you're over it. */
 .meter-plan {
   position: absolute;
-  top: -0.125rem;
-  bottom: -0.125rem;
-  width: 2px;
-  border-radius: 999px;
-  background: var(--color-ink);
-  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.6);
+  top: 0;
+  bottom: 0;
+  width: var(--px-unit);
+  background-color: var(--color-ink);
+  box-shadow: 0 0 0 var(--px-unit) rgb(0 0 0 / 0.7);
 }
 
 /* ============================================================
-   Motion — §6: 150–200 ms ease-out on sheets, none on data.
+   Pixel furniture
+   Small reusable pieces the components can opt into.
+   ============================================================ */
+
+/* A dashed rule drawn on the pixel grid instead of a 1px hairline. */
+.pixel-divider {
+  height: var(--px-unit);
+  border: 0;
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--color-line) 0 calc(var(--px-unit) * 2),
+    transparent calc(var(--px-unit) * 2) calc(var(--px-unit) * 4)
+  );
+}
+
+/* Stepped "pixel corner" frame — the notched corner you get when a rectangle
+   is drawn on a coarse grid. Used sparingly: the hero and modal headers. The
+   4px inset is baked in rather than variable because clip-path percentages
+   would scale the notch with the element and stop reading as pixels. */
+.pixel-corners {
+  clip-path: polygon(
+    0 4px,
+    4px 4px,
+    4px 0,
+    calc(100% - 4px) 0,
+    calc(100% - 4px) 4px,
+    100% 4px,
+    100% calc(100% - 4px),
+    calc(100% - 4px) calc(100% - 4px),
+    calc(100% - 4px) 100%,
+    4px 100%,
+    4px calc(100% - 4px),
+    0 calc(100% - 4px)
+  );
+}
+
+/* Terminal cursor, for the hero. Steps, not a fade — a CRT cursor is on or
+   off. `will-change` is deliberately omitted: promoting a 10px block to its
+   own layer costs more than repainting it twice a second. */
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+.blink {
+  animation: blink 1.06s steps(1, end) infinite;
+}
+
+/* ============================================================
+   Motion — §6: 150–200 ms on sheets, none on data.
    Numbers still just change. It's a ledger, not a slot machine.
+   Everything is stepped now, so transitions read as frames.
    ============================================================ */
 
 @keyframes sheet-in {
@@ -254,23 +456,21 @@ body::after {
   }
 }
 .sheet-in {
-  animation: sheet-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
+  animation: sheet-in 180ms steps(6, end);
 }
 
 /* Above md the same panel is a centred dialog, not a sheet riding up from the
-   bottom edge — so it arrives the way a dialog does. Rising 100% of its own
-   height into the middle of a laptop screen would be a long, silly journey.
-   Declared here rather than as a `md:` class so the reduced-motion block below
-   still switches both off with one rule. */
+   bottom edge. Declared here rather than as a `md:` class so the reduced-motion
+   block below still switches both off with one rule. */
 @keyframes dialog-in {
   from {
     opacity: 0;
-    transform: translateY(0.5rem) scale(0.985);
+    transform: translateY(0.5rem);
   }
 }
 @media (min-width: 48rem) {
   .sheet-in {
-    animation: dialog-in 160ms ease-out;
+    animation: dialog-in 140ms steps(4, end);
   }
 }
 
@@ -280,36 +480,38 @@ body::after {
   }
 }
 .scrim-in {
-  animation: scrim-in 200ms ease-out;
+  animation: scrim-in 180ms steps(4, end);
 }
 
-/* the lamp breathes, very slowly, only where it won't distract */
-@keyframes glow-drift {
-  50% {
-    opacity: 0.72;
-  }
-}
+/* Held as a no-op rather than deleted. The class is still applied by four
+   components to blurred radial blobs, which are the least pixel-native shape
+   in the app and are being removed screen by screen; neutralizing the drift
+   here stops them breathing in the meantime without breaking those files. */
 .glow-drift {
-  animation: glow-drift 14s ease-in-out infinite;
+  animation: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .sheet-in,
   .scrim-in,
-  .glow-drift {
+  .blink {
     animation: none;
   }
   .meter-fill {
     transition: none;
   }
+  .press {
+    transition: none;
+  }
   .press:active {
-    transform: none;
+    translate: none;
   }
 }
 
-/* focus that matches the lamp rather than the browser default */
+/* Focus as a hard pixel ring. Square, 2px, offset by a whole pixel unit so it
+   never sits half-on a border. */
 :where(a, button, input, select, textarea):focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-  border-radius: 0.75rem;
+  outline: var(--px-unit) solid var(--color-accent);
+  outline-offset: var(--px-unit);
+  border-radius: 0;
 }
