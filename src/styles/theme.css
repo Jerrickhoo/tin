@@ -172,6 +172,26 @@ body::after {
   filter: brightness(1.08);
 }
 
+/* A pointer can hover; a thumb cannot. Everything above was built for touch,
+   where :active is the only feedback there is — which left the desktop build
+   with no way to tell a control from a label until you clicked it. Gated on
+   `hover: hover` so a touch device never gets a "stuck hover" after a tap. */
+@media (hover: hover) {
+  .press:hover {
+    filter: brightness(1.06);
+  }
+  .card-interactive {
+    transition:
+      border-color 140ms ease-out,
+      background-color 140ms ease-out,
+      transform 140ms ease-out;
+  }
+  .card-interactive:hover {
+    border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-line));
+    transform: translateY(-1px);
+  }
+}
+
 /* ============================================================
    Level meters
    An envelope's balance as a share of all the money, with a tick
@@ -235,6 +255,23 @@ body::after {
 }
 .sheet-in {
   animation: sheet-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Above md the same panel is a centred dialog, not a sheet riding up from the
+   bottom edge — so it arrives the way a dialog does. Rising 100% of its own
+   height into the middle of a laptop screen would be a long, silly journey.
+   Declared here rather than as a `md:` class so the reduced-motion block below
+   still switches both off with one rule. */
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem) scale(0.985);
+  }
+}
+@media (min-width: 48rem) {
+  .sheet-in {
+    animation: dialog-in 160ms ease-out;
+  }
 }
 
 @keyframes scrim-in {

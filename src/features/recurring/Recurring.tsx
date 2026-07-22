@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import { useLedger, useToast } from '../../app-context'
 import { BottomSheet } from '../../components/BottomSheet'
 import { fetchCategories, fetchEnvelopes, type Category, type Envelope } from '../../db/entries'
+import { isOffline } from '../../db/sync'
 import {
   createTemplate,
   deleteTemplate,
@@ -24,6 +25,10 @@ export function Recurring() {
   const [envelopes, setEnvelopes] = useState<Envelope[]>([])
   const [editing, setEditing] = useState<RecurringTemplate | 'new' | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  // Templates live on the server, not in the mirror, so this is the one screen
+  // that genuinely can't work offline. It used to sit on "Loading templates…"
+  // forever behind a toast that expired after four seconds.
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -38,14 +43,23 @@ export function Recurring() {
         setTemplates(tpls)
         setCategories(cats)
         setEnvelopes(envs)
+        setLoadError(null)
       } catch (err) {
-        if (active) toast.show(err instanceof Error ? err.message : String(err), 'error')
+        if (!active) return
+        setLoadError(
+          isOffline()
+            ? "You're offline — recurring templates live on the server, so this screen needs a connection. Nothing already scheduled is affected."
+            : err instanceof Error
+              ? err.message
+              : String(err),
+        )
       }
     })()
     return () => {
       active = false
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // no disable needed here any more: the failure path sets local state
+    // instead of calling the toast context, so `version` really is the only dep
   }, [version])
 
   const categoriesById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
@@ -61,7 +75,7 @@ export function Recurring() {
   }
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-6 py-8">
+    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-6 py-8 md:max-w-2xl md:px-8 md:py-10">
       <div className="flex items-center justify-between">
         <h1 className="font-display text-[1.75rem] font-bold tracking-tight">Recurring</h1>
         <button
@@ -77,7 +91,19 @@ export function Recurring() {
         date, with an undo toast. No server, no cron, no missed rent.
       </p>
 
-      {!templates && <p className="text-ink-mute">Loading templates…</p>}
+      {loadError && (
+        <div className="card border-neg/40 p-4">
+          <p className="text-sm text-ink-soft">{loadError}</p>
+          <button
+            type="button"
+            onClick={bump}
+            className="mt-3 rounded-xl border border-line px-3 py-2 text-sm font-medium text-accent"
+          >
+            Try again
+          </button>
+        </div>
+      )}
+      {!templates && !loadError && <p className="text-ink-mute">Loading templates…</p>}
       {templates && templates.length === 0 && (
         <p className="text-ink-soft">
           None yet. Rent, allowance, subscriptions — anything that happens every month on the same

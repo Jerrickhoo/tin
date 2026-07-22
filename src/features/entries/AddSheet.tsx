@@ -83,7 +83,15 @@ export function AddSheet({
 
   const centavos = useMemo(() => parseAmountToCentavos(amount), [amount])
   const amountOk = centavos !== null && centavos > 0
-  const occurredAt = useMemo(() => new Date(when).toISOString(), [when])
+  // A datetime-local input can be cleared or left half-typed, and this runs
+  // during render — `new Date('').toISOString()` throws, which used to take the
+  // whole sheet down to the error boundary mid-entry. Invalid reads as null and
+  // simply blocks the save.
+  const occurredAt = useMemo(() => {
+    const at = new Date(when)
+    return Number.isNaN(at.getTime()) ? null : at.toISOString()
+  }, [when])
+  const whenOk = occurredAt !== null
 
   const splitParts = useMemo(() => {
     if (!amountOk || envelopes.length === 0) return null
@@ -116,7 +124,7 @@ export function AddSheet({
 
   // 2-tap path (ROADMAP 3.2): open sheet, type amount, tap a category — saved.
   function onCategoryTap(category: Category) {
-    if (!amountOk || busy) return
+    if (!amountOk || occurredAt === null || busy) return
     const env = envById.get(category.envelope_id)
     void run(
       () => addExpense({ amountCentavos: centavos, category, note, occurredAt }),
@@ -125,7 +133,7 @@ export function AddSheet({
   }
 
   function onSaveIncome() {
-    if (!amountOk || busy) return
+    if (!amountOk || occurredAt === null || busy) return
     void run(
       () => addIncome({ totalCentavos: centavos, envelopes, note, occurredAt }),
       `+${formatPHP(centavos)} split across envelopes`,
@@ -133,7 +141,7 @@ export function AddSheet({
   }
 
   function onSaveTransfer() {
-    if (!amountOk || busy || !fromId || !toId) return
+    if (!amountOk || occurredAt === null || busy || !fromId || !toId) return
     void run(
       () =>
         addTransfer({
@@ -199,6 +207,13 @@ export function AddSheet({
       {amount.trim() !== '' && !amountOk && (
         <p className="mt-2 text-center text-sm text-neg">Up to two decimals, more than zero.</p>
       )}
+      {/* The date lives behind "Note & date", so a blank one has to explain
+          itself out here or the save button just looks broken. */}
+      {!whenOk && (
+        <p className="mt-2 text-center text-sm text-neg">
+          Set a date under “Note &amp; date” — it can’t be blank.
+        </p>
+      )}
 
       {mode === 'expense' && (
         <div className="mt-5">
@@ -213,7 +228,7 @@ export function AddSheet({
                 <button
                   key={cat.id}
                   type="button"
-                  disabled={!amountOk || busy}
+                  disabled={!amountOk || !whenOk || busy}
                   onClick={() => onCategoryTap(cat)}
                   className="press flex min-h-11 items-center gap-1.5 rounded-xl border px-3 py-2 text-sm transition-opacity disabled:opacity-35"
                   style={{
@@ -259,7 +274,7 @@ export function AddSheet({
             )
           })}
           <PrimaryButton
-            disabled={!amountOk || busy}
+            disabled={!amountOk || !whenOk || busy}
             onClick={onSaveIncome}
             label={busy ? 'Saving…' : amountOk ? `Add ${formatPHP(centavos)} income` : 'Add income'}
           />
@@ -283,7 +298,7 @@ export function AddSheet({
             onChange={setToId}
           />
           <PrimaryButton
-            disabled={!amountOk || busy || !fromId || !toId}
+            disabled={!amountOk || !whenOk || busy || !fromId || !toId}
             onClick={onSaveTransfer}
             label={busy ? 'Moving…' : 'Move money'}
           />
@@ -314,9 +329,12 @@ export function AddSheet({
               type="datetime-local"
               value={when}
               onChange={(e) => setWhen(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-line bg-base/60 px-3 py-2.5 text-sm text-ink outline-none focus:border-accent"
+              className={`mt-1 w-full rounded-xl border bg-base/60 px-3 py-2.5 text-sm text-ink outline-none focus:border-accent ${
+                whenOk ? 'border-line' : 'border-neg'
+              }`}
             />
           </label>
+          {!whenOk && <p className="text-sm text-neg">Pick a date and time.</p>}
         </div>
       )}
     </BottomSheet>

@@ -7,6 +7,7 @@
 // This module never imports Supabase; sync.ts owns the network.
 
 import { splitByLargestRemainder } from '../lib/split'
+import { assertSplittable } from '../lib/shares'
 import { balancesFromEntries } from '../lib/balances'
 import type { EntryRow } from '../lib/groups'
 import { applyLocalInsert, applyLocalVoidGroup, localDb } from './dexie'
@@ -80,9 +81,34 @@ export async function fetchBalances(): Promise<Map<string, number>> {
   return balancesFromEntries(envelopes as string[], entries)
 }
 
+/**
+ * The most recent entries, as WHOLE groups, newest first.
+ *
+ * `limit` counts rows, not groups, so the window can land inside one. A 3-leg
+ * income straddling that boundary used to render in History as a partial total
+ * — and "Fix" would then prefill the understated amount into its replacement,
+ * turning a display glitch into a wrong ledger entry. So the window only picks
+ * which groups are recent enough; every leg of those groups is then re-read via
+ * the group_id index.
+ */
 export async function fetchEntries(limit = 400): Promise<EntryRow[]> {
   const db = await localDb()
-  return db.entries.orderBy('[occurred_at+id]').reverse().limit(limit).toArray()
+  const window = await db.entries.orderBy('[occurred_at+id]').reverse().limit(limit).toArray()
+  if (window.length === 0) return []
+  const groupIds = [...new Set(window.map((r) => r.group_id))]
+  const complete = await db.entries.where('group_id').anyOf(groupIds).toArray()
+  // groupEntries requires occurred_at desc; mirror the compound index's order
+  return complete.sort((a, b) =>
+    a.occurred_at === b.occurred_at
+      ? a.id < b.id
+        ? 1
+        : a.id > b.id
+          ? -1
+          : 0
+      : a.occurred_at < b.occurred_at
+        ? 1
+        : -1,
+  )
 }
 
 /** Entries in [startIso, endIso), non-voided — the Insights month window. */
@@ -165,6 +191,7 @@ export async function addIncome(params: {
   if (!Number.isSafeInteger(params.totalCentavos) || params.totalCentavos <= 0) {
     throw new RangeError('income must be positive centavos')
   }
+  assertSplittable(params.envelopes.map((e) => e.share_bp))
   const parts = splitByLargestRemainder(
     params.totalCentavos,
     params.envelopes.map((e) => e.share_bp),

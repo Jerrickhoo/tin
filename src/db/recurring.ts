@@ -7,6 +7,7 @@ import { supabase } from './supabase'
 import { fetchCategories, fetchEnvelopes, insertPostedRows } from './entries'
 import { isOffline } from './sync'
 import { manilaDayKey } from '../lib/dates'
+import { assertSplittable } from '../lib/shares'
 import { splitByLargestRemainder } from '../lib/split'
 import { dueDateOccurredAt, dueDatesUpTo, firstRunOnOrAfter, nextRunAfter } from '../lib/recurring'
 import { TIN_RECURRING_NAMESPACE, uuidv5 } from '../lib/uuidv5'
@@ -67,6 +68,14 @@ export async function updateTemplate(
     previousDayOfMonth: number
   },
 ): Promise<void> {
+  // same guards createTemplate applies — the DB checks these too, but a raw
+  // Postgres constraint message is not something to show someone mid-edit
+  if (!Number.isSafeInteger(params.amountCentavos) || params.amountCentavos <= 0) {
+    throw new RangeError('template amount must be positive centavos')
+  }
+  if (!Number.isInteger(params.dayOfMonth) || params.dayOfMonth < 1 || params.dayOfMonth > 31) {
+    throw new RangeError('day of month must be between 1 and 31')
+  }
   const patch: Record<string, unknown> = {
     amount_centavos: params.amountCentavos,
     category_id: params.categoryId,
@@ -147,17 +156,26 @@ export async function runCatchUp(): Promise<CatchUpResult> {
     const dueDates = dueDatesUpTo(template, today)
     if (dueDates.length === 0) continue
 
+    const label = template.note ?? (template.kind === 'income' ? 'Recurring income' : 'Recurring')
+    // How far next_run_on is allowed to move. A due date that could NOT be
+    // posted must never be consumed: the cursor stops at the last one that
+    // actually landed, so a template whose category vanished retries on every
+    // open instead of silently losing those months. One failure ends this
+    // template's run (hence `break`, not `continue`) — that also keeps the
+    // warning to one line per template rather than one per missed month.
+    let lastPosted: string | null = null
+    let blocked: string | null = null
+
     for (const due of dueDates) {
       const groupId = await uuidv5(TIN_RECURRING_NAMESPACE, `${template.id}:${due}:group`)
       const occurredAt = dueDateOccurredAt(due)
-      const label = template.note ?? (template.kind === 'income' ? 'Recurring income' : 'Recurring')
 
       let rows: PostingRow[]
       if (template.kind === 'expense') {
         const category = template.category_id ? categoriesById.get(template.category_id) : undefined
         if (!category) {
-          result.warnings.push(`"${label}" skipped — its category is gone; edit the template`)
-          continue
+          blocked = `"${label}" is stuck — its category is gone. Edit the template and it'll post the months it missed.`
+          break
         }
         rows = [
           {
@@ -174,6 +192,14 @@ export async function runCatchUp(): Promise<CatchUpResult> {
       } else {
         // income posts the full split at CURRENT shares — never one envelope.
         // Leg index follows sort_order, identical on every device.
+        try {
+          assertSplittable(envelopes.map((e) => e.share_bp))
+        } catch (err) {
+          // one broken split used to throw straight out of runCatchUp and take
+          // every other template — including healthy expense ones — with it
+          blocked = `"${label}" is stuck — ${err instanceof Error ? err.message : String(err)}`
+          break
+        }
         const parts = splitByLargestRemainder(
           template.amount_centavos,
           envelopes.map((e) => e.share_bp),
@@ -196,17 +222,31 @@ export async function runCatchUp(): Promise<CatchUpResult> {
 
       // local-first like every other write (mirror + outbox, ROADMAP 6.3);
       // deterministic ids collapse in the mirror AND in the eventual push
-      await insertPostedRows(rows)
+      try {
+        await insertPostedRows(rows)
+      } catch (err) {
+        blocked = `"${label}" couldn't be posted — ${err instanceof Error ? err.message : String(err)}`
+        break
+      }
+      lastPosted = due
       result.postedCount += 1
       result.postedGroupIds.push(groupId)
       result.descriptions.push(`${label} · ${due}`)
     }
 
+    if (blocked !== null) result.warnings.push(blocked)
+    // nothing landed → leave the cursor exactly where it was
+    if (lastPosted === null) continue
+
     const { error } = await supabase
       .from('recurring_templates')
-      .update({ next_run_on: nextRunAfter(dueDates[dueDates.length - 1], template.day_of_month) })
+      .update({ next_run_on: nextRunAfter(lastPosted, template.day_of_month) })
       .eq('id', template.id)
-    if (error) throw error
+    // a failed cursor write is harmless: the postings are already local-first
+    // and their ids are deterministic, so the next open re-posts into a no-op.
+    // Blocking the remaining templates over it would not be.
+    if (error)
+      result.warnings.push(`"${label}" posted, but its next date didn't save — ${error.message}`)
   }
 
   return result

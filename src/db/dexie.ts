@@ -203,6 +203,34 @@ export async function outboxCount(): Promise<number> {
   return db.outbox.count()
 }
 
+/** Enough failed pushes that it's the op, not the network. */
+export const STUCK_ATTEMPTS = 3
+
+/**
+ * The head-of-queue op when it has failed repeatedly — i.e. a write the server
+ * keeps rejecting rather than one waiting out a dead spot.
+ *
+ * Order is sacred in the outbox, so one permanently-rejected op blocks every
+ * write behind it forever. Without a way to see and discard it the only exit
+ * was logging out, which throws away the whole queue. This is the read half.
+ */
+export async function stuckOutboxRow(): Promise<OutboxRow | undefined> {
+  const row = await firstOutboxRow()
+  return row && row.attempts >= STUCK_ATTEMPTS ? row : undefined
+}
+
+/** Discard one op. Deliberately narrow: only the head, only by explicit seq,
+ *  because everything here is money the server has not accepted. */
+export async function discardOutboxRow(seq: number): Promise<void> {
+  const db = await localDb()
+  const head = await db.outbox.orderBy('seq').first()
+  if (!head || head.seq !== seq) {
+    throw new Error('That write is no longer at the front of the queue — nothing was discarded.')
+  }
+  await db.outbox.delete(seq)
+  notifyOutboxChanged('drain')
+}
+
 // ---- pull application: the server's word overwrites the mirror ----
 
 /** PostgREST emits `+00:00`; the client writes `Z`. One canonical form in the
@@ -222,20 +250,36 @@ export async function mirrorApplyPulledEntries(rows: readonly EntryRow[]): Promi
   )
 }
 
-export async function mirrorReplaceEnvelopes(rows: readonly EnvelopeRow[]): Promise<void> {
-  const db = await localDb()
-  await db.transaction('rw', db.envelopes, async () => {
-    await db.envelopes.clear()
-    await db.envelopes.bulkAdd(rows as EnvelopeRow[])
-  })
+/**
+ * Replace-in-place, with one refusal: an EMPTY pull never clears a populated
+ * table.
+ *
+ * These are clear-then-refill because the server is the truth, but "the server
+ * returned nothing" is far more often a transient (a dropped request, an auth
+ * blip, a pull that raced seeding) than a genuine "you own no envelopes". The
+ * old behaviour emptied the mirror on any such blip and Home rendered zero
+ * cards. A real deletion is impossible anyway — there is no DELETE policy on
+ * either table, "delete" is archived_at, and archived rows still come back in
+ * the pull.
+ */
+async function replaceAll<T extends { id: string }>(
+  table: EntityTable<T, 'id'>,
+  rows: readonly T[],
+): Promise<boolean> {
+  if (rows.length === 0 && (await table.count()) > 0) return false
+  await table.clear()
+  await table.bulkAdd(rows as T[])
+  return true
 }
 
-export async function mirrorReplaceCategories(rows: readonly CategoryRow[]): Promise<void> {
+export async function mirrorReplaceEnvelopes(rows: readonly EnvelopeRow[]): Promise<boolean> {
   const db = await localDb()
-  await db.transaction('rw', db.categories, async () => {
-    await db.categories.clear()
-    await db.categories.bulkAdd(rows as CategoryRow[])
-  })
+  return db.transaction('rw', db.envelopes, () => replaceAll(db.envelopes, rows))
+}
+
+export async function mirrorReplaceCategories(rows: readonly CategoryRow[]): Promise<boolean> {
+  const db = await localDb()
+  return db.transaction('rw', db.categories, () => replaceAll(db.categories, rows))
 }
 
 // ---- delta-pull cursor (ROADMAP 6.4) ----

@@ -71,7 +71,7 @@ export function Insights() {
   const maxTopLine = Math.max(summary.incomeCentavos, summary.spendingCentavos)
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-5 py-7">
+    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-5 py-7 md:max-w-4xl md:px-8 md:py-10">
       <div className="flex items-center justify-between gap-2">
         <h1 className="font-display text-[1.75rem] font-bold tracking-tight">Insights</h1>
         <div className="flex items-center gap-0.5 rounded-full border border-line/70 bg-surface/60 p-0.5">
@@ -154,103 +154,107 @@ export function Insights() {
             </div>
           </section>
 
-          <Panel title="Spending mix vs the plan" hint="bar = actual share · tick = plan">
-            <div className="flex flex-col gap-3.5">
-              {adherence.map((row) => {
-                const env = envelopes.find((e) => e.id === row.envelopeId)
-                if (!env) return null
-                const color = env.color ?? '#AFA7C2'
-                return (
-                  <div key={row.envelopeId}>
-                    <div className="mb-1.5 flex items-baseline justify-between gap-2 text-sm">
-                      <span className="flex min-w-0 items-center gap-2">
-                        <Dot color={color} />
-                        <span className="truncate">{env.name}</span>
-                      </span>
-                      {/* Values wear ink, not the series color — the dot
-                          carries identity (dataviz: text tokens for text). */}
-                      <span className="shrink-0 tabular-nums text-ink-soft">
-                        {row.actualBp === null ? '—' : `${(row.actualBp / 100).toFixed(0)}%`}
-                        <span className="text-ink-mute"> of {row.planBp / 100}%</span>
-                      </span>
-                    </div>
-                    <div className="meter">
-                      <div
-                        className="meter-fill"
-                        style={{
-                          width: `${Math.min((row.actualBp ?? 0) / 100, 100)}%`,
-                          background: `linear-gradient(90deg, ${color}99, ${color})`,
-                        }}
-                      />
-                      <span className="meter-plan" style={{ left: `${row.planBp / 100}%` }} />
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </Panel>
-
-          <Panel title="Envelope flows" hint="transfers count here">
-            <div className="flex flex-col gap-2.5">
-              {envelopes.map((env) => {
-                const flow = summary.perEnvelope.get(env.id)
-                if (!flow) return null
-                return (
-                  <div key={env.id} className="flex items-center justify-between gap-2 text-sm">
-                    <span className="flex min-w-0 items-center gap-2">
-                      <Dot color={env.color ?? '#AFA7C2'} />
-                      <span className="truncate">{env.name}</span>
-                    </span>
-                    <span className="shrink-0 tabular-nums">
-                      <span className="text-pos">+{formatPHP(flow.inflowCentavos)}</span>
-                      <span className="mx-1 text-ink-mute">/</span>
-                      <span className="text-neg">−{formatPHP(flow.outflowCentavos)}</span>
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          </Panel>
-
-          {categoryRows.length > 0 && (
-            <Panel title="Where it went" hint="ranked by spend">
-              <div className="flex flex-col gap-3">
-                {categoryRows.map(([categoryId, spent]) => {
-                  const category = categoriesById.get(categoryId)
+          {/* One column on a phone. On a desktop the three panels tile, so a
+              month reads as a single view instead of a scroll. */}
+          <div className="grid gap-4 md:grid-cols-2">
+            <Panel title="Spending mix vs the plan" hint="bar = actual share · tick = plan">
+              <div className="flex flex-col gap-3.5">
+                {adherence.map((row) => {
+                  const env = envelopes.find((e) => e.id === row.envelopeId)
+                  if (!env) return null
+                  const color = env.color ?? '#AFA7C2'
                   return (
-                    <div key={categoryId}>
+                    <div key={row.envelopeId}>
                       <div className="mb-1.5 flex items-baseline justify-between gap-2 text-sm">
-                        <span className="min-w-0 truncate">
-                          {category ? (
-                            <>
-                              <span aria-hidden>{category.emoji} </span>
-                              {category.name}
-                            </>
-                          ) : (
-                            'Unknown'
-                          )}
+                        <span className="flex min-w-0 items-center gap-2">
+                          <Dot color={color} />
+                          <span className="truncate">{env.name}</span>
                         </span>
+                        {/* Values wear ink, not the series color — the dot
+                          carries identity (dataviz: text tokens for text). */}
                         <span className="shrink-0 tabular-nums text-ink-soft">
-                          {formatPHP(spent)}
+                          {row.actualBp === null ? '—' : `${(row.actualBp / 100).toFixed(0)}%`}
+                          <span className="text-ink-mute"> of {row.planBp / 100}%</span>
                         </span>
                       </div>
-                      {/* One series, one hue — magnitude only, so no legend. */}
                       <div className="meter">
                         <div
                           className="meter-fill"
                           style={{
-                            width: `${(spent / maxCategory) * 100}%`,
-                            background:
-                              'linear-gradient(90deg, color-mix(in srgb, var(--color-accent) 55%, transparent), var(--color-accent))',
+                            width: `${Math.min((row.actualBp ?? 0) / 100, 100)}%`,
+                            background: `linear-gradient(90deg, ${color}99, ${color})`,
                           }}
                         />
+                        <span className="meter-plan" style={{ left: `${row.planBp / 100}%` }} />
                       </div>
                     </div>
                   )
                 })}
               </div>
             </Panel>
-          )}
+
+            <Panel title="Envelope flows" hint="transfers count here">
+              <div className="flex flex-col gap-2.5">
+                {envelopes.map((env) => {
+                  const flow = summary.perEnvelope.get(env.id)
+                  if (!flow) return null
+                  return (
+                    <div key={env.id} className="flex items-center justify-between gap-2 text-sm">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <Dot color={env.color ?? '#AFA7C2'} />
+                        <span className="truncate">{env.name}</span>
+                      </span>
+                      <span className="shrink-0 tabular-nums">
+                        <span className="text-pos">+{formatPHP(flow.inflowCentavos)}</span>
+                        <span className="mx-1 text-ink-mute">/</span>
+                        <span className="text-neg">−{formatPHP(flow.outflowCentavos)}</span>
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </Panel>
+
+            {categoryRows.length > 0 && (
+              <Panel title="Where it went" hint="ranked by spend" className="md:col-span-2">
+                <div className="flex flex-col gap-3">
+                  {categoryRows.map(([categoryId, spent]) => {
+                    const category = categoriesById.get(categoryId)
+                    return (
+                      <div key={categoryId}>
+                        <div className="mb-1.5 flex items-baseline justify-between gap-2 text-sm">
+                          <span className="min-w-0 truncate">
+                            {category ? (
+                              <>
+                                <span aria-hidden>{category.emoji} </span>
+                                {category.name}
+                              </>
+                            ) : (
+                              'Unknown'
+                            )}
+                          </span>
+                          <span className="shrink-0 tabular-nums text-ink-soft">
+                            {formatPHP(spent)}
+                          </span>
+                        </div>
+                        {/* One series, one hue — magnitude only, so no legend. */}
+                        <div className="meter">
+                          <div
+                            className="meter-fill"
+                            style={{
+                              width: `${(spent / maxCategory) * 100}%`,
+                              background:
+                                'linear-gradient(90deg, color-mix(in srgb, var(--color-accent) 55%, transparent), var(--color-accent))',
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </Panel>
+            )}
+          </div>
         </>
       )}
     </main>
@@ -267,9 +271,19 @@ function Dot({ color }: { color: string }) {
   )
 }
 
-function Panel({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
+function Panel({
+  title,
+  hint,
+  children,
+  className = '',
+}: {
+  title: string
+  hint?: string
+  children: ReactNode
+  className?: string
+}) {
   return (
-    <section className="card px-4 py-4">
+    <section className={`card px-4 py-4 ${className}`}>
       <div className="mb-3.5 flex items-baseline justify-between gap-2">
         <h2 className="font-display font-bold">{title}</h2>
         {hint && <span className="shrink-0 text-[0.6875rem] text-ink-mute">{hint}</span>}

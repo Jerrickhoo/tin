@@ -41,6 +41,11 @@ export function Home() {
   const [cards, setCards] = useState<Card[] | null>(null)
   const [empty, setEmpty] = useState(false)
   const [openingOpen, setOpeningOpen] = useState(false)
+  // Balances cover every envelope; cards cover only the un-archived ones. The
+  // difference is real money on the real ledger, so it belongs in the total
+  // even though it has no card to sit on — otherwise archiving an envelope
+  // makes its balance quietly disappear from the one number you check daily.
+  const [offCardCentavos, setOffCardCentavos] = useState(0)
 
   useEffect(() => {
     let active = true
@@ -53,6 +58,10 @@ export function Home() {
         ])
         if (!active) return
         setCards(envs.map((env) => ({ ...env, balanceCentavos: balances.get(env.id) ?? 0 })))
+        const onCard = new Set(envs.map((e) => e.id))
+        let off = 0
+        for (const [id, balance] of balances) if (!onCard.has(id)) off += balance
+        setOffCardCentavos(off)
         setEmpty(!anyEntries)
       } catch (err) {
         if (active) toast.show(err instanceof Error ? err.message : String(err), 'error')
@@ -65,14 +74,14 @@ export function Home() {
   }, [version])
 
   const now = new Date()
-  const total = (cards ?? []).reduce((sum, c) => sum + c.balanceCentavos, 0)
+  const total = (cards ?? []).reduce((sum, c) => sum + c.balanceCentavos, 0) + offCardCentavos
   // Denominator for "share of your money": only envelopes actually holding
   // money. Summing signed balances would let one overdrawn envelope push the
   // others past 100% — the meters would lie.
   const funded = (cards ?? []).reduce((sum, c) => sum + Math.max(0, c.balanceCentavos), 0)
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-5 py-7">
+    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-5 py-7 md:max-w-4xl md:gap-5 md:px-8 md:py-10">
       <header className="flex items-baseline justify-between">
         <p className="text-sm text-ink-mute">{manilaDate.format(now)}</p>
         <p className="text-sm text-ink-mute">{greeting(manilaHour(now))}</p>
@@ -80,15 +89,15 @@ export function Home() {
 
       {/* The hero: one number, big enough to read at arm's length, sitting in
           the brightest part of the lamp. This is the 10×/day glance. */}
-      <section className="card overflow-hidden px-5 py-6">
+      <section className="card overflow-hidden px-5 py-6 md:px-8 md:py-9">
         <span
           aria-hidden
-          className="glow-drift pointer-events-none absolute -top-24 -left-10 size-56 rounded-full bg-accent/20 blur-3xl"
+          className="glow-drift pointer-events-none absolute -top-24 -left-10 size-56 rounded-full bg-accent/20 blur-3xl md:size-80"
         />
         <div className="relative">
           <p className="text-sm text-ink-soft">In the tin</p>
           <p
-            className={`mt-1 font-display text-[2.5rem] leading-none font-bold tracking-tight tabular-nums ${
+            className={`mt-1 font-display text-[2.5rem] leading-none font-bold tracking-tight tabular-nums md:text-[3.5rem] ${
               total < 0 ? 'text-neg' : 'text-ink'
             }`}
           >
@@ -97,6 +106,11 @@ export function Home() {
           <p className="mt-2 text-xs text-ink-mute">
             {cards ? `across ${cards.length} envelopes` : 'opening the tin…'}
           </p>
+          {cards && offCardCentavos !== 0 && (
+            <p className="mt-1 text-xs text-ink-mute">
+              includes {formatPHP(offCardCentavos)} in archived envelopes
+            </p>
+          )}
         </div>
       </section>
 
@@ -104,7 +118,7 @@ export function Home() {
         <button
           type="button"
           onClick={() => setOpeningOpen(true)}
-          className="press card border-accent/40 px-4 py-3.5 text-left"
+          className="press card card-interactive border-accent/40 px-4 py-3.5 text-left"
         >
           <p className="font-display font-bold text-accent">Start from the truth →</p>
           <p className="mt-0.5 text-sm text-ink-soft">
@@ -113,8 +127,11 @@ export function Home() {
         </button>
       )}
 
+      {/* Stacked on a phone; side by side on a desktop, where three envelopes
+          in a 384px column is a lot of scrolling past a lot of empty room —
+          and where seeing all three meters at once is the whole point. */}
       {cards && (
-        <section className="flex flex-col gap-3">
+        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {cards.map((card) => (
             <EnvelopeCard
               key={card.id}
@@ -132,11 +149,11 @@ export function Home() {
         </section>
       )}
 
-      <OpeningBalancesSheet
-        open={openingOpen}
-        envelopes={cards ?? []}
-        onClose={() => setOpeningOpen(false)}
-      />
+      {/* mounted only while open, so each visit starts with empty inputs
+          instead of whatever was typed and abandoned last time */}
+      {openingOpen && (
+        <OpeningBalancesSheet open envelopes={cards ?? []} onClose={() => setOpeningOpen(false)} />
+      )}
     </main>
   )
 }

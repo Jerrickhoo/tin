@@ -10,11 +10,14 @@ export interface NameMaps {
 
 /**
  * Spreadsheet formula-injection guard: a text cell starting with = + - or @
- * gets a leading apostrophe so Excel/Sheets render it inert. Applied to text
- * cells only — numeric cells are emitted as numbers and can't be formulas.
+ * gets a leading apostrophe so Excel/Sheets render it inert. Leading whitespace
+ * is skipped before deciding, because Excel strips it and then reads what sits
+ * underneath — which made a tab-prefixed formula walk straight past the old
+ * anchored check. Applied to text cells only; numeric cells are emitted as
+ * numbers and can't be formulas.
  */
 export function guardCell(value: string): string {
-  return /^[=+\-@]/.test(value) ? `'${value}` : value
+  return /^\s*[=+\-@]/.test(value) ? `'${value}` : value
 }
 
 function csvEscape(value: string): string {

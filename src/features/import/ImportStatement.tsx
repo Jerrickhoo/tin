@@ -84,7 +84,10 @@ export function ImportStatement() {
       toast.show('Nothing to read — paste some rows first', 'error')
       return
     }
-    setRoles(guessRoles(table.header, table.rows[0].length))
+    // widest row, not the first: a ragged paste (a trailing column that only
+    // some rows carry) would otherwise leave later columns unmappable
+    const columnCount = Math.max(table.header?.length ?? 0, ...table.rows.map((r) => r.length))
+    setRoles(guessRoles(table.header, columnCount))
     setStep('map')
   }
 
@@ -141,7 +144,7 @@ export function ImportStatement() {
   const counts = drafts ? countDrafts(drafts) : null
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col gap-4 px-6 py-8">
+    <main className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col gap-4 px-6 py-8 md:px-8 md:py-10 lg:max-w-3xl">
       <div className="flex items-baseline justify-between gap-3">
         <h1 className="font-display text-[1.75rem] font-bold tracking-tight">Import</h1>
         <span className="text-sm text-ink-mute">
@@ -300,7 +303,17 @@ function MapStep({
   onBack: () => void
   onNext: () => void
 }) {
-  const sample = table.rows[0] ?? []
+  // One entry per mapped column, previewing the first row that actually has a
+  // value there. Keyed off `roles` rather than row 0 so a ragged paste can't
+  // hide its later columns behind a short first row.
+  const sample = useMemo(
+    () =>
+      Array.from(
+        { length: roles.length },
+        (_, i) => table.rows.find((r) => (r[i] ?? '').trim() !== '')?.[i] ?? '',
+      ),
+    [roles.length, table.rows],
+  )
   const hasDate = roles.includes('date')
   const hasAmount = roles.includes('amount')
   const preview = useMemo(

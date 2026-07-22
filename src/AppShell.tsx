@@ -13,7 +13,15 @@ import { ensureSeeded } from './db/seed'
 import { runCatchUp } from './db/recurring'
 import { voidGroup } from './db/entries'
 import { openForUser } from './db/dexie'
-import { getSyncSnapshot, isOffline, kickSync, startSync, subscribeSync, syncNow } from './db/sync'
+import {
+  getSyncSnapshot,
+  isOffline,
+  kickSync,
+  startSync,
+  stopSync,
+  subscribeSync,
+  syncNow,
+} from './db/sync'
 import { useSession } from './features/auth/useSession'
 
 // PWA shortcut deep link (ROADMAP 6.7): long-press the icon → /?add=expense.
@@ -33,14 +41,31 @@ export function AppShell() {
 
   const [toasts, setToasts] = useState<Toast[]>([])
   const nextToastId = useRef(1)
+  const toastTimers = useRef(new Set<ReturnType<typeof setTimeout>>())
   const show = useCallback(
     (message: string, kind: Toast['kind'] = 'ok', action?: Toast['action']) => {
       const id = nextToastId.current++
       setToasts((t) => [...t, { id, message, kind, action }])
-      setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), action ? 8000 : 4000)
+      const timer = setTimeout(
+        () => {
+          toastTimers.current.delete(timer)
+          setToasts((t) => t.filter((x) => x.id !== id))
+        },
+        action ? 8000 : 4000,
+      )
+      toastTimers.current.add(timer)
     },
     [],
   )
+  // dismissal timers outlive the shell otherwise, and fire setState into a
+  // component that is no longer there
+  useEffect(() => {
+    const timers = toastTimers.current
+    return () => {
+      for (const timer of timers) clearTimeout(timer)
+      timers.clear()
+    }
+  }, [])
   const toast = useMemo(() => ({ show }), [show])
 
   // Once per session, wherever the user lands: adopt the local mirror, start
@@ -105,12 +130,38 @@ export function AppShell() {
     if (launchShortcut) window.history.replaceState(null, '', window.location.pathname)
   }, [])
 
+  // Unmount-only: the boot effect above re-runs on every session object change
+  // (token refresh included), so its own cleanup would tear the sync loop down
+  // during normal operation. Logout goes through wipeLocalCaches, which stops
+  // sync itself — this covers the shell simply going away.
+  useEffect(() => stopSync, [])
+
+  // Keyboard path to the app's one core action. A laptop user shouldn't have to
+  // travel to a button for the thing they do ten times a day — but the sheet is
+  // full of text fields, so this stays out of the way of anything being typed
+  // into, and out of the way of the browser's own chords.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'n' && e.key !== 'N') return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const el = document.activeElement as HTMLElement | null
+      if (el?.isContentEditable) return
+      if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return
+      e.preventDefault()
+      open()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
+
   return (
     <LedgerContext.Provider value={ledger}>
       <ToastContext.Provider value={toast}>
         <AddSheetContext.Provider value={addSheet}>
           <SyncPill />
-          <div className="pb-24">
+          {/* bottom padding clears the phone tab bar; left padding clears the
+              desktop rail, which is out of the flow so it can stay fixed */}
+          <div className="pb-24 md:pb-8 md:pl-60">
             <Outlet />
           </div>
           <NavBar />
@@ -120,7 +171,10 @@ export function AppShell() {
             prefill={prefill}
             onClose={() => setSheetOpen(false)}
           />
-          <div className="pointer-events-none fixed inset-x-0 bottom-20 z-50 flex flex-col items-center gap-2 px-6">
+          {/* above the tab bar on a phone; clear of the rail and tucked to the
+              bottom corner on a desktop, where centre-screen is where you're
+              reading */}
+          <div className="pointer-events-none fixed inset-x-0 bottom-20 z-50 flex flex-col items-center gap-2 px-6 md:right-6 md:bottom-6 md:left-66 md:items-end md:px-0">
             {toasts.map((t) => (
               <div
                 key={t.id}
@@ -163,7 +217,9 @@ function SyncPill() {
   if (!snap.online) {
     text = snap.pending > 0 ? `Offline · ${snap.pending} queued` : 'Offline — reads are local'
   } else if (snap.lastError) {
-    text = `Sync stuck · ${snap.pending} queued — will retry`
+    // "will retry" alone was a half-truth: a permanently rejected op retries
+    // forever and blocks the queue. Settings has the discard path now.
+    text = `Sync stuck · ${snap.pending} queued — see Settings`
   } else {
     text = snap.syncing ? `Syncing ${snap.pending}…` : `${snap.pending} queued`
   }
@@ -172,7 +228,7 @@ function SyncPill() {
     <button
       type="button"
       onClick={() => kickSync()}
-      className={`press fixed inset-x-0 top-3 z-40 mx-auto w-fit rounded-full border px-3.5 py-1.5 text-xs shadow-lg shadow-black/50 backdrop-blur-md ${
+      className={`press fixed inset-x-0 top-3 z-40 mx-auto w-fit rounded-full border px-3.5 py-1.5 text-xs shadow-lg shadow-black/50 backdrop-blur-md md:left-60 ${
         snap.lastError && snap.online
           ? 'border-neg/40 bg-raised/90 text-neg'
           : 'border-line bg-raised/90 text-ink-soft'

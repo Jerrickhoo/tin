@@ -82,6 +82,7 @@ async function pullEntries(): Promise<boolean> {
 }
 
 async function runOnce(): Promise<void> {
+  if (stopped) return
   if (isOffline()) {
     patchSnapshot({ online: false, pending: await outboxCount() })
     return
@@ -95,21 +96,38 @@ async function runOnce(): Promise<void> {
       remote.pullEnvelopes(),
       remote.pullCategories(),
     ])
-    await mirrorReplaceEnvelopes(envelopes)
-    await mirrorReplaceCategories(categories)
-    if (envelopes.length > 0 || categories.length > 0) changed = true
+    const envReplaced = await mirrorReplaceEnvelopes(envelopes)
+    const catReplaced = await mirrorReplaceCategories(categories)
+    if ((envReplaced && envelopes.length > 0) || (catReplaced && categories.length > 0)) {
+      changed = true
+    }
     patchSnapshot({ lastError: drained.blocked ? drained.error : null })
   } catch (err) {
     patchSnapshot({ lastError: err instanceof Error ? err.message : String(err) })
   } finally {
-    patchSnapshot({ syncing: false, pending: await outboxCount() })
+    // the database can vanish under us (logout wipes it), and a throw from the
+    // bookkeeping read would mask whatever the sync itself was reporting
+    let pending = snapshot.pending
+    try {
+      pending = await outboxCount()
+    } catch {
+      /* db closed or gone — the count is cosmetic, the sync result is not */
+    }
+    patchSnapshot({ syncing: false, pending })
   }
-  if (changed) onApplied?.()
+  if (changed && !stopped) onApplied?.()
 }
 
 let inFlight: Promise<void> | null = null
 let dirty = false
+let stopped = false
 let onApplied: (() => void) | null = null
+
+/** Resolve once no sync pass is running. Never rejects — callers only need to
+ *  know the loop has let go of the database, not how the pass went. */
+export function settleSync(): Promise<void> {
+  return inFlight ? inFlight.catch(() => {}) : Promise.resolve()
+}
 
 /** Run a full push+pull. Concurrent calls coalesce into one extra pass. */
 export function syncNow(): Promise<void> {
@@ -139,6 +157,7 @@ let teardown: (() => void) | null = null
 
 export function startSync(opts: { onApplied: () => void }): void {
   stopSync()
+  stopped = false
   onApplied = opts.onApplied
   const unsubscribeOutbox = onOutboxChange((kind) => {
     void outboxCount().then((pending) => patchSnapshot({ pending }))
@@ -164,6 +183,7 @@ export function startSync(opts: { onApplied: () => void }): void {
 }
 
 export function stopSync(): void {
+  stopped = true
   teardown?.()
   teardown = null
   onApplied = null

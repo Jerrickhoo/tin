@@ -136,7 +136,7 @@ export function History() {
   }
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-5 px-5 py-7">
+    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-5 px-5 py-7 md:max-w-2xl md:px-8 md:py-10">
       <h1 className="font-display text-[1.75rem] font-bold tracking-tight">History</h1>
 
       {!rows && <p className="text-ink-mute">Reading the ledger…</p>}
@@ -253,7 +253,7 @@ function GroupCard({
         type="button"
         onClick={onToggle}
         aria-expanded={expanded}
-        className="w-full px-3.5 py-3 text-left"
+        className="w-full px-3.5 py-3 text-left transition-colors hover:bg-raised/40"
       >
         <div className="flex items-center gap-3">
           <span

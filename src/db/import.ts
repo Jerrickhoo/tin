@@ -41,7 +41,9 @@ export async function prepareDrafts(
 
   const entries = await db.entries.toArray()
   const existingGroups = groupEntries(
-    [...entries].sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1)),
+    [...entries].sort((a, b) =>
+      a.occurred_at === b.occurred_at ? 0 : a.occurred_at < b.occurred_at ? 1 : -1,
+    ),
   )
   // "already imported" = this row's deterministic group id is on the ledger,
   // voided or not: a voided import is a decision, and silently re-adding it
@@ -98,8 +100,22 @@ export async function commitDrafts(drafts: readonly DraftEntry[]): Promise<Commi
 
   // Chunked so one huge backfill doesn't become a single outbox row that has to
   // succeed or fail whole. Each chunk is independently idempotent.
-  for (let i = 0; i < rows.length; i += COMMIT_CHUNK_ROWS) {
-    await insertPostedRows(rows.slice(i, i + COMMIT_CHUNK_ROWS))
+  //
+  // Chunk boundaries fall between DRAFTS, never inside one: a statement row's
+  // legs have to reach the server together or an income lands as, say, its
+  // Needs leg alone and the server holds a group whose parts don't sum to the
+  // income until the next chunk pushes. A group is at most one leg per
+  // envelope, so a chunk overshoots the target by a handful of rows at worst.
+  for (let i = 0; i < built.length;) {
+    const chunk: ImportLedgerRow[] = []
+    while (
+      i < built.length &&
+      (chunk.length === 0 || chunk.length + built[i].length <= COMMIT_CHUNK_ROWS)
+    ) {
+      chunk.push(...built[i])
+      i += 1
+    }
+    await insertPostedRows(chunk)
   }
 
   return {

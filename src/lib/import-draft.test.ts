@@ -69,10 +69,15 @@ describe('sourceKeyFor', () => {
     expect(sourceKeyFor(row({ sourceRef: 'ABC123' }))).toBe('ref:abc123')
   })
 
-  it('ignores position and description noise once a ref exists', () => {
+  it('ignores case and description noise once a ref exists', () => {
     const a = sourceKeyFor(row({ sourceRef: 'ABC123', description: 'SM Supermarket' }), 0)
-    const b = sourceKeyFor(row({ sourceRef: 'abc123 ', description: 'SM  SUPERMARKET' }), 7)
+    const b = sourceKeyFor(row({ sourceRef: 'abc123 ', description: 'SM  SUPERMARKET' }), 0)
     expect(a).toBe(b)
+  })
+
+  it('keeps occurrence 0 bare so pre-existing import keys still regenerate', () => {
+    expect(sourceKeyFor(row({ sourceRef: 'ABC123' }), 0)).toBe('ref:abc123')
+    expect(sourceKeyFor(row({ sourceRef: 'ABC123' }), 1)).toBe('ref:abc123#1')
   })
 
   it('falls back to a positional key without a ref', () => {
@@ -97,13 +102,23 @@ describe('sourceKeysFor', () => {
     expect(sourceKeysFor(rows)).toEqual(sourceKeysFor(rows))
   })
 
-  it('does not renumber rows that carry refs', () => {
+  // A reference number is *supposed* to be unique, but statements do reprint
+  // one across two genuine rows. Collapsing them to one key meant one
+  // deterministic group id, so the insert swallowed the second real
+  // transaction while the UI still reported both as imported.
+  it('renumbers a reprinted reference number so both real rows survive', () => {
     const keys = sourceKeysFor([
       row({ sourceRef: 'R1' }),
       row({ sourceRef: 'R2' }),
       row({ sourceRef: 'R1' }),
     ])
-    expect(keys).toEqual(['ref:r1', 'ref:r2', 'ref:r1'])
+    expect(keys).toEqual(['ref:r1', 'ref:r2', 'ref:r1#1'])
+    expect(new Set(keys).size).toBe(3)
+  })
+
+  it('leaves a statement of unique refs completely untouched', () => {
+    const rows = [row({ sourceRef: 'R1' }), row({ sourceRef: 'R2' })]
+    expect(sourceKeysFor(rows)).toEqual(['ref:r1', 'ref:r2'])
   })
 })
 

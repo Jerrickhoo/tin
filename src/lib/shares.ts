@@ -70,6 +70,29 @@ export function balanceInto(sharesBp: readonly number[], index: number): number[
   return sharesBp.map((bp, i) => (i === index ? fixed : bp))
 }
 
+/**
+ * Guard for every path that splits income across envelopes.
+ *
+ * The "active shares sum to 10000" invariant has no database check behind it
+ * (001_core.sql says so on purpose), so a drifted set — an archived envelope
+ * that kept its share, or a mirror that hasn't pulled yet — reaches
+ * splitByLargestRemainder and comes back as a raw RangeError about basis
+ * points. That is true but useless to the person holding the phone. This turns
+ * it into a sentence that names the screen which can fix it.
+ */
+export function assertSplittable(sharesBp: readonly number[]): void {
+  if (sharesBp.length === 0) {
+    throw new Error('No envelopes to split across yet — they arrive with the first sync.')
+  }
+  const summary = summarizeShares(sharesBp)
+  if (!summary.ok) {
+    throw new Error(
+      `Income can't be split: your envelope shares add up to ${formatBpAsPercent(summary.totalBp)}%, ` +
+        'not 100%. Fix the split in Settings → Envelopes.',
+    )
+  }
+}
+
 /** Envelope name rule, mirroring the DB check (1–40 chars) plus uniqueness. */
 export function validateName(
   name: string,

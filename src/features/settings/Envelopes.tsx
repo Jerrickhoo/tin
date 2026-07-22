@@ -62,7 +62,7 @@ export function Envelopes() {
   }, [version])
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-6 py-8">
+    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-6 py-8 md:max-w-2xl md:px-8 md:py-10">
       <h1 className="font-display text-[1.75rem] font-bold tracking-tight">Envelopes</h1>
 
       {!envelopes && <p className="text-ink-mute">Loading…</p>}

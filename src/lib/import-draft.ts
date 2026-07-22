@@ -17,6 +17,7 @@
 //      human, never auto-resolved — that judgement isn't the parser's to make.
 
 import { manilaDayKey } from './dates'
+import { assertSplittable } from './shares'
 import { splitByLargestRemainder } from './split'
 import type { EntryKind, LedgerGroup } from './groups'
 import { TIN_IMPORT_NAMESPACE, uuidv5 } from './uuidv5'
@@ -73,32 +74,45 @@ export function normalizeDescription(description: string): string {
  * The natural key of a statement row, stable across re-imports of the same
  * statement and across re-exports of the same period.
  *
- * With a reference number that's trivial. Without one, the fallback is
+ * With a reference number that's mostly trivial. Without one, the fallback is
  * (Manila day, direction, amount, description) — which is NOT unique on its
  * own: two ₱50 jeepney fares on the same day are two real transactions, not a
  * duplicate. `occurrence` disambiguates them by position among identical rows,
  * which is stable as long as the statement covers the same period. That's the
  * honest limit of ref-less dedupe, and it's why 8.2 should capture a reference
  * number if GCash prints one.
+ *
+ * A reference number is *supposed* to be unique, but statements do reprint one
+ * across two genuine rows, so `occurrence` applies to refs too. Occurrence 0
+ * stays bare (`ref:x`, not `ref:x#0`) so keys minted before this existed
+ * regenerate identically and stay recognised as already-imported.
  */
 export function sourceKeyFor(row: StatementRow, occurrence = 0): string {
   const ref = row.sourceRef?.trim()
-  if (ref) return `ref:${ref.toLowerCase()}`
+  if (ref) {
+    const base = `ref:${ref.toLowerCase()}`
+    return occurrence === 0 ? base : `${base}#${occurrence}`
+  }
   const day = manilaDayKey(new Date(row.postedAt))
   const desc = normalizeDescription(row.description)
   return `syn:${day}:${row.direction}:${row.amountCentavos}:${desc}#${occurrence}`
 }
 
 /**
- * Source keys for a whole statement, assigning occurrence indexes to ref-less
- * rows that are otherwise identical. Order matters and must match the order the
- * rows appear in the file — that's what makes the index reproducible.
+ * Source keys for a whole statement, assigning occurrence indexes to rows that
+ * would otherwise collide. Order matters and must match the order the rows
+ * appear in the file — that's what makes the index reproducible.
+ *
+ * Ref-carrying rows used to skip this pass entirely, which meant a statement
+ * that reprinted one reference number produced one key, one deterministic group
+ * id, and therefore one ledger row — the second real transaction was swallowed
+ * by the very primary key that makes re-imports safe, while the UI still
+ * counted it as imported.
  */
 export function sourceKeysFor(rows: readonly StatementRow[]): string[] {
   const seen = new Map<string, number>()
   return rows.map((row) => {
     const base = sourceKeyFor(row, 0)
-    if (base.startsWith('ref:')) return base
     const n = seen.get(base) ?? 0
     seen.set(base, n + 1)
     return n === 0 ? base : sourceKeyFor(row, n)
@@ -263,6 +277,7 @@ export async function draftToLedgerRows(
     ]
   }
 
+  assertSplittable(context.envelopes.map((e) => e.share_bp))
   const parts = splitByLargestRemainder(
     row.amountCentavos,
     context.envelopes.map((e) => e.share_bp),
