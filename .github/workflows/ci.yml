@@ -1,0 +1,75 @@
+# CI — run the checks that Netlify doesn't.
+#
+# The deploy path is `git push` to main → Netlify → `npm run build`, i.e.
+# `tsc -b && vite build`. That gates TYPES and nothing else: a failing test
+# suite, a lint error or a contrast regression all deploy perfectly happily.
+# This workflow closes that gap.
+#
+# READ THIS — a green tick here does NOT block a deploy. Netlify builds from
+# the push, independently, and never consults GitHub's checks. What you get is
+# a red X and an email within ~2 minutes of pushing something broken, which is
+# enough to catch it before you've moved on. To make it an actual gate you need
+# one of:
+#   · work on branches and open a PR, then merge only on green (self-imposed,
+#     free, and the least effort — this workflow already runs on PRs);
+#   · branch protection requiring the `check` job, which on a private repo
+#     needs GitHub Pro;
+#   · make the repo public, where branch protection is free.
+#
+# Cost: ~2 min per run against the 2,000 free minutes/month for private repos.
+# Fifty pushes a month is ~5% of the allowance.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+
+# a fast follow-up push shouldn't queue behind the run it already obsoleted
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24' # matches netlify.toml's NODE_VERSION
+          cache: npm
+
+      - run: npm ci
+
+      # cheapest first, so an obvious failure reports in seconds
+      - name: Lint
+        run: npm run lint
+
+      - name: Formatting
+        run: npm run format:check
+
+      - name: AA contrast (ROADMAP 7.5)
+        run: npm run check:contrast
+
+      # The three supabase/tests integration files are describe.skipIf'd on
+      # PROBE_B_PASSWORD and import their modules inside the test body, so they
+      # skip here without credentials instead of failing. Deliberate: this job
+      # must never need a secret to be useful, and must never write to the
+      # live project.
+      - name: Tests
+        run: npm test
+
+      # `tsc -b && vite build` — the same command Netlify runs, so a broken
+      # build is caught here rather than discovered in the deploy log.
+      - name: Build
+        run: npm run build
+        env:
+          # Vite inlines these at build time; the real values live in Netlify.
+          # Placeholders keep the build deterministic and make it obvious that
+          # nothing here is deployable. src/db/supabase.ts only throws on a
+          # missing value at RUNTIME, so the build never executes this.
+          VITE_SUPABASE_URL: https://ci-placeholder.invalid
+          VITE_SUPABASE_ANON_KEY: ci-placeholder-not-a-real-key
