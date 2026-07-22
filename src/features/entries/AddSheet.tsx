@@ -1,15 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLedger, useToast, type AddPrefill } from '../../app-context'
 import { BottomSheet } from '../../components/BottomSheet'
+import { Keypad } from '../../components/Keypad'
+import { useCoarsePointer } from '../../components/useCoarsePointer'
 import {
   addExpense,
   addIncome,
   addTransfer,
   fetchCategories,
+  fetchEntriesBetween,
   fetchEnvelopes,
+  voidGroup,
   type Category,
   type Envelope,
 } from '../../db/entries'
+import { rankByUse } from '../../lib/category-rank'
+import { applyKeypadKey, KEYPAD_PLACEHOLDER } from '../../lib/keypad'
 import { formatPHP, parseAmountToCentavos } from '../../lib/money'
 import { splitByLargestRemainder } from '../../lib/split'
 
@@ -23,11 +29,14 @@ function toLocalInput(date: Date): string {
 
 /* The sheet takes on the color of the thing you're doing: money leaving is
    rose, money arriving is mint, money moving sideways is lavender. You can
-   tell which mode you're in from the corner of your eye, mid-typing. */
-const MODE_TONE: Record<Mode, { text: string; ring: string; glow: string }> = {
-  expense: { text: 'text-neg', ring: 'border-neg/45', glow: 'bg-neg/15' },
-  income: { text: 'text-pos', ring: 'border-pos/45', glow: 'bg-pos/15' },
-  transfer: { text: 'text-accent', ring: 'border-accent/45', glow: 'bg-accent/15' },
+   tell which mode you're in from the corner of your eye, mid-typing.
+
+   `glow` dropped with the blurred radial it fed — the tint now rides entirely
+   on the amount text and the field ring, both of which are hard-edged. */
+const MODE_TONE: Record<Mode, { text: string; ring: string }> = {
+  expense: { text: 'text-neg', ring: 'border-neg/45' },
+  income: { text: 'text-pos', ring: 'border-pos/45' },
+  transfer: { text: 'text-accent', ring: 'border-accent/45' },
 }
 
 export function AddSheet({
@@ -69,11 +78,20 @@ export function AddSheet({
   useEffect(() => {
     if (!open) return
     let active = true
-    Promise.all([fetchEnvelopes(), fetchCategories()])
-      .then(([envs, cats]) => {
+    // The 90-day window feeds the category ranking below. It reads the
+    // `occurred_at` index rather than the whole table, and it is deliberately
+    // fetched once per sheet-open: ranking that recomputed while you type
+    // would shuffle the grid under your thumb mid-entry.
+    const since = new Date(Date.now() - 90 * 86_400_000).toISOString()
+    const until = new Date(Date.now() + 86_400_000).toISOString()
+    Promise.all([fetchEnvelopes(), fetchCategories(), fetchEntriesBetween(since, until)])
+      .then(([envs, cats, recent]) => {
         if (!active) return
         setEnvelopes(envs)
-        setCategories(cats)
+        // Most-used first (ROADMAP 3.2 — the second tap of the 2-tap path was a
+        // scan through an alphabetical grid). Ties and empty ledgers fall back
+        // to alphabetical, so a fresh install is unchanged.
+        setCategories(rankByUse(cats, recent))
       })
       .catch((err) => toast.show(err instanceof Error ? err.message : String(err), 'error'))
     return () => {
@@ -107,13 +125,42 @@ export function AddSheet({
 
   const envById = useMemo(() => new Map(envelopes.map((e) => [e.id, e])), [envelopes])
   const tone = MODE_TONE[mode]
+  const coarse = useCoarsePointer()
 
-  async function run(fn: () => Promise<unknown>, okMessage: string) {
+  /**
+   * Undo a just-saved group by voiding it.
+   *
+   * A void is the correct undo for this ledger rather than a workaround for
+   * lacking delete: §1 is append-only, so "it never happened" is spelled
+   * `voided_at`, and the entry stays visible in History struck through while
+   * dropping out of every balance. Exactly what History's own void does — the
+   * toast is just a faster door to it.
+   *
+   * Deliberately not awaited by the caller and safe after unmount: `bump` and
+   * `toast.show` belong to AppShell, which outlives this sheet, and nothing
+   * here touches local state.
+   */
+  async function undo(groupId: string) {
+    try {
+      await voidGroup(groupId, 'undone')
+      bump()
+      toast.show('Undone — the ledger remembers, balances forget')
+    } catch (err) {
+      toast.show(err instanceof Error ? err.message : String(err), 'error')
+    }
+  }
+
+  async function run(fn: () => Promise<string>, okMessage: string) {
     setBusy(true)
     try {
-      await fn()
+      const groupId = await fn()
       bump()
-      toast.show(okMessage, 'ok')
+      // A short tick on save. The pressed-block styling promises a physical
+      // control; without this the promise stops at the pixel boundary. Guarded
+      // because iOS Safari has never shipped the Vibration API — `?.` is the
+      // whole feature-detect.
+      navigator.vibrate?.(12)
+      toast.show(okMessage, 'ok', { label: 'Undo', run: () => void undo(groupId) })
       onClose()
     } catch (err) {
       toast.show(err instanceof Error ? err.message : String(err), 'error')
@@ -177,36 +224,45 @@ export function AddSheet({
       {/* Amount is the hero of this sheet — no box around it, just the number
           you're typing, in the tone of the mode you're in. */}
       <div className="relative">
-        <span
-          aria-hidden
-          className={`pointer-events-none absolute -top-6 left-1/2 size-40 -translate-x-1/2 rounded-full blur-3xl ${tone.glow}`}
-        />
         <div className="relative flex items-center justify-center gap-1">
+          {/* `tabular-nums` pulls this into the numeric font (theme.css) so the
+              sign matches the digits beside it. It is not itself a number, but
+              it is half of one on screen — and neither pixel face even covers
+              U+20B1, so left alone it rendered in a third font. */}
           <span
-            className={`font-display text-2xl font-bold ${amountOk ? tone.text : 'text-ink-mute'}`}
+            className={`text-2xl font-bold tabular-nums ${amountOk ? tone.text : 'text-ink-mute'}`}
           >
             ₱
           </span>
           <input
-            inputMode="decimal"
+            // `none` suppresses the OS keyboard without making the field
+            // read-only, so the caret still shows and a hardware keyboard (or
+            // a screen reader's text entry) still works. On a mouse device
+            // there is no pad, so the field keeps its normal decimal keypad
+            // hint — the two are driven by the same flag and cannot disagree.
+            inputMode={coarse ? 'none' : 'decimal'}
             autoComplete="off"
             autoFocus
             aria-label="Amount in pesos"
-            placeholder="0.00"
+            placeholder={KEYPAD_PLACEHOLDER}
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
-            className={`w-full min-w-0 border-0 bg-transparent py-1 text-center font-display text-[2.75rem] leading-tight font-bold tabular-nums outline-none placeholder:text-ink-mute/40 focus:outline-none ${
+            className={`w-full min-w-0 border-0 bg-transparent py-1 text-center text-[2.75rem] leading-tight font-bold tabular-nums outline-none placeholder:text-ink-mute/40 focus:outline-none ${
               amountOk ? tone.text : 'text-ink'
             }`}
           />
         </div>
         <div
-          className={`mx-auto h-px w-40 transition-colors ${amountOk ? 'bg-current opacity-30' : 'bg-line'} ${amountOk ? tone.text : ''}`}
+          className={`mx-auto h-0.5 w-40 transition-colors ${amountOk ? 'bg-current opacity-40' : 'bg-line'} ${amountOk ? tone.text : ''}`}
         />
       </div>
       {amount.trim() !== '' && !amountOk && (
         <p className="mt-2 text-center text-sm text-neg">Up to two decimals, more than zero.</p>
       )}
+
+      {/* Touch only. See useCoarsePointer — on a keyboard device the number row
+          beats a tap-pad, and the field keeps its normal OS keyboard there. */}
+      {coarse && <Keypad onKey={(key) => setAmount((a) => applyKeypadKey(a, key))} />}
       {/* The date lives behind "Note & date", so a blank one has to explain
           itself out here or the save button just looks broken. */}
       {!whenOk && (
@@ -259,15 +315,11 @@ export function AddSheet({
                 className="flex items-center justify-between rounded-xl border border-line/70 bg-base/40 px-3 py-2.5"
               >
                 <span className="flex items-center gap-2 text-sm">
-                  <span
-                    aria-hidden
-                    className="size-2 rounded-full"
-                    style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}66` }}
-                  />
+                  <span aria-hidden className="size-2" style={{ backgroundColor: color }} />
                   <span className="font-medium">{env.name}</span>
                   <span className="text-ink-mute">{env.share_bp / 100}%</span>
                 </span>
-                <span className="font-display text-sm font-bold tabular-nums text-pos">
+                <span className="text-sm font-bold tabular-nums text-pos">
                   {splitParts ? `+${formatPHP(splitParts[i])}` : '—'}
                 </span>
               </div>
@@ -355,7 +407,7 @@ function PrimaryButton({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className="press mt-2 w-full rounded-xl px-4 py-3.5 font-display font-bold text-on-accent shadow-[0_8px_20px_-8px_rgb(180_155_245/0.7)] transition-opacity disabled:opacity-40 disabled:shadow-none"
+      className="press mt-2 w-full rounded-xl px-4 py-3.5 font-display text-[0.6875rem] leading-relaxed text-on-accent shadow-[0_8px_20px_-8px_rgb(180_155_245/0.7)] transition-opacity disabled:opacity-40 disabled:shadow-none"
       style={{ background: 'linear-gradient(160deg, #cdb9ff 0%, #b49bf5 55%, #9a7fe0 100%)' }}
     >
       {label}
@@ -401,7 +453,7 @@ function EnvelopePicker({
             >
               <span
                 aria-hidden
-                className="mr-1.5 inline-block size-2 rounded-full align-middle"
+                className="mr-1.5 inline-block size-2 align-middle"
                 style={{ backgroundColor: color }}
               />
               {env.name}
