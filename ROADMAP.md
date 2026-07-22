@@ -6,6 +6,27 @@
 
 ---
 
+## Status — all phases closed (2026-07-22)
+
+**Live at <https://tin-jar.netlify.app>.** Phases 0–8 are done, plus a Phase 3.5 retrofit. 185 tests; lint, build and the AA-contrast script all clean. `git push` to `main` deploys.
+
+| Phase | State |
+| ----- | ----- |
+| 0–2 Setup, money brain, accounts & RLS | ✅ |
+| 3 The ledger ★ | ✅ |
+| 3.5 Envelope/category management | ✅ **retrofit** — §0 promised it, no phase ever gave it a task line, so it was never built. Found by auditing prose against code. |
+| 4–7 Analytics, recurring, offline, hardening | ✅ |
+| 8 Statement importer | ✅ **closed** — importer shipped; the GCash-PDF-specific reader was **dropped by decision**, not left pending |
+
+This document stops being a plan here and becomes the record of why things are the way they are. The parts worth reading before changing anything: **§1 engineering law**, the **§3** notes on composite ownership FKs and the missing sum-to-10000 check, **§6**'s known CVD gap, and the closure note on Phase 8.
+
+Two lessons this roadmap taught the hard way, both worth keeping:
+
+1. **A ticked checklist is not a built product.** Every box for Phases 0–7 was ticked while an entire promised feature (editable percentages, category management) did not exist — because it only ever lived in prose and a file-tree comment, never in a task line. Audit promises against code, not against boxes.
+2. **`[]` is truthy.** `{list && …}` is not a loading guard. On a cold load the local mirror is empty until the first pull; that bug shipped twice, once leaving a picker permanently empty and once crashing a screen outright.
+
+---
+
 ## 0. Decisions on record
 
 These were answered in the kickoff session (2026-07-17). Don't re-litigate them casually.
@@ -173,7 +194,7 @@ Effort = focused evenings (~2–3 h). Total to end of Phase 7: **~17–25 evenin
 
 **Shippable:** the version you stop thinking about.
 
-### Phase 8 — GCash statement importer (optional; 4–8 evenings, high variance)
+### Phase 8 — GCash statement importer — ✅ CLOSED 2026-07-22 (importer shipped; GCash PDF reader dropped)
 
 **Goal:** backfill history from GCash's emailed, password-protected transaction export. **Entirely client-side — the file never leaves the machine.** This is an _importer with review_, not a sync.
 
@@ -182,9 +203,15 @@ Effort = focused evenings (~2–3 h). Total to end of Phase 7: **~17–25 evenin
 - **Duplicate detection:** flag drafts matching an existing entry within ±amount-exact and ±36 h, and drafts identical to a previous import (store a source-row hash on imported entries).
 - Batch insert as backdated entries with client UUIDs.
 
-**Risk note:** statement-format parsing is the flakiest code you'll write; GCash can change the layout any time. That's why it's last and optional.
+**Risk note:** statement-format parsing is the flakiest code you'll write; GCash can change the layout any time. That's why it's last and optional. *(This note aged well — it's the reason the GCash-specific half was ultimately dropped rather than built. See the closure note below.)*
 
-> **Built 2026-07-22, format-independent half only.** 8.1 needs a real GCash export in hand, and writing a PDF parser against an imagined layout is how you get a decoy instead of a head start. So the phase was split at a seam — `StatementRow` in `src/lib/import-draft.ts` — and everything *above* that line (review table, duplicate detection, backdated batch insert) is built and tested against synthetic rows. A pasted-table/CSV reader feeds the same seam today, so the pipeline is usable now; the PDF reader becomes a small adapter later. See §5's Phase 8 checklist for what's done and what 8.2 still owes.
+> **CLOSED 2026-07-22 — owner's call, and the right one.** The importer shipped; the **GCash-PDF-specific reader was dropped, not deferred.** Read this before reopening it.
+>
+> What shipped is a working importer with review: paste a table or CSV, map the columns, review every row, commit as backdated entries. That covers the actual goal — backfilling history — from a spreadsheet, a copied list, or anything else with selectable text.
+>
+> What was dropped is only the *GCash PDF adapter*. Its cost was never the parsing; it was that nobody had confirmed the emailed statement even contains selectable text. If those pages are images, the job isn't "a small adapter", it's OCR over money — unreliable in a way a ledger cannot absorb, and needing a library that likely can't run under Tin's CSP anyway. Spending 4–8 evenings on a one-time backfill with that unknown at the front, for a format GCash can change at will, was a bad trade against just typing a month in via the 2-tap sheet.
+>
+> **Reopening is cheap and that is by design.** The phase was built at a seam — `StatementRow` in `src/lib/import-draft.ts`. Anything that can emit `StatementRow[]` inherits the review table, duplicate detection and backdated insert for free, all already tested. If a GCash export with real text ever lands, the adapter is a contained piece of work against a known contract, not a re-architecture.
 >
 > **The dedupe design changed on the way in.** The roadmap called for "a source-row hash on imported entries", i.e. a new column and a migration. Not needed: derive each entry's UUID from the statement row's natural key (UUIDv5, exactly the trick §5.1 recurring postings use to stop two devices double-posting rent) and a re-import regenerates byte-identical ids that both the Dexie mirror's `bulkAdd` and the server upsert already ignore. Duplicate protection becomes the primary key rather than a check that could be forgotten — no schema change, no sync change.
 
@@ -552,13 +579,13 @@ Work top to bottom; nothing depends on anything below it.
 
   Driving it caught a crash: an **empty** envelope list is not a ready state, and on a cold load the mirror is empty until the first pull — `envelopes[envelopes.length - 1].name` threw and took the screen into the ErrorBoundary. Same cold-load race as the import screen, worse symptom. Empty is now its own rendered state. **Worth remembering: `[]` is truthy, so `{list && …}` is not a loading guard.**
 
-**Phase 8 — GCash importer (optional)** — format-independent core DONE 2026-07-22; 8.1/8.2-PDF still open
+**Phase 8 — statement importer** — ✅ **CLOSED 2026-07-22.** Importer shipped and live; the GCash-PDF-specific reader was **dropped by decision**, not left pending. Rationale in the §2 closure note.
 
-- [ ] 8.1 Request own GCash export; inspect real file format — **blocked on you, and it blocks only the PDF reader.** Everything downstream is built and waiting.
+- [x] ~~8.1 Request own GCash export; inspect real file format~~ — **dropped.** This was the gate for the PDF reader, and the reader was dropped, so the gate is moot. It resolved to a single unanswered question — does the emailed statement contain selectable text or images? — and the honest answer was that nobody wanted to spend evenings finding out for a one-time backfill.
 - [x] 8.2a Client-side parse, format-independent — `src/lib/import-parse.ts`: CSV/TSV/pasted-table reader with quote handling, delimiter detection, header sniffing and an explicit column mapping. Statement-flavoured amounts (`₱`, thousands commas, leading/trailing/unicode minus, accountancy parens) and dates (ISO, named-month both orders, numeric d/m/y). 35 tests.
 
   Two things it refuses to guess, because guessing them silently corrupts a ledger: **`03/04/2026`** (3 Apr or 4 Mar? the UI asks) and **direction on an unsigned amount** (the UI asks). Bare dates anchor at **noon** Manila, not midnight — a midnight anchor sits within ±8 h of the day boundary, so Manila-day grouping would file half an import on the wrong date. Unreadable rows are reported with their row number, never dropped.
-- [ ] 8.2b Client-side parse, GCash PDF — the remaining work. pdf.js with password, emitting `StatementRow[]`; it plugs into the seam and inherits 8.3–8.5 for free. Do this with the real file open, not before.
+- [x] ~~8.2b Client-side parse, GCash PDF~~ — **dropped.** pdf.js-with-password emitting `StatementRow[]` remains the design if it's ever revived; the seam is in place and 8.3–8.5 would come free. Not built because the prerequisite (a statement confirmed to hold selectable text) was never established, and image-only pages would turn this into OCR-over-money — a different, worse project. Typing a month into the 2-tap sheet beats it.
 - [x] 8.3 Row → draft-entry mapping + review/confirm table — `src/features/import/ImportStatement.tsx`, three steps (paste → map columns → review), reachable from Settings → Import. Debit ⇒ expense needing a category (category implies envelope, §1); credit ⇒ income posting the **full split at current shares**, same rule recurring income follows. Nothing writes until the confirm button; a flagged row starts unticked so a careless confirm can't double-post.
 - [x] 8.4 Duplicate detection — two halves, because there are two ways a row can already be on the ledger. **Re-import:** deterministic UUIDv5 id (see the note in §2) — detected up-front, shown as "already imported", and locked out. **Hand-typed overlap:** exact amount + same direction + within ±36 h, matched against **group totals, not legs** (a ₱10,000 income is 7,000/2,000/1,000 and no leg equals the statement figure). Voided groups never match — voiding means it didn't happen. Flagged, never auto-resolved.
 - [x] 8.5 Batch insert as backdated entries — `src/db/import.ts` writes through `insertPostedRows`, so an import is Dexie + outbox like every other write since Phase 6: works offline, drains later. Chunked at 200 rows so a year-long backfill isn't one all-or-nothing outbox row; each chunk independently idempotent.
