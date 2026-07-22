@@ -141,6 +141,17 @@ export function Settings() {
       </section>
 
       <section className="card p-4">
+        <h2 className="font-display font-bold">Import a statement</h2>
+        <p className="mt-1 text-sm text-ink-soft">
+          Backfill old transactions from a pasted table or CSV. Read on this device, reviewed row by
+          row, and never posted until you say so.
+        </p>
+        <Link to="/import" className="mt-2 inline-block text-sm font-medium text-accent">
+          Import entries →
+        </Link>
+      </section>
+
+      <section className="card p-4">
         <h2 className="font-display font-bold">Extras</h2>
         <p className="mt-1 text-sm">
           <Link to="/split" className="text-accent">

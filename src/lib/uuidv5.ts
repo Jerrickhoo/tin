@@ -5,6 +5,12 @@
 /** Tin's fixed namespace for recurring postings (random, generated once). */
 export const TIN_RECURRING_NAMESPACE = '5f0be0b2-f0aa-4dcf-9f39-4f4a30e5f524'
 
+/** Namespace for statement imports (ROADMAP 8.4) — a separate namespace so an
+ *  import key can never collide with a recurring posting key. Same trick, same
+ *  payoff: re-importing a statement regenerates identical ids and the insert
+ *  ignores them, so duplicate protection is the primary key, not a check. */
+export const TIN_IMPORT_NAMESPACE = 'c3a6a1de-6a2f-4a5f-9b47-8e0b8f2c1d94'
+
 function uuidToBytes(uuid: string): Uint8Array {
   const hex = uuid.replaceAll('-', '')
   const bytes = new Uint8Array(16)

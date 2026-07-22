@@ -184,6 +184,10 @@ Effort = focused evenings (~2–3 h). Total to end of Phase 7: **~17–25 evenin
 
 **Risk note:** statement-format parsing is the flakiest code you'll write; GCash can change the layout any time. That's why it's last and optional.
 
+> **Built 2026-07-22, format-independent half only.** 8.1 needs a real GCash export in hand, and writing a PDF parser against an imagined layout is how you get a decoy instead of a head start. So the phase was split at a seam — `StatementRow` in `src/lib/import-draft.ts` — and everything *above* that line (review table, duplicate detection, backdated batch insert) is built and tested against synthetic rows. A pasted-table/CSV reader feeds the same seam today, so the pipeline is usable now; the PDF reader becomes a small adapter later. See §5's Phase 8 checklist for what's done and what 8.2 still owes.
+>
+> **The dedupe design changed on the way in.** The roadmap called for "a source-row hash on imported entries", i.e. a new column and a migration. Not needed: derive each entry's UUID from the statement row's natural key (UUIDv5, exactly the trick §5.1 recurring postings use to stop two devices double-posting rent) and a re-import regenerates byte-identical ids that both the Dexie mirror's `bulkAdd` and the server upsert already ignore. Duplicate protection becomes the primary key rather than a check that could be forgotten — no schema change, no sync change.
+
 ---
 
 ## 3. Data model & security SQL
@@ -420,12 +424,15 @@ tin/
 │  │  ├─ money.ts                      #   centavos, formatPHP, parseAmount
 │  │  ├─ split.ts                      #   largest-remainder split
 │  │  ├─ dates.ts                      #   Manila month/day keys, boundaries
-│  │  └─ export.ts                     #   entries → CSV / JSON
+│  │  ├─ export.ts                     #   entries → CSV / JSON
+│  │  ├─ import-draft.ts               #   StatementRow seam, dedupe  (Phase 8)
+│  │  └─ import-parse.ts               #   delimited text → rows      (Phase 8)
 │  ├─ db/
 │  │  ├─ supabase.ts                   # client init (reads VITE_ vars)
 │  │  ├─ dexie.ts                      # local mirror schema        (Phase 6)
 │  │  ├─ outbox.ts                     # pending-writes queue       (Phase 6)
-│  │  └─ sync.ts                       # push outbox / delta pull   (Phase 6)
+│  │  ├─ sync.ts                       # push outbox / delta pull   (Phase 6)
+│  │  └─ import.ts                     # classify + batch commit    (Phase 8)
 │  ├─ features/
 │  │  ├─ auth/                         # login, signup, session, logout(+cache wipe)
 │  │  ├─ home/                         # balance cards + Add button
@@ -433,7 +440,7 @@ tin/
 │  │  ├─ analytics/                    # month picker, flows, adherence
 │  │  ├─ recurring/                    # templates + catch-up poster (Phase 5)
 │  │  ├─ settings/                     # envelopes, categories, percentages, export, account
-│  │  └─ import-gcash/                 # client-side statement parser (Phase 8)
+│  │  └─ import/                       # paste/CSV → review → backdated insert (Phase 8)
 │  ├─ components/                      # Button, BottomSheet, AmountText, NavBar, EmptyState…
 │  ├─ styles/
 │  │  └─ theme.css                     # design tokens from §6
@@ -530,13 +537,18 @@ Work top to bottom; nothing depends on anything below it.
   Verified while wiring the preload: only the two latin faces are ever fetched for latin text — the ext/cyrillic/vietnamese subsets never download. So trimming Inter to latin (still unclaimed) shrinks the **SW precache**, not the critical path; it will not move LCP.
 - [x] 7.6 Monthly export reminder — localStorage "last export" nudge in Settings (`lib/exportReminder.ts`, unit-tested), **not** a self-pointed recurring template (that would post fake money rows into the ledger it's meant to back up).
 
-**Phase 8 — GCash importer (optional)**
+**Phase 8 — GCash importer (optional)** — format-independent core DONE 2026-07-22; 8.1/8.2-PDF still open
 
-- [ ] 8.1 Request own GCash export; inspect real file format
-- [ ] 8.2 Client-side parse (pdf.js w/ password, or SheetJS if XLSX)
-- [ ] 8.3 Row → draft-entry mapping + review/confirm table
-- [ ] 8.4 Duplicate detection (existing-entry window match + source-row hash)
-- [ ] 8.5 Batch insert as backdated entries
+- [ ] 8.1 Request own GCash export; inspect real file format — **blocked on you, and it blocks only the PDF reader.** Everything downstream is built and waiting.
+- [x] 8.2a Client-side parse, format-independent — `src/lib/import-parse.ts`: CSV/TSV/pasted-table reader with quote handling, delimiter detection, header sniffing and an explicit column mapping. Statement-flavoured amounts (`₱`, thousands commas, leading/trailing/unicode minus, accountancy parens) and dates (ISO, named-month both orders, numeric d/m/y). 35 tests.
+
+  Two things it refuses to guess, because guessing them silently corrupts a ledger: **`03/04/2026`** (3 Apr or 4 Mar? the UI asks) and **direction on an unsigned amount** (the UI asks). Bare dates anchor at **noon** Manila, not midnight — a midnight anchor sits within ±8 h of the day boundary, so Manila-day grouping would file half an import on the wrong date. Unreadable rows are reported with their row number, never dropped.
+- [ ] 8.2b Client-side parse, GCash PDF — the remaining work. pdf.js with password, emitting `StatementRow[]`; it plugs into the seam and inherits 8.3–8.5 for free. Do this with the real file open, not before.
+- [x] 8.3 Row → draft-entry mapping + review/confirm table — `src/features/import/ImportStatement.tsx`, three steps (paste → map columns → review), reachable from Settings → Import. Debit ⇒ expense needing a category (category implies envelope, §1); credit ⇒ income posting the **full split at current shares**, same rule recurring income follows. Nothing writes until the confirm button; a flagged row starts unticked so a careless confirm can't double-post.
+- [x] 8.4 Duplicate detection — two halves, because there are two ways a row can already be on the ledger. **Re-import:** deterministic UUIDv5 id (see the note in §2) — detected up-front, shown as "already imported", and locked out. **Hand-typed overlap:** exact amount + same direction + within ±36 h, matched against **group totals, not legs** (a ₱10,000 income is 7,000/2,000/1,000 and no leg equals the statement figure). Voided groups never match — voiding means it didn't happen. Flagged, never auto-resolved.
+- [x] 8.5 Batch insert as backdated entries — `src/db/import.ts` writes through `insertPostedRows`, so an import is Dexie + outbox like every other write since Phase 6: works offline, drains later. Chunked at 200 rows so a year-long backfill isn't one all-or-nothing outbox row; each chunk independently idempotent.
+
+  **Verified in real Edge** (probe-b, `scratchpad/drive-import.mjs`): auto-mapping, sign detection, duplicate classification, bulk-categorise and the confirm bar all correct; stopped short of committing so the shared probe ledger stays clean — the commit path is covered by `src/db/import-flow.test.ts` instead. That run caught one genuine bug: the screen fetched categories with `[]` deps, so a **cold** load straight to `/import` could beat sync populating the mirror and leave the category pickers permanently empty. Now follows `version` like every other screen. 77 new tests (161 total).
 
 ---
 
