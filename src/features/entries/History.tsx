@@ -137,7 +137,7 @@ export function History() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-5 px-5 py-7 md:max-w-2xl md:px-8 md:py-10">
-      <h1 className="font-display text-base">History</h1>
+      <h1 className="font-display text-[1rem] text-ink">History</h1>
 
       {!rows && <p className="text-ink-mute">Reading the ledger…</p>}
       {rows && rows.length === 0 && (
@@ -262,7 +262,7 @@ function GroupCard({
         <div className="flex items-center gap-3">
           <span
             aria-hidden
-            className="flex size-9 shrink-0 items-center justify-center text-base"
+            className="flex size-9 shrink-0 items-center justify-center text-[1rem]"
             style={{ backgroundColor: `${tint}1f`, border: `1px solid ${tint}3d`, color: tint }}
           >
             {glyph}

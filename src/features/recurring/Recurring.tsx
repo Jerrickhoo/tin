@@ -77,7 +77,7 @@ export function Recurring() {
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-6 py-8 md:max-w-2xl md:px-8 md:py-10">
       <div className="flex items-center justify-between">
-        <h1 className="font-display text-base">Recurring</h1>
+        <h1 className="font-display text-[1rem] text-ink">Recurring</h1>
         <button
           type="button"
           onClick={() => setEditing('new')}

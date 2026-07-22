@@ -196,7 +196,7 @@ export function Settings() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-6 py-8 md:max-w-3xl md:px-8 md:py-10">
-      <h1 className="font-display text-base">Settings</h1>
+      <h1 className="font-display text-[1rem] text-ink">Settings</h1>
 
       <section className="card p-4">
         <h2 className="font-display text-[0.6875rem] leading-relaxed">Account</h2>

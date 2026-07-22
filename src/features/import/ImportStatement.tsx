@@ -146,7 +146,7 @@ export function ImportStatement() {
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col gap-4 px-6 py-8 md:px-8 md:py-10 lg:max-w-3xl">
       <div className="flex items-baseline justify-between gap-3">
-        <h1 className="font-display text-base">Import</h1>
+        <h1 className="font-display text-[1rem] text-ink">Import</h1>
         <span className="text-sm text-ink-mute">
           {step === 'paste' ? 'Step 1 of 3' : step === 'map' ? 'Step 2 of 3' : 'Step 3 of 3'}
         </span>

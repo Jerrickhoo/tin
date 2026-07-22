@@ -73,7 +73,7 @@ export function Insights() {
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-5 py-7 md:max-w-4xl md:px-8 md:py-10">
       <div className="flex items-center justify-between gap-2">
-        <h1 className="font-display text-base">Insights</h1>
+        <h1 className="font-display text-[1rem] text-ink">Insights</h1>
         <div className="flex items-center gap-0.5 border border-line/70 bg-surface/60 p-0.5">
           <button
             type="button"

@@ -54,6 +54,12 @@ jobs:
       - name: AA contrast (ROADMAP 7.5)
         run: npm run check:contrast
 
+      # --color-base makes Tailwind emit `.text-base{color:...}` and drop the
+      # font-size rule entirely, so `text-base` silently paints text the
+      # background colour. Six headers shipped invisible before this existed.
+      - name: Token / utility collisions
+        run: npm run check:tokens
+
       # The three supabase/tests integration files are describe.skipIf'd on
       # PROBE_B_PASSWORD and import their modules inside the test body, so they
       # skip here without credentials instead of failing. Deliberate: this job

@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check:contrast": "node scripts/check-contrast.mjs",
+    "check:tokens": "node scripts/check-token-collisions.mjs",
     "probe:rls": "node supabase/tests/rls-probe.ts",
     "preview": "vite preview"
   },
