@@ -566,6 +566,8 @@ Work top to bottom; nothing depends on anything below it.
   Verified while wiring the preload: only the two latin faces are ever fetched for latin text — the ext/cyrillic/vietnamese subsets never download. So trimming Inter to latin shrinks the **SW precache**, not the critical path; it will not move LCP.
 
   **Done 2026-07-22.** Inter now gets the same hand-declared latin-only `@font-face` Nunito has, in `theme.css`. Precache **953.02 KiB → 798.20 KiB across 18 → 12 entries**; the six unused Inter subsets are gone. Confirmed the trim didn't silently fall back to a system face — a wrong `@font-face` path fails invisibly — by checking `document.fonts` resolves both families and that `Peña ₱1,234` measures differently from monospace. LCP is unchanged by design.
+
+  > **Superseded by §6 v4 (same day).** The pixel reskin dropped Inter and Nunito entirely — both packages are uninstalled — and replaced them with Press Start 2P + three Pixelify Sans weights, 36 KB against 87 KB. The hand-declared latin-only technique documented here carried over verbatim to the new faces; only the font names changed. The `₱`-measures-differently-from-monospace check above is **no longer a valid smoke test**: money now renders in the system monospace stack on purpose (§6, "Numbers deliberately opt out").
 - [x] 7.6 Monthly export reminder — localStorage "last export" nudge in Settings (`lib/exportReminder.ts`, unit-tested), **not** a self-pointed recurring template (that would post fake money rows into the ledger it's meant to back up).
 
 **Phase 3.5 — Envelope & category management (retrofit, 2026-07-22)**
@@ -596,58 +598,62 @@ Work top to bottom; nothing depends on anything below it.
 
 ---
 
-## 6. Design system — midnight violet
+## 6. Design system — pixel pastel
 
-> Remade 2026-07-18 (v2). The original "cozy dark" was espresso/honey — too brown. Direction now follows the `theme reference/` folder (near-black neutral surfaces, hairline borders, one confident accent) plus the owner's call: dark + purple. Coziness lives in shape, spacing, and soft pastels — not warm browns.
+> **v4, 2026-07-22 — reskinned.** Replaces "midnight violet, one lamp" (v2/v3) with a retro pixel-art treatment: dark plum surfaces, pastel accents, pixel typefaces, hard edges everywhere. This was a **reskin, not a rebuild** — no component logic changed, no layout changed. The rule that made that possible is the one v2 wrote down and v4 collected on: token names in `src/styles/theme.css` are role-based, so ~360 utility usages across 25 component files restyled without being touched.
 >
-> **v3, 2026-07-22 — relit.** v2 set correct colours and then used them flatly: every surface in the app was the same `rounded-2xl border bg-surface` recipe, so six screens read as one generic dark dashboard. v3 keeps the colors and adds the three things that were missing — a light source, depth, and texture — plus a display face. The measured-contrast rule is unchanged and still enforced by `npm run check:contrast`.
+> What survived unchanged: measured contrast enforced by `npm run check:contrast`, no off-origin assets, and the CVD caveat below (improved, still open).
 
-A dark room lit by one lamp: near-black violet surfaces, lavender light. All ratios below are **measured** (WCAG relative-luminance script, not eyeballed); every text token clears AA (4.5:1) on `bg-base`, `bg-surface`, *and* `bg-raised` — worst case is `text-muted` on `bg-raised` at 4.86:1.
+A CRT in a dark room: deep-plum surfaces, pastel sprites, scanlines over the top. All ratios below are **measured** (WCAG relative-luminance script, not eyeballed); every text token clears AA (4.5:1) on `bg-base`, `bg-surface`, *and* `bg-raised`. Worst case is `text-muted` on `bg-raised` at **5.19:1** — up from v3's 4.86:1 floor.
 
 ### Palette
 
-Token names in code are role-based (`src/styles/theme.css`) so a future restyle touches one file. §6-name → code-name mapping is commented in that file.
+Token names in code are role-based (`src/styles/theme.css`) so a future restyle touches one file. §6-name → code-name mapping is commented in that file, and is unchanged from v2 — that stability is the whole reason v4 was cheap.
 
-| Token            | Hex       | Use                                     | Contrast on `bg-base` |
-| ---------------- | --------- | --------------------------------------- | --------------------- |
-| `bg-base`        | `#100E15` | app background (violet-tinted near-black) | —                   |
-| `bg-surface`     | `#1B1823` | cards                                   | —                     |
-| `bg-raised`      | `#262230` | bottom sheets, modals                   | —                     |
-| `border`         | `#363044` | hairlines, dividers                     | —                     |
-| `text-primary`   | `#EAE6F2` | body & amounts (lavender-white)         | 15.25 : 1             |
-| `text-secondary` | `#AFA7C2` | labels, secondary                       | 8.14 : 1              |
-| `text-muted`     | `#948CA9` | timestamps, hints                       | 5.87 : 1              |
-| `accent`         | `#B49BF5` | primary buttons, focus rings, links (lavender) | 7.98 : 1       |
-| `on-accent`      | `#1D1530` | text on accent buttons                  | 7.44 : 1 on accent    |
-| `positive`       | `#93CFA9` | income, positive deltas (mint)          | 10.47 : 1             |
-| `negative`       | `#E4808A` | expenses, red envelopes (dusty rose)    | 6.92 : 1              |
-| `env-needs`      | `#B49BF5` | Needs identity (violet)                 | —                     |
-| `env-savings`    | `#93CFA9` | Savings identity (mint)                 | —                     |
-| `env-wants`      | `#EFA9D6` | Wants identity (orchid)                 | 10.09 : 1             |
+| Token            | Hex       | Use                                            | Contrast on `bg-base` |
+| ---------------- | --------- | ---------------------------------------------- | --------------------- |
+| `bg-base`        | `#17131F` | app background (deep plum)                     | —                     |
+| `bg-surface`     | `#221B2E` | cards                                          | —                     |
+| `bg-raised`      | `#2D2440` | bottom sheets, modals                          | —                     |
+| `border`         | `#3D3354` | borders, dividers (2px, never hairline)        | —                     |
+| `text-primary`   | `#F2E9F7` | body & labels (plum-white)                     | 15.46 : 1             |
+| `text-secondary` | `#C4B3D6` | labels, secondary                              | 9.37 : 1              |
+| `text-muted`     | `#A294B8` | timestamps, hints                              | 6.49 : 1              |
+| `accent`         | `#C9A7FF` | primary buttons, focus rings, links (lavender) | 9.10 : 1              |
+| `on-accent`      | `#1E1030` | text on accent buttons                         | 8.92 : 1 on accent    |
+| `positive`       | `#A8E6CF` | income, positive deltas (mint)                 | 12.95 : 1             |
+| `negative`       | `#FF9AA2` | expenses, red envelopes (soft coral)           | 9.04 : 1              |
+| `env-needs`      | `#C9A7FF` | Needs identity (lavender)                      | 9.10 : 1              |
+| `env-savings`    | `#A8E6CF` | Savings identity (mint)                        | 12.95 : 1             |
+| `env-wants`      | `#FFB3D9` | Wants identity (pastel pink)                   | 11.05 : 1             |
 
-v3 darkened `bg-base` (`#131118` → `#100E15`) and `bg-surface` (`#1C1923` → `#1B1823`) so the lamp has something to glow against; every ratio went **up** and the 4.86:1 floor is untouched because `bg-raised` — where that floor lives — was deliberately left alone. `theme-color` in `index.html`, `manifest.webmanifest`, `favicon.svg` and `scripts/generate-icons.mjs` all track `bg-base`; change them together.
+The base is deep plum rather than near-black **on purpose**: pastels on `#000` read as neon, which is the opposite of cozy. Every surface keeps a violet cast so the pastels sit *on* something instead of glowing out of a void. `theme-color` in `index.html`, `manifest.webmanifest`, `favicon.svg` and `scripts/generate-icons.mjs` all track `bg-base`; change them together.
 
-**Known gap — envelope colors under color-vision deficiency.** Run through a CVD validator against `bg-surface`, the three envelope identity colors fail adjacent-pair separation: `env-savings` (mint) ↔ `env-wants` (orchid) sit at **ΔE 5.5 under deuteranopia** (normal vision is a comfortable 18.2). Red-green colorblind viewers cannot reliably tell a Savings bar from a Wants bar by hue. This is **mitigated, not fixed**: identity is never carried by color alone anywhere in the app — every dot, meter and chip is immediately adjacent to the envelope's name in text, which is the sanctioned secondary encoding. Fixing it properly means re-stepping the palette *and* migrating the `color` column on existing `envelopes` rows, so it's a deliberate decision rather than a drive-by change. Amber was tried as a Wants replacement and is worse — it collides with mint for *normal* vision (ΔE 13.1, below the 15 floor). A workable direction if it's ever picked up: spread the three on **lightness** as well as hue, not hue alone.
+**Known gap — envelope colors under color-vision deficiency.** Carried forward from v3 and **improved but not closed**. Re-measured against the v4 hexes (Viénot 1999 deuteranopia simulation → CIEDE2000): `env-savings` (mint) ↔ `env-wants` (pink) sit at **ΔE 8.7 under deuteranopia** against 38.5 for normal vision. That is up from v3's 5.5 — the pinker Wants helps — but still under the 15 floor, so red-green colorblind viewers still cannot reliably separate a Savings bar from a Wants bar by hue alone. The other two pairs are fine (needs↔savings 27.6, needs↔wants 18.4 under deuteranopia). Still **mitigated, not fixed**, by the same rule as before: identity is never carried by color alone anywhere in the app — every dot, meter and chip sits immediately next to the envelope's name in text. Fixing it properly still means re-stepping the palette *and* migrating the `color` column on existing `envelopes` rows. The workable direction is unchanged: spread the three on **lightness** as well as hue.
 
-Note `env-needs` deliberately shares the accent lavender (same trade-off the honey palette made): Needs is the app's center of gravity. If Needs cards ever read as "buttons," shift Needs to a deeper violet like `#9A7FE0` and re-run the contrast script. `negative` (rose-red) vs `env-wants` (orchid-pink) are neighbors — keep negative for amounts/errors only, wants for identity dots/bars only, and they never sit side by side ambiguously.
+Note `env-needs` still deliberately shares the accent lavender: Needs is the app's center of gravity. `negative` (coral) vs `env-wants` (pink) remain neighbours — keep negative for amounts/errors only, wants for identity dots/bars only.
 
-### Light, depth, texture (v3)
+### Hard edges, light, texture (v4)
 
-The three layers that turned "correct colors, flat screens" into a room. All defined once in `src/styles/theme.css`; screens compose them, never re-roll them.
+All defined once in `src/styles/theme.css`; screens compose them, never re-roll them.
 
-- **The lamp** — two fixed radial gradients on `body::before`, high and slightly left. Radii are *smaller than the viewport* (26rem/20rem) on purpose: the first attempt used 80rem, which on a 390px phone has no visible falloff and reads as flat grey wash. The falloff **is** the effect.
-- **The grain** — an inline `feTurbulence` SVG data URI on `body::after` at 0.22 opacity. Stops large dark areas reading as switched-off OLED. Costs one data URI, no request; allowed by the existing `img-src 'self' data:` CSP.
-- **`.card`** — the single surface recipe, replacing the repeated `rounded-2xl border border-line bg-surface` literal. Lit from above: inset top highlight + ambient shadow, and *slightly translucent* so the grain reads through. Stays darker than `bg-raised`, so AA holds. `.sheet-surface` is the same material one step brighter, for sheets and toasts.
-- **`.meter` / `.meter-fill` / `.meter-plan`** — an envelope's balance as a share of all funded money, with a tick at its planned share. Promotes plan-vs-actual from a buried Insights panel to the Home glance: the gap between fill and tick *is* the answer. The tick is light-core-on-dark-halo because it lands on the empty track when you're under plan and on top of the colored fill when you're over — a flat grey tick vanishes exactly when being over plan is worth noticing.
-- **`.press`** — 120 ms scale/brightness on tap. Everything above is disabled under `prefers-reduced-motion`.
+- **Zero radius, from one block.** `--radius-xs` … `--radius-4xl` are all `0px`. Tailwind v4 resolves `rounded-xl` to `var(--radius-xl)`, so the 104 hardcoded `rounded-*` classes across 25 files squared without a single JSX edit. `rounded-full` is the one exception — v4 hardcodes it to `calc(infinity * 1px)` with no variable — so its 23 uses were removed by hand.
+- **The screen** — `body::before` is a much-weakened pastel bloom (a smooth gradient is the least pixel-native thing available, so it earns its place only by being nearly subliminal); `body::after` carries scanlines plus a 4×4 ordered dither. Scanline period is **3px, not 2px**: at 2px it beats against the device pixel grid on 1.5x and 2.5x DPR screens and crawls during scroll.
+- **`.card`** — 2px border, flat `bg-surface`, and a **solid offset shadow** rather than a blurred one. A blur is a lens; pixel art is drawn, so depth comes from a shape displaced by whole pixels. `.sheet-surface` is the same recipe one step brighter.
+- **`.press`** — the offset shadow *is* the affordance: at rest the control floats 2px up-left of its own shadow and pressing drops it onto it, in 60ms `steps(2)`. Replaces v3's `scale(0.97)`, which resampled the glyph grid mid-animation and made pixel text shimmer.
+- **`.meter`** — now segmented into discrete cells by a repeating hard-stop gradient, so small differences are *countable*, not merely visible. Plan tick unchanged (light core, dark halo).
+- **Blur is banned app-wide.** Every `backdrop-blur` and `blur-3xl` glow was removed — a lens over scrolling text smears the pixel grid it covers, and costs a GPU pass per frame on exactly the elements composited during scroll. Anything that was translucent-and-blurred is now opaque.
+- **Pixel art is drawn, never sourced.** `img-src 'self' data:` means a hotlinked asset is blocked by CSP in production while working fine in dev. Nav icons and the tin sprite are inline SVG on a 16×16 grid, filled `<rect>`s with `shape-rendering="crispEdges"` — stroked paths centre on their path and land on half-pixels. They also inherit the palette tokens, so art can't drift out of sync with the theme.
 
 ### Type & shape
 
-- **Typeface:** Inter for body, self-hosted via Fontsource (CSP-friendly, no external requests), fallback `system-ui`. All amounts use `font-variant-numeric: tabular-nums` so columns of money align.
-- **Display face (v3):** Nunito Variable (`--font-display`) for headings, envelope names and money — the rounded terminals do the cozying Inter deliberately won't. **Latin subset only, declared by hand** in `theme.css` rather than importing the Fontsource entrypoint: that entrypoint ships cyrillic/cyrillic-ext/vietnamese/latin-ext too and put ~124 KB of glyphs Tin will never render into the service worker precache. Latin covers English and Filipino (ñ is in U+0000–00FF). 39 KB instead of 124 KB. *Inter is still imported whole — trimming it the same way is a further ~130 KB of precache, unclaimed.*
-- **Scale (mobile-first, px/line-height):** balance hero 34/40 semibold · amount-lg 28/34 semibold · title 20/28 semibold · body 16/24 · secondary 14/20 · caption 12/16.
-- **Shape:** 16 px card radius, 12 px buttons, 24 px top radius on bottom sheets; min 44 px tap targets; bottom nav + Add button in the thumb zone.
-- **Motion:** 150–200 ms ease-out on sheets; none on data updates (numbers just change — it's a ledger, not a slot machine).
+- **Body:** Pixelify Sans, self-hosted via Fontsource, latin subset declared by hand. Chosen over VT323 because it ships **real weights** — the JSX carries hierarchy in `font-medium` (17 uses), `font-semibold` (42) and `font-bold` (38), and a single-weight face would collapse all 97 into one texture or into synthesized faux-bold.
+- **Display:** Press Start 2P (`--font-display`), **short headings only** — app name, section titles, button labels. It runs ~2.3× wider per character, so every heading that adopted it stepped *down* in size, and it is never applied to a sentence.
+- **Weight scale is remapped down one step** in `@theme`: `medium`→400, `semibold`→500, `bold`→600. A pixel face has no optical weight axis — it bolds by adding whole pixels to every stem, so the face's own 700 is double the stem width of its 400 and most of the app read as solid blocks. Remapping thinned all 97 usages from one block while keeping three distinct steps. No 700 face is loaded as a result.
+- **Numbers deliberately opt out of the pixel aesthetic.** `--font-numeric` (system monospace) is applied via the `tabular-nums` class. Pixel faces separate 6/8/5 and 0/8 by one or two lit pixels — fine for a score counter, not for a balance you act on. It also **fixes `₱`**: neither pixel face covers U+20B1, so before this every amount was a pixel-font number with a fallback-font peso sign glued to the front. This overloads a Tailwind utility on purpose — all 26 uses in the codebase are already exactly and only numeric content. Delete that one block in `theme.css` to revert.
+- **Font budget went down:** 36 KB (Press Start 2P + three Pixelify weights) against 87 KB for Inter + Nunito. Both old packages were uninstalled. The LCP element (the hero balance) now needs **no font download at all** — it renders in the system numeric stack.
+- **Shape:** 0 radius everywhere; 2px borders; min 44px tap targets; bottom nav + Add button in the thumb zone.
+- **Motion:** 140–180 ms on sheets, all `steps()` rather than eased, so transitions read as frames. None on data updates. Everything disabled under `prefers-reduced-motion`.
 
 ---
 
