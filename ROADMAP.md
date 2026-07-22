@@ -550,6 +550,8 @@ Work top to bottom; nothing depends on anything below it.
 
   **Verified in real Edge** (probe-b, `scratchpad/drive-import.mjs`): auto-mapping, sign detection, duplicate classification, bulk-categorise and the confirm bar all correct; stopped short of committing so the shared probe ledger stays clean — the commit path is covered by `src/db/import-flow.test.ts` instead. That run caught one genuine bug: the screen fetched categories with `[]` deps, so a **cold** load straight to `/import` could beat sync populating the mirror and leave the category pickers permanently empty. Now follows `version` like every other screen. 77 new tests (161 total).
 
+  **Shipped 2026-07-22** — commit `e0c9946`, pushed to `Jerrickhoo/tin`, deployed to <https://tin-jar.netlify.app>. Prod re-verified by deep-linking to `/import` on a cold load (the exact path that was broken): route resolves, auto-mapping correct, category pickers populate, no page errors. Prod ledger untouched — the smoke test stops before the confirm button.
+
 ---
 
 ## 6. Design system — midnight violet
