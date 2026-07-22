@@ -131,6 +131,17 @@ export function Settings() {
       <MfaSection />
 
       <section className="card p-4">
+        <h2 className="font-display font-bold">Envelopes &amp; categories</h2>
+        <p className="mt-1 text-sm text-ink-soft">
+          Change the 70/20/10 split, rename envelopes, add or archive categories. Past entries are
+          never re-allocated.
+        </p>
+        <Link to="/envelopes" className="mt-2 inline-block text-sm font-medium text-accent">
+          Manage envelopes →
+        </Link>
+      </section>
+
+      <section className="card p-4">
         <h2 className="font-display font-bold">Recurring</h2>
         <p className="mt-1 text-sm text-ink-soft">
           Rent, allowance, subscriptions — they log themselves on app open.

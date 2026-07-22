@@ -425,6 +425,7 @@ tin/
 │  │  ├─ split.ts                      #   largest-remainder split
 │  │  ├─ dates.ts                      #   Manila month/day keys, boundaries
 │  │  ├─ export.ts                     #   entries → CSV / JSON
+│  │  ├─ shares.ts                     #   split percentages ↔ bp    (Phase 3.5)
 │  │  ├─ import-draft.ts               #   StatementRow seam, dedupe  (Phase 8)
 │  │  └─ import-parse.ts               #   delimited text → rows      (Phase 8)
 │  ├─ db/
@@ -432,6 +433,7 @@ tin/
 │  │  ├─ dexie.ts                      # local mirror schema        (Phase 6)
 │  │  ├─ outbox.ts                     # pending-writes queue       (Phase 6)
 │  │  ├─ sync.ts                       # push outbox / delta pull   (Phase 6)
+│  │  ├─ config.ts                     # envelope/category writes  (Phase 3.5)
 │  │  └─ import.ts                     # classify + batch commit    (Phase 8)
 │  ├─ features/
 │  │  ├─ auth/                         # login, signup, session, logout(+cache wipe)
@@ -534,8 +536,21 @@ Work top to bottom; nothing depends on anything below it.
   - **Run it in incognito.** A normal-profile run scored 68 with TBT 3,080 ms and claimed "1,810 KiB unused JS" — against a 613 KB bundle, which is arithmetically impossible. That was extension code, not Tin. Incognito: TBT 20 ms.
   - **Run it on `/login`, not `/`.** With a session, `/` boots Dexie, the sync loop, seeding and the catch-up poster — a completely different workload from the static login screen these numbers describe. (Logged out, `/` redirects to `/login`, so incognito happens to be comparable.)
 
-  Verified while wiring the preload: only the two latin faces are ever fetched for latin text — the ext/cyrillic/vietnamese subsets never download. So trimming Inter to latin (still unclaimed) shrinks the **SW precache**, not the critical path; it will not move LCP.
+  Verified while wiring the preload: only the two latin faces are ever fetched for latin text — the ext/cyrillic/vietnamese subsets never download. So trimming Inter to latin shrinks the **SW precache**, not the critical path; it will not move LCP.
+
+  **Done 2026-07-22.** Inter now gets the same hand-declared latin-only `@font-face` Nunito has, in `theme.css`. Precache **953.02 KiB → 798.20 KiB across 18 → 12 entries**; the six unused Inter subsets are gone. Confirmed the trim didn't silently fall back to a system face — a wrong `@font-face` path fails invisibly — by checking `document.fonts` resolves both families and that `Peña ₱1,234` measures differently from monospace. LCP is unchanged by design.
 - [x] 7.6 Monthly export reminder — localStorage "last export" nudge in Settings (`lib/exportReminder.ts`, unit-tested), **not** a self-pointed recurring template (that would post fake money rows into the ledger it's meant to back up).
+
+**Phase 3.5 — Envelope & category management (retrofit, 2026-07-22)**
+
+> **Why this has its own heading:** §0 promises editable percentages and categories you can "rename/add/archive freely", and the §4 file tree claimed `settings/` already covered "envelopes, categories, percentages" — but **no phase ever gave it a task line**, so it was never built and nothing flagged it. Prose promises without a checklist item don't get built. Found 2026-07-22 by auditing the code against the roadmap's own claims rather than against its checkboxes.
+
+- [x] 3.5.1 Editable split — `/envelopes`, linked from Settings. Percentages in, basis points stored. The "active shares sum to 10000" invariant has **no database check behind it** (001_core.sql says a deferred trigger isn't worth it at this scale), so `lib/shares.ts` *is* the enforcement — and the save is **one upsert, not three updates**, because a partial failure would leave the split permanently malformed. `name` rides along in the upsert because its INSERT arm must satisfy every NOT NULL column. Verified against the live schema (saved 60/30/10, confirmed after reload, restored).
+- [x] 3.5.2 Envelope rename — label only; entries are untouched.
+- [x] 3.5.3 Categories add / rename / emoji / archive / restore. **No re-parenting, by design:** entries carry a composite FK `(category_id, envelope_id)`, so moving a category between envelopes is refused by the database once anything references it. 001_core.sql already called it — "archive + create new instead, which is the product rule anyway" — so the sheet says so in plain words instead of offering a control that fails.
+- [x] 3.5.4 Config writes go **direct to Supabase and need a connection**, following the Phase 5 recurring-templates precedent rather than the outbox. The outbox has exactly two op types on purpose, both idempotent money writes; config edits are rare, need server-side uniqueness, and have nothing to reconcile offline. After each write we `syncNow()` so the mirror the UI reads picks it up. 24 new tests.
+
+  Driving it caught a crash: an **empty** envelope list is not a ready state, and on a cold load the mirror is empty until the first pull — `envelopes[envelopes.length - 1].name` threw and took the screen into the ErrorBoundary. Same cold-load race as the import screen, worse symptom. Empty is now its own rendered state. **Worth remembering: `[]` is truthy, so `{list && …}` is not a loading guard.**
 
 **Phase 8 — GCash importer (optional)** — format-independent core DONE 2026-07-22; 8.1/8.2-PDF still open
 

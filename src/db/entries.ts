@@ -58,6 +58,19 @@ export async function fetchCategories(): Promise<Category[]> {
     }))
 }
 
+/** Includes archived — the Settings manager needs them to offer un-archiving. */
+export async function fetchCategoriesIncludingArchived(): Promise<Category[]> {
+  const db = await localDb()
+  const rows = await db.categories.orderBy('name').toArray()
+  return rows.map((r) => ({
+    id: r.id,
+    envelope_id: r.envelope_id,
+    name: r.name,
+    emoji: r.emoji,
+    archived_at: r.archived_at,
+  }))
+}
+
 export async function fetchBalances(): Promise<Map<string, number>> {
   const db = await localDb()
   const [envelopes, entries] = await Promise.all([

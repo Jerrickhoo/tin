@@ -12,6 +12,7 @@ import { Insights } from './features/analytics/Insights'
 import { Recurring } from './features/recurring/Recurring'
 import { ImportStatement } from './features/import/ImportStatement'
 import { Settings } from './features/settings/Settings'
+import { Envelopes } from './features/settings/Envelopes'
 import { SplitPreview } from './features/entries/SplitPreview'
 import { AppShell } from './AppShell'
 
@@ -34,6 +35,7 @@ export function AppRouter() {
             <Route path="/insights" element={<Insights />} />
             <Route path="/recurring" element={<Recurring />} />
             <Route path="/import" element={<ImportStatement />} />
+            <Route path="/envelopes" element={<Envelopes />} />
             <Route path="/settings" element={<Settings />} />
           </Route>
           <Route path="/split" element={<SplitPreview />} />
