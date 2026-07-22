@@ -19,7 +19,10 @@ export function pullWindowStart(cursorIso: string | null): string | null {
  * writes `Z` — lexicographic order across the two formats lies near ties.
  * An empty pull keeps the cursor exactly where it was.
  */
-export function advanceCursor(cursorIso: string | null, serverUpdatedAts: readonly string[]): string | null {
+export function advanceCursor(
+  cursorIso: string | null,
+  serverUpdatedAts: readonly string[],
+): string | null {
   let max = cursorIso
   for (const raw of serverUpdatedAts) {
     if (max === null || new Date(raw).getTime() > new Date(max).getTime()) max = raw

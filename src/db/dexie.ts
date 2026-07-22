@@ -139,7 +139,9 @@ async function mirrorInsertIgnoringDuplicates(db: TinDb, rows: EntryRow[]): Prom
   }
 }
 
-export async function applyLocalInsert(rows: readonly Omit<EntryRow, 'voided_at' | 'void_reason'>[]): Promise<void> {
+export async function applyLocalInsert(
+  rows: readonly Omit<EntryRow, 'voided_at' | 'void_reason'>[],
+): Promise<void> {
   const db = await localDb()
   const full: EntryRow[] = rows.map((r) => ({ ...r, voided_at: null, void_reason: null }))
   await db.transaction('rw', db.entries, db.outbox, async () => {

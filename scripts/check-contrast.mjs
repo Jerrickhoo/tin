@@ -29,7 +29,7 @@ const luminance = (hex) => {
 }
 const ratio = (fg, bg) => {
   const [a, b] = [luminance(fg) + 0.05, luminance(bg) + 0.05]
-  return (Math.max(a, b) / Math.min(a, b))
+  return Math.max(a, b) / Math.min(a, b)
 }
 
 const AA = 4.5 // normal-size text

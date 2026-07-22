@@ -20,18 +20,58 @@ import { drainOutbox, type OutboxOp } from './outbox'
 import * as entriesDb from './entries'
 
 const ENVELOPES = [
-  { id: 'env-needs', name: 'Needs', share_bp: 7000, sort_order: 0, color: '#B49BF5', archived_at: null },
-  { id: 'env-savings', name: 'Savings', share_bp: 2000, sort_order: 1, color: '#93CFA9', archived_at: null },
-  { id: 'env-wants', name: 'Wants', share_bp: 1000, sort_order: 2, color: '#EFA9D6', archived_at: null },
-  { id: 'env-old', name: 'Retired', share_bp: 0, sort_order: 3, color: null, archived_at: '2026-01-01T00:00:00.000Z' },
+  {
+    id: 'env-needs',
+    name: 'Needs',
+    share_bp: 7000,
+    sort_order: 0,
+    color: '#B49BF5',
+    archived_at: null,
+  },
+  {
+    id: 'env-savings',
+    name: 'Savings',
+    share_bp: 2000,
+    sort_order: 1,
+    color: '#93CFA9',
+    archived_at: null,
+  },
+  {
+    id: 'env-wants',
+    name: 'Wants',
+    share_bp: 1000,
+    sort_order: 2,
+    color: '#EFA9D6',
+    archived_at: null,
+  },
+  {
+    id: 'env-old',
+    name: 'Retired',
+    share_bp: 0,
+    sort_order: 3,
+    color: null,
+    archived_at: '2026-01-01T00:00:00.000Z',
+  },
 ]
 
 const CATEGORIES = [
   { id: 'cat-food', envelope_id: 'env-needs', name: 'Food', emoji: '🍚', archived_at: null },
-  { id: 'cat-dead', envelope_id: 'env-needs', name: 'Zzz', emoji: null, archived_at: '2026-01-01T00:00:00.000Z' },
+  {
+    id: 'cat-dead',
+    envelope_id: 'env-needs',
+    name: 'Zzz',
+    emoji: null,
+    archived_at: '2026-01-01T00:00:00.000Z',
+  },
 ]
 
-const food = { id: 'cat-food', envelope_id: 'env-needs', name: 'Food', emoji: '🍚', archived_at: null }
+const food = {
+  id: 'cat-food',
+  envelope_id: 'env-needs',
+  name: 'Food',
+  emoji: '🍚',
+  archived_at: null,
+}
 
 let expenseGroup: string
 let incomeGroup: string

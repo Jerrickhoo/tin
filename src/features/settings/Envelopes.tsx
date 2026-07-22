@@ -72,8 +72,8 @@ export function Envelopes() {
           against zero envelopes crashed this screen once. */}
       {envelopes?.length === 0 && (
         <p className="text-ink-soft">
-          No envelopes here yet — if you just signed in, they arrive with the first sync. Still empty
-          after a moment? Check your connection.
+          No envelopes here yet — if you just signed in, they arrive with the first sync. Still
+          empty after a moment? Check your connection.
         </p>
       )}
 
@@ -177,9 +177,7 @@ function SplitSection({
                 inputMode="decimal"
                 value={drafts[i]}
                 aria-label={`${env.name} share`}
-                onChange={(e) =>
-                  setDrafts((d) => d.map((v, j) => (j === i ? e.target.value : v)))
-                }
+                onChange={(e) => setDrafts((d) => d.map((v, j) => (j === i ? e.target.value : v)))}
                 className={`w-20 rounded-xl border bg-base px-2 py-2 text-right tabular-nums text-ink outline-none focus:border-accent ${
                   parsed[i] === null ? 'border-neg' : 'border-line'
                 }`}

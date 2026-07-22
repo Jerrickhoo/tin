@@ -52,12 +52,10 @@ export async function updateEnvelopeShares(
     throw new RangeError('shares must be non-negative whole basis points')
   }
 
-  const { error } = await supabase
-    .from('envelopes')
-    .upsert(
-      envelopes.map((e) => ({ id: e.id, name: e.name, share_bp: e.share_bp })),
-      { onConflict: 'id' },
-    )
+  const { error } = await supabase.from('envelopes').upsert(
+    envelopes.map((e) => ({ id: e.id, name: e.name, share_bp: e.share_bp })),
+    { onConflict: 'id' },
+  )
   if (error) throw error
   await refresh()
 }

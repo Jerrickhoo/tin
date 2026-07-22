@@ -85,9 +85,7 @@ function MfaChallenge({ onVerified }: { onVerified: () => void }) {
       }
     >
       <form onSubmit={onSubmit} className="flex flex-col gap-3">
-        <p className="text-sm text-ink-soft">
-          Enter the 6-digit code from your authenticator app.
-        </p>
+        <p className="text-sm text-ink-soft">Enter the 6-digit code from your authenticator app.</p>
         <input
           inputMode="numeric"
           autoComplete="one-time-code"

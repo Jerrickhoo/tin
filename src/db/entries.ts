@@ -88,7 +88,10 @@ export async function fetchEntries(limit = 400): Promise<EntryRow[]> {
 /** Entries in [startIso, endIso), non-voided — the Insights month window. */
 export async function fetchEntriesBetween(startIso: string, endIso: string): Promise<EntryRow[]> {
   const db = await localDb()
-  const rows = await db.entries.where('occurred_at').between(startIso, endIso, true, false).toArray()
+  const rows = await db.entries
+    .where('occurred_at')
+    .between(startIso, endIso, true, false)
+    .toArray()
   return rows.filter((r) => r.voided_at === null)
 }
 

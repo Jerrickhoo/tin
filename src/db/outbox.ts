@@ -5,12 +5,7 @@
 // module (and its tests) never touch the network.
 
 import type { EntryRow } from '../lib/groups'
-import {
-  deleteOutboxRow,
-  firstOutboxRow,
-  notifyOutboxChanged,
-  recordOutboxFailure,
-} from './dexie'
+import { deleteOutboxRow, firstOutboxRow, notifyOutboxChanged, recordOutboxFailure } from './dexie'
 
 /** An entry as first inserted — voiding fields don't exist yet. */
 export type NewEntryRow = Omit<EntryRow, 'voided_at' | 'void_reason'>

@@ -63,10 +63,7 @@ export function summarizeShares(sharesBp: readonly number[]): ShareSummary {
  * the arithmetic. Returns null when the fix would push that envelope out of
  * range, because silently clamping would produce a total that still isn't 100%.
  */
-export function balanceInto(
-  sharesBp: readonly number[],
-  index: number,
-): number[] | null {
+export function balanceInto(sharesBp: readonly number[], index: number): number[] | null {
   const { deltaBp } = summarizeShares(sharesBp)
   const fixed = sharesBp[index] - deltaBp
   if (fixed < 0 || fixed > TOTAL_BP) return null
