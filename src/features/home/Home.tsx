@@ -7,7 +7,8 @@ import {
   hasAnyEntries,
   type Envelope,
 } from '../../db/entries'
-import { loggingStrip, type LoggedDay } from '../../lib/logging-streak'
+import { manilaDayKey } from '../../lib/dates'
+import { loggingStrip, spentOnDay, type LoggedDay } from '../../lib/logging-streak'
 import { formatPHP } from '../../lib/money'
 import { OpeningBalancesSheet } from './OpeningBalancesSheet'
 
@@ -54,6 +55,7 @@ export function Home() {
   // makes its balance quietly disappear from the one number you check daily.
   const [offCardCentavos, setOffCardCentavos] = useState(0)
   const [strip, setStrip] = useState<LoggedDay[] | null>(null)
+  const [todayCentavos, setTodayCentavos] = useState(0)
 
   useEffect(() => {
     let active = true
@@ -78,6 +80,8 @@ export function Home() {
         setOffCardCentavos(off)
         setEmpty(!anyEntries)
         setStrip(loggingStrip(recent))
+        // Same 8-day window, second use — no extra query.
+        setTodayCentavos(spentOnDay(recent, manilaDayKey(new Date())))
       } catch (err) {
         if (active) toast.show(err instanceof Error ? err.message : String(err), 'error')
       }
@@ -128,6 +132,17 @@ export function Home() {
           {cards && offCardCentavos !== 0 && (
             <p className="mt-1 text-xs text-ink-mute">
               includes {formatPHP(offCardCentavos)} in archived envelopes
+            </p>
+          )}
+          {/* Today's spend, under the balance rather than on its own card: the
+              two numbers answer one question together ("how am I doing right
+              now?") and splitting them across cards would make you look twice.
+              Hidden at zero — "spent today ₱0.00" before you have bought
+              anything reads as a scolding, not a fact. */}
+          {cards && todayCentavos > 0 && (
+            <p className="mt-2 text-xs text-ink-soft tabular-nums">
+              <span className="text-ink-mute">spent today </span>
+              {formatPHP(todayCentavos)}
             </p>
           )}
           {strip && <LoggingStrip days={strip} />}

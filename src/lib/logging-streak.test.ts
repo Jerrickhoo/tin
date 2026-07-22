@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { loggingStrip, STRIP_DAYS } from './logging-streak'
+import { loggingStrip, spentOnDay, STRIP_DAYS } from './logging-streak'
 import type { EntryRow } from './groups'
 
 // 12:00 UTC = 20:00 Manila, comfortably inside the same Manila day
@@ -70,5 +70,52 @@ describe('loggingStrip', () => {
 
   it('flags exactly one day as today', () => {
     expect(loggingStrip([], NOW).filter((d) => d.isToday)).toHaveLength(1)
+  })
+})
+
+describe('spentOnDay', () => {
+  const today = '2026-07-22'
+
+  it('sums expenses on the day as positive centavos', () => {
+    const rows = [
+      entry('2026-07-22T01:00:00.000Z', { amount_centavos: -1300 }),
+      entry('2026-07-22T09:00:00.000Z', { amount_centavos: -5000 }),
+    ]
+    expect(spentOnDay(rows, today)).toBe(6300)
+  })
+
+  it('excludes other days', () => {
+    const rows = [entry('2026-07-21T01:00:00.000Z', { amount_centavos: -1300 })]
+    expect(spentOnDay(rows, today)).toBe(0)
+  })
+
+  it('excludes income, transfers and adjustments', () => {
+    const rows = [
+      entry('2026-07-22T01:00:00.000Z', { kind: 'income', amount_centavos: 10000 }),
+      entry('2026-07-22T02:00:00.000Z', { kind: 'transfer', amount_centavos: -5000 }),
+      entry('2026-07-22T03:00:00.000Z', { kind: 'adjustment', amount_centavos: -700 }),
+    ]
+    expect(spentOnDay(rows, today)).toBe(0)
+  })
+
+  it('excludes voided entries, so an undo corrects the figure', () => {
+    const rows = [
+      entry('2026-07-22T01:00:00.000Z', { amount_centavos: -1300 }),
+      entry('2026-07-22T02:00:00.000Z', {
+        amount_centavos: -9900,
+        voided_at: '2026-07-22T02:00:05.000Z',
+      }),
+    ]
+    expect(spentOnDay(rows, today)).toBe(1300)
+  })
+
+  it('keys by Manila day — a 1am Manila entry is not the previous UTC day', () => {
+    // 17:00Z on the 21st is 01:00 Manila on the 22nd
+    const rows = [entry('2026-07-21T17:00:00.000Z', { amount_centavos: -1300 })]
+    expect(spentOnDay(rows, today)).toBe(1300)
+  })
+
+  it('is zero on an empty ledger', () => {
+    expect(spentOnDay([], today)).toBe(0)
   })
 })

@@ -60,3 +60,27 @@ export function loggingStrip(rows: readonly EntryRow[], now: Date = new Date()):
   }
   return days
 }
+
+/**
+ * Total spent on a given Manila day, as positive centavos.
+ *
+ * Expenses only. Transfers move money between envelopes without leaving the
+ * tin, and income is not spending — including either would make the number
+ * mean nothing. Adjustments (opening balances, corrections) are excluded for
+ * the same reason: they are bookkeeping, not a purchase you made.
+ *
+ * Voided entries are excluded, so undoing a mistyped entry immediately
+ * corrects the figure rather than leaving today looking expensive.
+ */
+export function spentOnDay(rows: readonly EntryRow[], dayKey: string): number {
+  let total = 0
+  for (const row of rows) {
+    if (row.kind !== 'expense') continue
+    if (row.voided_at !== null) continue
+    const at = new Date(row.occurred_at)
+    if (Number.isNaN(at.getTime())) continue
+    if (manilaDayKey(at) !== dayKey) continue
+    total += Math.abs(row.amount_centavos)
+  }
+  return total
+}

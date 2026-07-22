@@ -31,20 +31,33 @@ const LABELS: Partial<Record<KeypadKey, string>> = {
 export function Keypad({ onKey }: { onKey: (key: KeypadKey) => void }) {
   return (
     <div className="mt-5 grid grid-cols-3 gap-2" role="group" aria-label="Amount keypad">
-      {KEYPAD_ROWS.flat().map((key) => (
-        <button
-          key={key}
-          type="button"
-          aria-label={LABELS[key] ?? key}
-          // No `press` transition on the digits themselves would make the pad
-          // feel dead; `.press` gives the same 2px drop every other control in
-          // the app uses, so the pad reads as part of the same machine.
-          className="press flex h-12 items-center justify-center border-2 border-line bg-raised text-xl font-bold tabular-nums text-ink shadow-[2px_2px_0_0_rgb(0_0_0/0.55)] select-none"
-          onClick={() => onKey(key)}
-        >
-          {key === 'back' ? BackspaceIcon : key}
-        </button>
-      ))}
+      {KEYPAD_ROWS.flat().map((key) => {
+        // Digits are the hot path and carry full ink; point and backspace are
+        // corrections, so they sit back a step. Without this every key has
+        // identical weight and the pad reads as an undifferentiated wall of
+        // twelve blocks, which is slower to aim at than it looks.
+        const secondary = key === '.' || key === 'back'
+        return (
+          <button
+            key={key}
+            type="button"
+            aria-label={LABELS[key] ?? key}
+            // h-14 (56px) clears the 44px minimum tap target with room for the
+            // 2px press travel, which eats into the target at the bottom edge.
+            // `.press` gives the same drop every other control uses, so the pad
+            // reads as part of the same machine rather than a bolted-on widget.
+            // touch-manipulation kills the ~300ms double-tap-zoom wait, which
+            // on a pad you tap four times in a row is the difference between
+            // responsive and laggy.
+            className={`press flex h-14 touch-manipulation items-center justify-center border-2 border-line text-2xl font-bold tabular-nums shadow-[2px_2px_0_0_rgb(0_0_0/0.55)] select-none ${
+              secondary ? 'bg-surface text-ink-soft' : 'bg-raised text-ink'
+            }`}
+            onClick={() => onKey(key)}
+          >
+            {key === 'back' ? BackspaceIcon : key}
+          </button>
+        )
+      })}
     </div>
   )
 }

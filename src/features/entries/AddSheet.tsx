@@ -15,6 +15,7 @@ import {
   type Envelope,
 } from '../../db/entries'
 import { rankByUse } from '../../lib/category-rank'
+import { frequentAmounts } from '../../lib/frequent-amounts'
 import { applyKeypadKey, KEYPAD_PLACEHOLDER } from '../../lib/keypad'
 import { formatPHP, parseAmountToCentavos } from '../../lib/money'
 import { splitByLargestRemainder } from '../../lib/split'
@@ -74,6 +75,7 @@ export function AddSheet({
   const [busy, setBusy] = useState(false)
   const [envelopes, setEnvelopes] = useState<Envelope[]>([])
   const [categories, setCategories] = useState<Category[]>([])
+  const [quickAmounts, setQuickAmounts] = useState<number[]>([])
 
   useEffect(() => {
     if (!open) return
@@ -92,6 +94,8 @@ export function AddSheet({
         // scan through an alphabetical grid). Ties and empty ledgers fall back
         // to alphabetical, so a fresh install is unchanged.
         setCategories(rankByUse(cats, recent))
+        // Same window, second use — the repeated-amount chips. Free.
+        setQuickAmounts(frequentAmounts(recent))
       })
       .catch((err) => toast.show(err instanceof Error ? err.message : String(err), 'error'))
     return () => {
@@ -258,6 +262,26 @@ export function AddSheet({
       </div>
       {amount.trim() !== '' && !amountOk && (
         <p className="mt-2 text-center text-sm text-neg">Up to two decimals, more than zero.</p>
+      )}
+
+      {/* Amounts you actually repeat. Shown only while the field is empty:
+          these are shortcuts to START an entry, and once you are typing they
+          would be three buttons that throw away what you have keyed in.
+          Expense-only — income and transfers do not repeat to the centavo the
+          way a fare or a load top-up does. */}
+      {mode === 'expense' && amount === '' && quickAmounts.length > 0 && (
+        <div className="mt-4 flex gap-2" role="group" aria-label="Frequent amounts">
+          {quickAmounts.map((centavos) => (
+            <button
+              key={centavos}
+              type="button"
+              onClick={() => setAmount((centavos / 100).toFixed(2))}
+              className="press flex-1 border-2 border-line bg-raised px-2 py-2 text-sm font-semibold tabular-nums text-ink-soft shadow-[2px_2px_0_0_rgb(0_0_0/0.55)]"
+            >
+              {formatPHP(centavos)}
+            </button>
+          ))}
+        </div>
       )}
 
       {/* Touch only. See useCoarsePointer — on a keyboard device the number row
