@@ -81,6 +81,15 @@ export async function fetchBalances(): Promise<Map<string, number>> {
   return balancesFromEntries(envelopes as string[], entries)
 }
 
+/** Rows per History page. Counts rows, not groups — see below. */
+export const HISTORY_PAGE_ROWS = 200
+
+export interface EntryPage {
+  rows: EntryRow[]
+  /** the mirror holds older rows this page did not reach */
+  hasMore: boolean
+}
+
 /**
  * The most recent entries, as WHOLE groups, newest first.
  *
@@ -91,14 +100,13 @@ export async function fetchBalances(): Promise<Map<string, number>> {
  * which groups are recent enough; every leg of those groups is then re-read via
  * the group_id index.
  */
-export async function fetchEntries(limit = 400): Promise<EntryRow[]> {
-  const db = await localDb()
-  const window = await db.entries.orderBy('[occurred_at+id]').reverse().limit(limit).toArray()
-  if (window.length === 0) return []
-  const groupIds = [...new Set(window.map((r) => r.group_id))]
-  const complete = await db.entries.where('group_id').anyOf(groupIds).toArray()
-  // groupEntries requires occurred_at desc; mirror the compound index's order
-  return complete.sort((a, b) =>
+export async function fetchEntries(limit = HISTORY_PAGE_ROWS): Promise<EntryRow[]> {
+  return (await fetchEntryPage(limit)).rows
+}
+
+/** groupEntries requires occurred_at desc; mirror the compound index's order. */
+function newestFirst(rows: EntryRow[]): EntryRow[] {
+  return rows.sort((a, b) =>
     a.occurred_at === b.occurred_at
       ? a.id < b.id
         ? 1
@@ -109,6 +117,60 @@ export async function fetchEntries(limit = 400): Promise<EntryRow[]> {
         ? 1
         : -1,
   )
+}
+
+/**
+ * One page of History, plus whether there is anything older behind it.
+ *
+ * The page used to be the whole feature: `fetchEntries` took the newest 400
+ * rows and History called it with no argument, no "load older", and no hint
+ * that a wall existed. At three entries a day — and an income is three rows on
+ * its own — that is about four months before the ledger's past silently stopped
+ * rendering. The rows were never lost (the mirror holds everything, and the
+ * export reads all of it); the screen built to prove the ledger is honest just
+ * showed a truncated one.
+ *
+ * `hasMore` is exact rather than inferred from `window.length === limit`.
+ * Whole-group expansion can pull in rows the window never reached, so the only
+ * truthful test is whether the table still holds something this page does not.
+ * An indexed count is cheap enough to do properly.
+ */
+export async function fetchEntryPage(limit = HISTORY_PAGE_ROWS): Promise<EntryPage> {
+  const db = await localDb()
+  const window = await db.entries.orderBy('[occurred_at+id]').reverse().limit(limit).toArray()
+  if (window.length === 0) return { rows: [], hasMore: false }
+  const groupIds = [...new Set(window.map((r) => r.group_id))]
+  const [complete, total] = await Promise.all([
+    db.entries.where('group_id').anyOf(groupIds).toArray(),
+    db.entries.count(),
+  ])
+  return { rows: newestFirst(complete), hasMore: total > complete.length }
+}
+
+/**
+ * The whole ledger, newest first.
+ *
+ * History switches to this the moment a search or filter is active, and that is
+ * not an optimisation detail — it is the difference between a search and a lie.
+ * Filtering only the loaded page would answer "three results" to a question
+ * whose real answer is forty, while looking exactly like a complete search. The
+ * mirror is local and a personal ledger is thousands of rows, which is the same
+ * bet `prepareDrafts` already makes when it reads the table whole to dedupe.
+ */
+export async function fetchAllEntriesNewestFirst(): Promise<EntryRow[]> {
+  const db = await localDb()
+  return newestFirst(await db.entries.toArray())
+}
+
+/** Which of these entry ids the ledger already holds — the restore preflight. */
+export async function existingEntryIds(ids: readonly string[]): Promise<Set<string>> {
+  if (ids.length === 0) return new Set()
+  const db = await localDb()
+  const found = await db.entries
+    .where('id')
+    .anyOf([...ids])
+    .primaryKeys()
+  return new Set(found as string[])
 }
 
 /** Entries in [startIso, endIso), non-voided — the Insights month window. */

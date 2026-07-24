@@ -67,6 +67,32 @@ export function daysInMonth(monthKey: string): number {
   return new Date(Date.UTC(year, month, 0)).getUTCDate()
 }
 
+/**
+ * Days left in the month a day key falls in, counting that day itself.
+ *
+ * Never 0: today is always one of the days you can still spend on, and a zero
+ * would divide an allowance by nothing. On the last of the month it returns 1,
+ * which correctly makes the day's allowance the whole remaining balance.
+ */
+export function daysRemainingInMonth(dayKey: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayKey)
+  if (!m) throw new RangeError(`invalid day key: ${dayKey}`)
+  const day = Number(m[3])
+  const total = daysInMonth(dayKey.slice(0, 7))
+  if (day < 1 || day > total) throw new RangeError(`invalid day key: ${dayKey}`)
+  return total - day + 1
+}
+
+/** The `count` month keys ending at `monthKey`, oldest first. */
+export function recentMonthKeys(monthKey: string, count: number): string[] {
+  if (!Number.isInteger(count) || count < 1)
+    throw new RangeError('count must be a positive integer')
+  parseMonthKey(monthKey)
+  const keys = [monthKey]
+  for (let i = 1; i < count; i += 1) keys.push(prevMonthKey(keys[keys.length - 1]))
+  return keys.reverse()
+}
+
 const MANILA_UTC_OFFSET_MS = 8 * 60 * 60 * 1000
 
 export interface UtcRange {

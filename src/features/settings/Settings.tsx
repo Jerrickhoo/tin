@@ -1,6 +1,6 @@
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Link } from 'react-router'
-import { useToast } from '../../app-context'
+import { useLedger, useToast } from '../../app-context'
 import { supabase } from '../../db/supabase'
 import { wipeLocalCaches } from '../../db/cacheWipe'
 import { discardOutboxRow, outboxCount, stuckOutboxRow, type OutboxRow } from '../../db/dexie'
@@ -11,7 +11,9 @@ import {
   fetchAllEntriesForExport,
   fetchAllEnvelopesForExport,
 } from '../../db/entries'
+import { applyRestore, planRestoreFromBundle } from '../../db/restore'
 import { entriesToCsv, entriesToJson } from '../../lib/export'
+import { isBlocked, parseBundle, type RestorePlan } from '../../lib/restore'
 import { manilaDayKey } from '../../lib/dates'
 import { exportReminderStatus, getLastExport, recordExport } from '../../lib/exportReminder'
 import { getTexture, setTexture, type Texture } from '../../lib/texture'
@@ -168,6 +170,160 @@ function AppearanceSection() {
   )
 }
 
+/**
+ * The other half of Export.
+ *
+ * An export nothing can read back is a file, not a backup — it proves what
+ * happened and restores none of it. This reads one in.
+ *
+ * Two-stage on purpose: picking a file only ever builds a PLAN and shows it.
+ * Nothing is written until the count on the button is the count you agreed to.
+ * A restore is bulk money movement, and the one thing it must never be is a
+ * single tap away from a file picker.
+ */
+function RestoreSection() {
+  const toast = useToast()
+  const { bump } = useLedger()
+  const fileInput = useRef<HTMLInputElement>(null)
+  const [plan, setPlan] = useState<RestorePlan | null>(null)
+  const [fileName, setFileName] = useState('')
+  const [busy, setBusy] = useState<'reading' | 'writing' | null>(null)
+
+  function reset() {
+    setPlan(null)
+    setFileName('')
+    if (fileInput.current) fileInput.current.value = ''
+  }
+
+  async function onPick(file: File) {
+    setBusy('reading')
+    try {
+      const bundle = parseBundle(await file.text())
+      setPlan(await planRestoreFromBundle(bundle))
+      setFileName(file.name)
+    } catch (err) {
+      reset()
+      toast.show(err instanceof Error ? err.message : String(err), 'error')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function confirm(ready: RestorePlan) {
+    setBusy('writing')
+    try {
+      const result = await applyRestore(ready)
+      bump()
+      reset()
+      toast.show(`Restored ${result.rows} entries — syncing them up now`)
+    } catch (err) {
+      toast.show(err instanceof Error ? err.message : String(err), 'error')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const blocked = plan !== null && isBlocked(plan)
+
+  return (
+    <section className="card p-4">
+      <h2 className="font-display text-[0.6875rem] leading-relaxed">Restore from a backup</h2>
+      <p className="mt-1 mb-3 text-sm text-ink-soft">
+        Read a <code className="text-ink">tin-export-….json</code> back in. Entries only —
+        envelopes, categories and your 70/20/10 split are matched by name, never overwritten.
+        Re-reading the same file changes nothing, so it is safe to retry.
+      </p>
+
+      {plan === null ? (
+        <label className="press inline-block cursor-pointer rounded-xl border border-line px-3 py-2.5 font-semibold text-ink">
+          {busy === 'reading' ? 'Reading…' : 'Choose a JSON backup'}
+          <input
+            ref={fileInput}
+            type="file"
+            accept="application/json,.json"
+            className="sr-only"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) void onPick(file)
+            }}
+          />
+        </label>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <div className="rounded-xl border border-line bg-base/60 px-3 py-2.5 text-sm">
+            <p className="truncate font-medium text-ink">{fileName}</p>
+            <p className="mt-1 text-ink-soft tabular-nums">
+              {plan.rows.length} ledger rows in {plan.groupCount} entries
+            </p>
+            <p className="mt-0.5 text-xs text-ink-mute tabular-nums">
+              {plan.newCount} new · {plan.alreadyPresent} already here
+              {plan.voids.length > 0 && ` · ${plan.voids.length} voided`}
+            </p>
+          </div>
+
+          {blocked && (
+            <div className="rounded-xl border border-neg/40 bg-neg/10 px-3 py-2.5 text-sm">
+              {/* Refused UP FRONT and named, rather than let through to fail in
+                  the outbox. The queue is strict FIFO, so a row the server
+                  rejects on a foreign key stops every write behind it until
+                  someone finds the Discard button in "A write is stuck". */}
+              <p className="font-semibold text-neg">Nowhere to put some of this</p>
+              <p className="mt-1 text-ink-soft">
+                Create these in{' '}
+                <Link to="/envelopes" className="text-accent">
+                  Envelopes &amp; categories
+                </Link>{' '}
+                first, spelled the same way, then pick the file again:
+              </p>
+              <ul className="mt-2 list-inside list-disc text-ink-soft">
+                {plan.missingEnvelopes.map((name) => (
+                  <li key={`env-${name}`}>envelope “{name}”</li>
+                ))}
+                {plan.missingCategories.map((name) => (
+                  <li key={`cat-${name}`}>category “{name}”</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {!blocked && plan.newCount === 0 && (
+            <p className="text-sm text-ink-soft">
+              Every entry in this file is already on your ledger — there is nothing to restore.
+            </p>
+          )}
+
+          <div className="flex gap-2">
+            {/* Disabled, not merely unhelpful, when nothing is new: the line
+                above already says there is nothing to restore, and a button
+                offering to restore 38 entries beside it makes the panel say two
+                different things about the same file. */}
+            <button
+              type="button"
+              disabled={blocked || busy !== null || plan.newCount === 0}
+              onClick={() => void confirm(plan)}
+              className="press flex-1 rounded-xl bg-accent px-3 py-2.5 font-semibold text-on-accent disabled:opacity-40"
+            >
+              {busy === 'writing'
+                ? 'Restoring…'
+                : plan.newCount === 0
+                  ? 'Nothing new to restore'
+                  : `Restore ${plan.groupCount} entries`}
+            </button>
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={reset}
+              className="press rounded-xl border border-line px-3 py-2.5 text-ink-soft disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
 export function Settings() {
   const { session } = useSession()
   const toast = useToast()
@@ -275,6 +431,8 @@ export function Settings() {
           </button>
         </div>
       </section>
+
+      <RestoreSection />
 
       <MfaSection />
 

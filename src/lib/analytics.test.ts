@@ -4,6 +4,7 @@ import {
   monthPace,
   OTHER,
   spendBreakdown,
+  spendTrend,
   splitAdherence,
   summarizeMonth,
   UNCATEGORIZED,
@@ -231,5 +232,89 @@ describe('splitAdherence', () => {
   it('reports null mix when nothing was spent (no fake 0% bars)', () => {
     const rows = splitAdherence(new Map(), envelopes)
     expect(rows.every((r) => r.actualBp === null)).toBe(true)
+  })
+})
+
+describe('spendTrend', () => {
+  const month = (monthKey: string, byEnvelope: [string, number][], total?: number) => ({
+    monthKey,
+    summary: {
+      spendingCentavos: total ?? byEnvelope.reduce((s, [, n]) => s + n, 0),
+      spendingByEnvelope: new Map(byEnvelope),
+    },
+  })
+
+  it('aligns each month to the envelope ids given', () => {
+    const trend = spendTrend(
+      [
+        month('2026-06', [
+          ['needs', 700_00],
+          ['wants', 100_00],
+        ]),
+        month('2026-07', [
+          ['needs', 500_00],
+          ['wants', 300_00],
+        ]),
+      ],
+      ['needs', 'savings', 'wants'],
+    )
+    expect(trend.months[0].perEnvelopeCentavos).toEqual([700_00, 0, 100_00])
+    expect(trend.months[1].perEnvelopeCentavos).toEqual([500_00, 0, 300_00])
+  })
+
+  it('keeps a month with no entries as a zero rather than dropping it', () => {
+    const trend = spendTrend([month('2026-06', []), month('2026-07', [['needs', 100]])], ['needs'])
+    expect(trend.months.map((m) => m.monthKey)).toEqual(['2026-06', '2026-07'])
+    expect(trend.months[0].totalCentavos).toBe(0)
+  })
+
+  it('parks spending on an unlisted envelope in `other`, so the parts sum to the total', () => {
+    // an archived envelope is not in the id list, but its expenses are real
+    const trend = spendTrend(
+      [
+        month(
+          '2026-07',
+          [
+            ['needs', 700_00],
+            ['retired', 50_00],
+          ],
+          750_00,
+        ),
+      ],
+      ['needs'],
+    )
+    const [m] = trend.months
+    expect(m.perEnvelopeCentavos).toEqual([700_00])
+    expect(m.otherCentavos).toBe(50_00)
+    expect(m.perEnvelopeCentavos[0] + m.otherCentavos).toBe(m.totalCentavos)
+  })
+
+  it('never reports a negative remainder', () => {
+    const trend = spendTrend([month('2026-07', [['needs', 900_00]], 100_00)], ['needs'])
+    expect(trend.months[0].otherCentavos).toBe(0)
+  })
+
+  it('reports a peak per row, because each row is scaled to its own', () => {
+    const trend = spendTrend(
+      [
+        month('2026-06', [
+          ['needs', 700_00],
+          ['wants', 900_00],
+        ]),
+        month('2026-07', [
+          ['needs', 800_00],
+          ['wants', 100_00],
+        ]),
+      ],
+      ['needs', 'wants'],
+    )
+    expect(trend.peakPerEnvelopeCentavos).toEqual([800_00, 900_00])
+    expect(trend.peakTotalCentavos).toBe(1_600_00)
+  })
+
+  it('reports a zero peak for a ledger with no spending at all', () => {
+    const trend = spendTrend([month('2026-07', [])], ['needs'])
+    expect(trend.peakTotalCentavos).toBe(0)
+    expect(trend.peakPerEnvelopeCentavos).toEqual([0])
   })
 })

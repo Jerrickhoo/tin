@@ -9,7 +9,8 @@ import {
 } from '../../db/entries'
 import { readCheckIns } from '../../db/dexie'
 import { readStreakSaves, repairDay } from '../../db/streak'
-import { manilaDayKey, manilaHour } from '../../lib/dates'
+import { allowancePerDay, spentTodayByEnvelope } from '../../lib/allowance'
+import { daysRemainingInMonth, manilaDayKey, manilaHour } from '../../lib/dates'
 import {
   computeStreak,
   loggingStrip,
@@ -59,6 +60,7 @@ export function Home() {
   const [offCardCentavos, setOffCardCentavos] = useState(0)
   const [strip, setStrip] = useState<LoggedDay[] | null>(null)
   const [todayCentavos, setTodayCentavos] = useState(0)
+  const [spentToday, setSpentToday] = useState<Map<string, number>>(new Map())
   const [streak, setStreak] = useState<StreakState | null>(null)
   const [repairing, setRepairing] = useState(false)
 
@@ -89,8 +91,11 @@ export function Home() {
         for (const [id, balance] of balances) if (!onCard.has(id)) off += balance
         setOffCardCentavos(off)
         setEmpty(!anyEntries)
+        const todayKey = manilaDayKey(new Date())
         setStrip(loggingStrip(recent, checkIns))
-        setTodayCentavos(spentOnDay(recent, manilaDayKey(new Date())))
+        setTodayCentavos(spentOnDay(recent, todayKey))
+        // Same window, third use — the per-envelope daily allowance. Free.
+        setSpentToday(spentTodayByEnvelope(recent, todayKey))
         setStreak(computeStreak(recent, saves, checkIns))
       } catch (err) {
         if (active) toast.show(err instanceof Error ? err.message : String(err), 'error')
@@ -123,6 +128,11 @@ export function Home() {
   // money. Summing signed balances would let one overdrawn envelope push the
   // others past 100% — the meters would lie.
   const funded = (cards ?? []).reduce((sum, c) => sum + Math.max(0, c.balanceCentavos), 0)
+  // The forward-looking half of the screen. Deliberately per envelope and never
+  // summed into one "safe to spend" figure — see lib/allowance.ts: with no flag
+  // marking which envelope is savings, an aggregate would quietly invite you to
+  // spend the savings envelope.
+  const daysLeft = daysRemainingInMonth(manilaDayKey(now))
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-5 py-7 md:max-w-4xl md:gap-5 md:px-8 md:py-10">
@@ -219,6 +229,8 @@ export function Home() {
               key={card.id}
               card={card}
               funded={funded}
+              daysLeft={daysLeft}
+              spentTodayCentavos={spentToday.get(card.id) ?? 0}
               onCover={() =>
                 addSheet.open({
                   mode: 'transfer',
@@ -467,10 +479,14 @@ function TinJar() {
 function EnvelopeCard({
   card,
   funded,
+  daysLeft,
+  spentTodayCentavos,
   onCover,
 }: {
   card: Card
   funded: number
+  daysLeft: number
+  spentTodayCentavos: number
   onCover: () => void
 }) {
   const color = card.color ?? '#AFA7C2'
@@ -479,6 +495,7 @@ function EnvelopeCard({
   // An overdrawn envelope holds none of the money — its meter reads empty and
   // the red state carries the meaning instead.
   const actualPct = funded > 0 && !red ? (card.balanceCentavos / funded) * 100 : 0
+  const perDay = allowancePerDay(card.balanceCentavos, daysLeft)
 
   return (
     <article className="card px-4 pt-3.5 pb-4">
@@ -518,6 +535,27 @@ function EnvelopeCard({
         <span className="mx-1.5 opacity-50">·</span>
         plan {planPct}%
       </p>
+
+      {/* The only forward-looking number on Home. Everything above it reports
+          what already happened; this one answers "can I buy this?", which is
+          the question the balance is actually being read for.
+          Hidden when the envelope has nothing to give — an overdrawn card's
+          message is the cover button below, and "₱0.00/day" underneath it would
+          just be the same bad news twice. */}
+      {perDay > 0 && (
+        <p className="mt-1.5 text-xs tabular-nums">
+          <span className="font-semibold text-ink">{formatPHP(perDay)}</span>
+          <span className="text-ink-mute">
+            /day for the {daysLeft === 1 ? 'last day' : `${daysLeft} days left`}
+          </span>
+          {spentTodayCentavos > 0 && (
+            <>
+              <span className="mx-1.5 text-ink-mute opacity-50">·</span>
+              <span className="text-ink-soft">{formatPHP(spentTodayCentavos)} today</span>
+            </>
+          )}
+        </p>
+      )}
 
       {red && (
         <button

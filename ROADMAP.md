@@ -6,9 +6,9 @@
 
 ---
 
-## Status — all phases closed (2026-07-22), Phase 9 added 2026-07-24
+## Status — all phases closed (2026-07-22), Phases 9 and 10 added 2026-07-24
 
-**Live at <https://tin-jar.netlify.app>.** Phases 0–9 are done, plus a Phase 3.5 retrofit. 305 tests; lint, build and the AA-contrast script all clean. `git push` to `main` deploys.
+**Live at <https://tin-jar.netlify.app>.** Phases 0–10 are done, plus a Phase 3.5 retrofit. 405 tests; lint, build and the AA-contrast script all clean. `git push` to `main` deploys.
 
 | Phase | State |
 | ----- | ----- |
@@ -18,6 +18,7 @@
 | 4–7 Analytics, recurring, offline, hardening | ✅ |
 | 8 Statement importer | ✅ **closed** — importer shipped; the GCash-PDF-specific reader was **dropped by decision**, not left pending |
 | 9 Habit loop & insight rework | ✅ — streak + repair saves + check-ins, true-ratio spending breakdown, calmer backdrop. **Web Push explicitly NOT built** — see §9. |
+| 10 The review surfaces | ✅ — History paging + whole-ledger search, **restore from a JSON export**, per-envelope daily allowance, note chips, 6-month trend. See §10. |
 
 This document stops being a plan here and becomes the record of why things are the way they are. The parts worth reading before changing anything: **§1 engineering law**, the **§3** notes on composite ownership FKs and the missing sum-to-10000 check, **§6**'s known CVD gap, and the closure note on Phase 8.
 
@@ -764,3 +765,73 @@ Four details that would each have been a silent bug:
 
 Migration 004 is a **separate table from `streak_saves`**, not a `kind` column on it. Saves are capped at 3/month and that cap is a row count per month; folding unlimited check-ins into the same table would make every budget check filter on kind, and the first place that forgot would silently lock the user out of repairs for the month.
 
+
+---
+
+## 10. Phase 10 — the review surfaces (2026-07-24)
+
+Six changes, from an audit of what a daily user can and cannot do with a ledger they have been keeping for months. The first two are not polish; they are promises the app had already made and was not keeping.
+
+### 10.1 History stopped at 400 rows and never said so
+
+`fetchEntries(limit = 400)`, called by History with no argument, no "load older", no marker. At three entries a day — and an income is three rows on its own — that is roughly four months before the ledger's past silently stops rendering. The rows were never lost: the mirror holds everything and the export reads all of it. But the screen whose entire job is to prove the ledger is honest was showing a truncated one.
+
+Now `fetchEntryPage(limit)` returns `{ rows, hasMore }` and History pages in 200-row steps with an explicit end marker. **`hasMore` is exact, not inferred from `window.length === limit`** — whole-group expansion pulls in rows the window never reached, so the only truthful test is whether the table still holds something the page does not. An indexed `count()` is cheap enough to do properly.
+
+### 10.2 Search and filter, over the WHOLE ledger
+
+Text (notes, category names, envelope names, void reasons, amounts), category chips, kind chips. Three rules earned their own code:
+
+1. **Filters run on groups, never on legs.** A 3-leg income matching on one leg must survive whole or its total is understated on screen — and "Fix" prefills from that total, so a half-matched group would put a wrong amount into a replacement entry. Same class of bug the whole-group window in `fetchEntries` exists to prevent.
+2. **The group total is matched as well as each leg.** A ₱10,000 income is legs of 7,000 / 2,000 / 1,000; searching the amount you actually received would otherwise find nothing.
+3. **A search reads the whole ledger, not the loaded page.** Filtering only what happens to be on screen would answer "3 results" to a question whose real answer is forty, and look identical to a complete search. `fetchAllEntriesNewestFirst` takes the same bet `prepareDrafts` already makes.
+
+History also switched to `fetchCategoriesIncludingArchived`, which fixed a latent bug in passing: "delete" is `archived_at` here, so an entry on a retired category was rendering as the bare word "Expense".
+
+### 10.3 Restore — the export finally has a second half
+
+An export nothing can read back is a file, not a backup. `lib/restore.ts` + `db/restore.ts` + a two-stage Settings panel: picking a file only ever builds a **plan** and shows it; nothing is written until the count on the button is the count you agreed to.
+
+**Entries only, by decision.** Envelopes and categories have a unique constraint on `(user_id, name)`, no DELETE policy, and a composite FK from entries that Postgres will not let you re-parent (§ db/config.ts). Writing to them during a restore turns one clear failure into a spread of half-applied config nobody can undo. So references are **remapped by name** onto whatever the account already has — which is exactly what works after a wipe, because `ensureSeeded` recreates Needs/Savings/Wants and the eight starter categories under fresh ids.
+
+Five things this had to get right:
+
+- **Refuse up front and name the gaps.** The outbox is strict FIFO, so one row the server rejects on a foreign key blocks every write behind it until someone finds the Discard button. A blocked plan writes nothing and lists the missing names.
+- **An expense takes its envelope from the matched CATEGORY, not from the row.** Trusting the row's own envelope builds a `(category_id, envelope_id)` pair Postgres rejects — inside the outbox, after the UI already said it worked.
+- **Categories match on BOTH names.** Uniqueness is `(user_id, envelope_id, name)`, so two envelopes may each hold a "Misc" and only the pair identifies one.
+- **Voids replay as their own op, after the inserts, with the ORIGINAL timestamp.** A void only touches rows that exist and are not already voided, so replaying one before its group lands updates nothing and the entry comes back alive.
+- **Archived categories are matched.** They are precisely what old entries point at; refusing them would block the history a restore exists to bring back.
+
+Idempotent by construction — entry ids ride in the bundle, and both the mirror's `bulkAdd` and the server's upsert ignore ids they already hold. Verified live: exporting probe-b's own ledger and restoring it left the mirror at 64 rows and the balance at ₱0.00.
+
+### 10.4 A forward-looking number on Home
+
+Every figure on Home pointed backwards — what is in the tin, what left today. Neither answers the question the balance is actually being read for ten times a day, which is whether the next purchase is affordable. Each envelope card now carries `balance ÷ days left in the month`.
+
+**Per envelope, and deliberately never summed.** An aggregate "safe to spend" would fold Savings into a spending allowance, and the one thing a 70/20/10 tracker must not do is quietly encourage raiding it. The app has no flag marking which envelope is savings — envelopes are user-named and user-shared (§0) — so it declines to guess.
+
+The rate takes no "spent today" input and is **self-correcting**: the balance already reflects today's spending, so buying something now lowers the number on its own, with no before-and-after reconstruction that could drift. `floor`, never `round` — rounding up promises a peso the envelope cannot pay on the 31st.
+
+### 10.5 Note chips in AddSheet
+
+The third feature squeezed out of the 90-day window the category ranking already fetches, after `frequentAmounts`. The note field is optional and hidden behind a disclosure, so the 2-tap path never passes through it and most entries carry no note — which is what left History's subtitles thin and gave 10.2's search little to match on.
+
+**Global, not per category, and that is forced by the flow rather than chosen:** tapping a category _saves_ the entry, so at the moment the chips must be on screen the category is not yet known. Ranking them per category would mean showing them after the save, or breaking the two-tap path to insert a confirmation step.
+
+### 10.6 Six months, as small multiples
+
+A single month could be compared only against the one before it — "are my Wants creeping up since March" was unanswerable. The new panel is one **single-series row per envelope**, not one stacked column, and that is a colour-vision decision with a measurement behind it: running the envelope palette through a CVD check puts mint `#a8e6cf` and orchid `#ffb3d9` at **ΔE 3.2 under deuteranopia**, far under the 6–8 floor. Any chart asking a reader to tell two adjacent envelope segments apart by hue alone is unreadable for them. That is the §6 gap, now designed around instead of merely recorded: split into rows, no hue comparison is ever required, and identity comes from the row label.
+
+**Each row is scaled to its own peak.** The honest cost is that heights mean nothing across rows, so the row's own figure is stated beside it and the hint says so outright. The gain is the only question the panel exists to answer — a within-row shape that a shared scale would flatten into an invisible line under the 70% envelope.
+
+Two details found by looking at the rendered chart rather than at the code:
+
+- **Every month gets a baseline whether or not it has a bar.** Without one, five quiet months and a busy one drew as a single block floating in empty space — which reads as data that failed to load, not as months you spent nothing in.
+- **An in-progress month is marked in text (`Jul…`), never by a paler bar.** A partial column is the one value on the chart that is not comparable to its neighbours, and encoding that in opacity alone hides it from exactly the readers the small-multiples layout was chosen to serve.
+
+`spendTrend` keeps spending on envelopes outside the list (archived ones) as an explicit `otherCentavos`, so the parts always sum to the total — the same discipline §9.1 imposed on "where it went".
+
+### 10.7 What this pass did not do
+
+- **Code-splitting the 698 KB bundle.** It is a PWA served from the service worker after the first visit; the split buys a Lighthouse number on a screen you see once.
+- **App-icon badging as a push substitute.** It only updates while the app is running, which solves nothing the in-app evening banner does not already solve. Web Push remains out (§9.3).

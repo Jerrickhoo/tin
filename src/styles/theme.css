@@ -543,3 +543,14 @@ body::after {
   outline-offset: var(--px-unit);
   border-radius: 0;
 }
+
+/* History's search field ships its own clear button, styled to match the app.
+   WebKit adds a second one of its own inside the field — two ✕ glyphs side by
+   side, one of them in the browser's colours and not the app's. Suppressed here
+   rather than by dropping type="search", which is what earns the field its
+   search-shaped mobile keyboard and its role in the accessibility tree. */
+input[type='search']::-webkit-search-cancel-button,
+input[type='search']::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}

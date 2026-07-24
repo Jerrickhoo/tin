@@ -16,6 +16,7 @@ import {
 } from '../../db/entries'
 import { rankByUse } from '../../lib/category-rank'
 import { frequentAmounts } from '../../lib/frequent-amounts'
+import { frequentNotes } from '../../lib/frequent-notes'
 import { applyKeypadKey, KEYPAD_PLACEHOLDER } from '../../lib/keypad'
 import { formatPHP, parseAmountToCentavos } from '../../lib/money'
 import { splitByLargestRemainder } from '../../lib/split'
@@ -76,6 +77,7 @@ export function AddSheet({
   const [envelopes, setEnvelopes] = useState<Envelope[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [quickAmounts, setQuickAmounts] = useState<number[]>([])
+  const [noteChips, setNoteChips] = useState<string[]>([])
 
   useEffect(() => {
     if (!open) return
@@ -94,8 +96,10 @@ export function AddSheet({
         // scan through an alphabetical grid). Ties and empty ledgers fall back
         // to alphabetical, so a fresh install is unchanged.
         setCategories(rankByUse(cats, recent))
-        // Same window, second use — the repeated-amount chips. Free.
+        // Same window, second and third use — the repeated-amount chips and the
+        // repeated-note chips. Both free.
         setQuickAmounts(frequentAmounts(recent))
+        setNoteChips(frequentNotes(recent))
       })
       .catch((err) => toast.show(err instanceof Error ? err.message : String(err), 'error'))
     return () => {
@@ -297,6 +301,47 @@ export function AddSheet({
 
       {mode === 'expense' && (
         <div className="mt-5">
+          {/* Notes you repeat, one tap.
+              The note field itself is optional and hidden behind a disclosure,
+              so the 2-tap path never passes through it and most entries end up
+              with no note at all — which is what left History's subtitles thin
+              and gave its new search almost nothing to match on.
+              Placed ABOVE the category grid because tapping a category SAVES:
+              anything meant to be attached to the entry has to be reachable
+              before that tap, not after it. Shown only once an amount is in, so
+              it does not compete with the quick-amount row. */}
+          {note.trim() !== '' ? (
+            <div className="mb-3 flex items-center gap-2 text-sm">
+              <span className="min-w-0 flex-1 truncate text-ink-soft">
+                <span className="text-ink-mute">note </span>
+                {note}
+              </span>
+              <button
+                type="button"
+                aria-label="Clear note"
+                onClick={() => setNote('')}
+                className="press shrink-0 rounded-lg border border-line px-2 py-1 text-xs text-ink-mute"
+              >
+                ✕
+              </button>
+            </div>
+          ) : (
+            amountOk &&
+            noteChips.length > 0 && (
+              <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label="Recent notes">
+                {noteChips.map((chip) => (
+                  <button
+                    key={chip}
+                    type="button"
+                    onClick={() => setNote(chip)}
+                    className="press min-h-9 rounded-xl border border-line bg-base/40 px-2.5 py-1.5 text-sm text-ink-soft"
+                  >
+                    {chip}
+                  </button>
+                ))}
+              </div>
+            )
+          )}
           <p className="mb-2.5 text-sm text-ink-soft">
             Tap a category to save — it picks the envelope for you.
           </p>

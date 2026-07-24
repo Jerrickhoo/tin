@@ -15,10 +15,12 @@ import {
   monthPace,
   OTHER,
   spendBreakdown,
+  spendTrend,
   splitAdherence,
   summarizeMonth,
   UNCATEGORIZED,
   type MonthSummary,
+  type SpendTrend,
 } from '../../lib/analytics'
 import {
   daysInMonth,
@@ -28,6 +30,7 @@ import {
   monthLabel,
   nextMonthKey,
   prevMonthKey,
+  recentMonthKeys,
 } from '../../lib/dates'
 import type { EntryRow } from '../../lib/groups'
 import { computeStreak, STREAK_WINDOW_DAYS, type StreakState } from '../../lib/logging-streak'
@@ -39,6 +42,13 @@ async function fetchMonthEntries(monthKey: string): Promise<EntryRow[]> {
   const { start, end } = manilaMonthRangeUtc(monthKey)
   return fetchEntriesBetween(start.toISOString(), end.toISOString())
 }
+
+/** Half a year — long enough for a habit to show, short enough to fit a phone. */
+const TREND_MONTHS = 6
+
+const shortMonthFmt = new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', month: 'short' })
+const shortMonthLabel = (monthKey: string): string =>
+  shortMonthFmt.format(new Date(`${monthKey}-15T12:00:00+08:00`))
 
 export function Insights() {
   const { version } = useLedger()
@@ -55,6 +65,7 @@ export function Insights() {
   const [categories, setCategories] = useState<Category[]>([])
   const [earliestMonth, setEarliestMonth] = useState<string | null>(null)
   const [streak, setStreak] = useState<StreakState | null>(null)
+  const [trend, setTrend] = useState<SpendTrend | null>(null)
 
   useEffect(() => {
     let active = true
@@ -109,6 +120,38 @@ export function Insights() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version])
+
+  const trendKeys = useMemo(() => recentMonthKeys(monthKey, TREND_MONTHS), [monthKey])
+  const envelopeIds = useMemo(() => envelopes.map((e) => e.id), [envelopes])
+
+  // Its own effect and its own six range reads. Folded into the month effect it
+  // would have to re-derive on every ‹ tap anyway, and keeping it separate means
+  // a slow trend never delays the numbers above it from painting.
+  useEffect(() => {
+    // Empty is a real state here, not a falsy one: on a cold load the mirror
+    // has no envelopes until the first pull, and computing a trend against an
+    // empty id list would cache a chart with every row missing.
+    if (envelopeIds.length === 0) return
+    let active = true
+    ;(async () => {
+      try {
+        const months = await Promise.all(
+          trendKeys.map(async (key) => ({
+            monthKey: key,
+            summary: summarizeMonth(await fetchMonthEntries(key)),
+          })),
+        )
+        if (!active) return
+        setTrend(spendTrend(months, envelopeIds))
+      } catch (err) {
+        if (active) toast.show(err instanceof Error ? err.message : String(err), 'error')
+      }
+    })()
+    return () => {
+      active = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trendKeys, envelopeIds, version])
 
   const summary = useMemo(() => summarizeMonth(rows ?? []), [rows])
   const previousSummary = useMemo(() => summarizeMonth(previousRows), [previousRows])
@@ -258,6 +301,15 @@ export function Insights() {
               moves={moves}
               categoriesById={categoriesById}
             />
+
+            {trend && (
+              <TrendPanel
+                trend={trend}
+                envelopes={envelopes}
+                currentMonth={currentMonth}
+                className="md:col-span-2"
+              />
+            )}
 
             {streak && <StreakPanel streak={streak} />}
 
@@ -528,6 +580,179 @@ function VsLastMonth({
         </div>
       )}
     </Panel>
+  )
+}
+
+/**
+ * Six months, as small multiples — one single-series row per envelope.
+ *
+ * SMALL MULTIPLES RATHER THAN ONE STACKED COLUMN, and that is a colour-vision
+ * decision with a measurement behind it. Running the envelope palette through
+ * the CVD check puts mint (#a8e6cf) and orchid (#ffb3d9) at ΔE 3.2 under
+ * deuteranopia — far under the 6–8 floor — so any chart asking you to tell two
+ * adjacent envelope segments apart by hue alone is unreadable for a red-green
+ * colour-blind reader. That is the known gap ROADMAP §6 records. Split into one
+ * row per envelope, no comparison between hues is ever required: identity comes
+ * from the row's own label, and the colour is only reinforcement.
+ *
+ * EACH ROW IS SCALED TO ITS OWN PEAK. The honest cost is that row heights mean
+ * nothing across rows, so the row's own latest figure is stated beside it and
+ * the hint says so outright. The gain is the only question this panel exists to
+ * answer: "are my Wants creeping up?" is a within-row shape, and on one shared
+ * scale a 10% envelope is a flat line under the 70% one — a chart that renders
+ * the question invisible.
+ */
+function TrendPanel({
+  trend,
+  envelopes,
+  currentMonth,
+  className,
+}: {
+  trend: SpendTrend
+  envelopes: Envelope[]
+  currentMonth: string
+  className?: string
+}) {
+  const anyArchived = trend.months.some((m) => m.otherCentavos > 0)
+  const rows: {
+    key: string
+    label: string
+    color: string | null
+    values: number[]
+    peak: number
+  }[] = [
+    {
+      key: ' total',
+      label: 'All spending',
+      color: null,
+      values: trend.months.map((m) => m.totalCentavos),
+      peak: trend.peakTotalCentavos,
+    },
+    ...envelopes.map((env, i) => ({
+      key: env.id,
+      label: env.name,
+      color: env.color ?? '#AFA7C2',
+      values: trend.months.map((m) => m.perEnvelopeCentavos[i] ?? 0),
+      peak: trend.peakPerEnvelopeCentavos[i] ?? 0,
+    })),
+  ]
+  if (anyArchived) {
+    rows.push({
+      key: ' archived',
+      label: 'Archived',
+      color: null,
+      values: trend.months.map((m) => m.otherCentavos),
+      peak: Math.max(...trend.months.map((m) => m.otherCentavos)),
+    })
+  }
+
+  if (trend.peakTotalCentavos === 0) {
+    return (
+      <Panel title="Last 6 months" hint="spending" className={className}>
+        <p className="text-sm text-ink-mute">
+          No spending in the last six months — nothing to trace yet.
+        </p>
+      </Panel>
+    )
+  }
+
+  return (
+    <Panel title="Last 6 months" hint="each row on its own scale" className={className}>
+      <div className="flex flex-col gap-2.5">
+        {rows.map((row) => (
+          <TrendRow
+            key={row.key}
+            row={row}
+            monthKeys={trend.months.map((m) => m.monthKey)}
+            currentMonth={currentMonth}
+          />
+        ))}
+      </div>
+      {/* The axis, once, under all the rows. An in-progress month is marked in
+          TEXT rather than by a paler bar: a partial column is the one value on
+          this chart that is not comparable to its neighbours, and encoding that
+          in colour or opacity alone would hide it from exactly the readers the
+          small-multiples layout was chosen to serve. */}
+      {/* Mirrors TrendRow's own three-part layout — label gutter, plot, value
+          gutter — so the ticks sit under the bars they name. */}
+      <div className="mt-2 flex items-center gap-2 border-t border-line/70 pt-1.5">
+        <span aria-hidden className="w-20 shrink-0" />
+        <div className="flex flex-1 gap-[2px]">
+          {trend.months.map((m) => (
+            <span key={m.monthKey} className="flex-1 text-center text-[0.625rem] text-ink-mute">
+              {shortMonthLabel(m.monthKey)}
+              {m.monthKey === currentMonth ? '…' : ''}
+            </span>
+          ))}
+        </div>
+        <span aria-hidden className="w-20 shrink-0" />
+      </div>
+      {trend.months.some((m) => m.monthKey === currentMonth) && (
+        <p className="mt-1.5 text-[0.625rem] text-ink-mute">… this month is still running</p>
+      )}
+    </Panel>
+  )
+}
+
+function TrendRow({
+  row,
+  monthKeys,
+  currentMonth,
+}: {
+  row: { label: string; color: string | null; values: number[]; peak: number }
+  monthKeys: string[]
+  currentMonth: string
+}) {
+  const latest = row.values[row.values.length - 1] ?? 0
+  const summary = `${row.label}: ${monthKeys
+    .map(
+      (key, i) =>
+        `${shortMonthLabel(key)} ${formatPHP(row.values[i])}${key === currentMonth ? ' so far' : ''}`,
+    )
+    .join(', ')}`
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="flex w-20 shrink-0 items-center gap-1.5 text-xs">
+        {row.color && <Dot color={row.color} />}
+        {/* Text wears text tokens — the dot beside it carries the identity. */}
+        <span className="truncate text-ink-soft">{row.label}</span>
+      </span>
+      <div className="flex h-7 flex-1 items-stretch gap-[2px]" role="img" aria-label={summary}>
+        {row.values.map((value, i) => {
+          // A month with real spending never renders as nothing: at true scale a
+          // ₱40 month beside a ₱9,000 one rounds to zero pixels and reads as
+          // "you spent nothing", which is a different and wrong claim.
+          const pct = row.peak > 0 ? (value / row.peak) * 100 : 0
+          const height = value > 0 ? Math.max(pct, 6) : 0
+          return (
+            // Every month gets a baseline whether or not it has a bar. Without
+            // one, five quiet months and a busy one drew as a single block
+            // floating in empty space — which reads as data that failed to load
+            // rather than as months you spent nothing in. The track is what
+            // makes a zero visible as a zero.
+            <span
+              key={monthKeys[i]}
+              aria-hidden
+              title={`${shortMonthLabel(monthKeys[i])} — ${formatPHP(value)}`}
+              className="flex flex-1 items-end border-b-2 border-line/60"
+            >
+              <span
+                className="w-full"
+                style={{
+                  height: `${height}%`,
+                  minHeight: value > 0 ? '2px' : '0',
+                  backgroundColor: row.color ?? 'var(--color-ink-mute)',
+                }}
+              />
+            </span>
+          )
+        })}
+      </div>
+      <span className="w-20 shrink-0 text-right text-xs tabular-nums text-ink-soft">
+        {formatPHP(latest)}
+      </span>
+    </div>
   )
 }
 

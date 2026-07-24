@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   daysBetweenKeys,
   daysInMonth,
+  daysRemainingInMonth,
   manilaDayKey,
   manilaHour,
   manilaMonthKey,
   manilaMonthRangeUtc,
+  recentMonthKeys,
   shiftDayKey,
 } from './dates'
 
@@ -126,5 +128,58 @@ describe('manilaMonthRangeUtc', () => {
     expect(() => manilaMonthRangeUtc('2026-13')).toThrow(RangeError)
     expect(() => manilaMonthRangeUtc('2026-00')).toThrow(RangeError)
     expect(() => manilaMonthRangeUtc('garbage')).toThrow(RangeError)
+  })
+})
+
+describe('daysRemainingInMonth', () => {
+  it('counts today as one of the days you can still spend on', () => {
+    expect(daysRemainingInMonth('2026-07-24')).toBe(8)
+  })
+
+  it('returns 1 on the last day, so the allowance is the whole balance', () => {
+    expect(daysRemainingInMonth('2026-07-31')).toBe(1)
+    expect(daysRemainingInMonth('2026-02-28')).toBe(1)
+  })
+
+  it('returns the whole month on the 1st', () => {
+    expect(daysRemainingInMonth('2026-07-01')).toBe(31)
+    expect(daysRemainingInMonth('2026-06-01')).toBe(30)
+  })
+
+  it('knows a leap February', () => {
+    expect(daysRemainingInMonth('2028-02-01')).toBe(29)
+    expect(daysRemainingInMonth('2028-02-29')).toBe(1)
+  })
+
+  it('rejects a day the month does not have', () => {
+    expect(() => daysRemainingInMonth('2026-02-30')).toThrow(RangeError)
+    expect(() => daysRemainingInMonth('2026-07-00')).toThrow(RangeError)
+    expect(() => daysRemainingInMonth('2026-07')).toThrow(RangeError)
+  })
+})
+
+describe('recentMonthKeys', () => {
+  it('returns the window oldest first, ending at the key given', () => {
+    expect(recentMonthKeys('2026-07', 6)).toEqual([
+      '2026-02',
+      '2026-03',
+      '2026-04',
+      '2026-05',
+      '2026-06',
+      '2026-07',
+    ])
+  })
+
+  it('crosses a year boundary', () => {
+    expect(recentMonthKeys('2026-02', 4)).toEqual(['2025-11', '2025-12', '2026-01', '2026-02'])
+  })
+
+  it('handles a window of one', () => {
+    expect(recentMonthKeys('2026-07', 1)).toEqual(['2026-07'])
+  })
+
+  it('rejects a nonsense window or key', () => {
+    expect(() => recentMonthKeys('2026-07', 0)).toThrow(RangeError)
+    expect(() => recentMonthKeys('2026-13', 3)).toThrow(RangeError)
   })
 })
