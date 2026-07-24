@@ -12,7 +12,8 @@ import { AddSheet } from './features/entries/AddSheet'
 import { ensureSeeded } from './db/seed'
 import { runCatchUp } from './db/recurring'
 import { voidGroup } from './db/entries'
-import { openForUser } from './db/dexie'
+import { openForUser, recordCheckIn } from './db/dexie'
+import { manilaDayKey } from './lib/dates'
 import {
   getSyncSnapshot,
   isOffline,
@@ -83,6 +84,12 @@ export function AppShell() {
     ;(async () => {
       try {
         await openForUser(session.user.id)
+        // Record the visit BEFORE anything that needs a network. Opening the
+        // app is the event most likely to happen in a dead spot, and a
+        // check-in that only counted online would break the streak on exactly
+        // the days this is meant to protect. It is a local Dexie write; the
+        // sync loop pushes it whenever a connection next appears.
+        await recordCheckIn(manilaDayKey(new Date()))
         startSync({ onApplied: bump })
         bump() // mirror may already hold yesterday's data — show it now
         if (!isOffline()) {

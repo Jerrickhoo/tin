@@ -33,6 +33,38 @@ export interface CategoryRow {
   [extra: string]: unknown
 }
 
+/** One bought-back day (migration 003). Keyed by the day, which is the PK. */
+export interface StreakSaveRow {
+  /** Philippine calendar day, YYYY-MM-DD */
+  day_key: string
+  [extra: string]: unknown
+}
+
+/**
+ * A check-in day as it comes off the wire — just the day.
+ *
+ * Separate from the stored row because `synced` is a purely local bookkeeping
+ * flag that the server neither has nor needs. Casting pulled rows to the
+ * stored type would have been a lie the compiler could not catch.
+ */
+export interface PulledCheckIn {
+  /** Philippine calendar day, YYYY-MM-DD */
+  day_key: string
+}
+
+/** One day Tin was opened (migration 004), as stored locally. */
+export interface CheckInRow extends PulledCheckIn {
+  /**
+   * 1 once the server has it, 0 while it is still only local.
+   *
+   * A number, not a boolean, because IndexedDB cannot index booleans — Dexie
+   * will accept `synced: false` in a `where` clause and match nothing at all,
+   * which would leave every check-in stuck as unpushed forever while looking
+   * like it worked.
+   */
+  synced: 0 | 1
+}
+
 export interface OutboxRow {
   seq?: number
   created_at: string
@@ -50,6 +82,8 @@ class TinDb extends Dexie {
   entries!: EntityTable<EntryRow, 'id'>
   envelopes!: EntityTable<EnvelopeRow, 'id'>
   categories!: EntityTable<CategoryRow, 'id'>
+  streakSaves!: EntityTable<StreakSaveRow, 'day_key'>
+  checkIns!: EntityTable<CheckInRow, 'day_key'>
   outbox!: EntityTable<OutboxRow, 'seq'>
   meta!: EntityTable<MetaRow, 'key'>
 
@@ -61,6 +95,18 @@ class TinDb extends Dexie {
       categories: 'id, name',
       outbox: '++seq',
       meta: 'key',
+    })
+    // v2 adds the streak-save mirror. Dexie applies this as an additive
+    // upgrade — no data migration, because v1 databases simply have no saves
+    // yet and the first sync fills the table.
+    this.version(2).stores({
+      streakSaves: 'day_key',
+    })
+    // v3 adds check-in days. `synced` is indexed and stored as 0/1 rather than
+    // a boolean: IndexedDB cannot index booleans, so a `where('synced')` query
+    // on true/false silently matches nothing.
+    this.version(3).stores({
+      checkIns: 'day_key, synced',
     })
   }
 }
@@ -87,6 +133,8 @@ export async function openForUser(userId: string): Promise<void> {
       current.entries.clear(),
       current.envelopes.clear(),
       current.categories.clear(),
+      current.streakSaves.clear(),
+      current.checkIns.clear(),
       current.outbox.clear(),
       current.meta.clear(),
     ])
@@ -280,6 +328,95 @@ export async function mirrorReplaceEnvelopes(rows: readonly EnvelopeRow[]): Prom
 export async function mirrorReplaceCategories(rows: readonly CategoryRow[]): Promise<boolean> {
   const db = await localDb()
   return db.transaction('rw', db.categories, () => replaceAll(db.categories, rows))
+}
+
+/**
+ * Streak saves, replaced wholesale — and unlike the two above, an EMPTY pull
+ * IS applied here.
+ *
+ * The refusal that protects envelopes and categories would be a bug on this
+ * table. Those tables have no DELETE policy, so "the server returned nothing"
+ * can only ever be a transient. `streak_saves` does have one (migration 003
+ * explains why), so zero rows is a state a user can legitimately reach by
+ * taking a save back — and refusing it would leave a deleted save alive in the
+ * mirror forever, still propping up a streak the server no longer supports.
+ *
+ * The exposure this accepts is small and self-healing: a transient empty pull
+ * briefly under-reports a streak, and the next successful pull restores it.
+ * These are not money rows, and the local mirror is a pure cache of them —
+ * saves are written online-only, so nothing unsynced can be lost here.
+ */
+export async function mirrorReplaceStreakSaves(rows: readonly StreakSaveRow[]): Promise<void> {
+  const db = await localDb()
+  await db.transaction('rw', db.streakSaves, async () => {
+    await db.streakSaves.clear()
+    await db.streakSaves.bulkAdd(rows as StreakSaveRow[])
+  })
+}
+
+/** Every day bought back, as day keys. The whole table — it is tiny by design. */
+export async function readStreakSaves(): Promise<string[]> {
+  const db = await localDb()
+  return (await db.streakSaves.toArray()).map((r) => r.day_key)
+}
+
+// ---- check-in days (migration 004) ----
+//
+// The one thing in this file written LOCAL-FIRST outside the money path, and
+// the reason is that opening the app is exactly the event most likely to
+// happen with no connection. An online-only write would mean a day you opened
+// Tin in a dead spot never counted — the failure would be invisible, and it
+// would break the streak this feature exists to protect.
+
+/**
+ * Record that today was opened. Idempotent and safe to call on every boot.
+ *
+ * `add` rather than `put`: a day already recorded must keep its existing
+ * `synced` flag, and `put` would reset a pushed day back to unpushed on every
+ * subsequent open, re-uploading it forever.
+ */
+export async function recordCheckIn(dayKey: string): Promise<void> {
+  const db = await localDb()
+  try {
+    await db.checkIns.add({ day_key: dayKey, synced: 0 })
+  } catch (err) {
+    // Already there — that is the normal path on the second open of the day.
+    if (!(err instanceof Error) || err.name !== 'ConstraintError') throw err
+  }
+}
+
+/** Every check-in day, local and pulled alike. */
+export async function readCheckIns(): Promise<string[]> {
+  const db = await localDb()
+  return (await db.checkIns.toArray()).map((r) => r.day_key)
+}
+
+/** Days recorded on this device that the server has not acknowledged yet. */
+export async function unsyncedCheckIns(): Promise<string[]> {
+  const db = await localDb()
+  return (await db.checkIns.where('synced').equals(0).toArray()).map((r) => r.day_key)
+}
+
+/** Mark days as landed, after the server accepted them. */
+export async function markCheckInsSynced(dayKeys: readonly string[]): Promise<void> {
+  if (dayKeys.length === 0) return
+  const db = await localDb()
+  await db.checkIns.bulkPut(dayKeys.map((day_key) => ({ day_key, synced: 1 })))
+}
+
+/**
+ * Fold pulled check-ins into the mirror.
+ *
+ * MERGE, never replace — this is the only pull in the file that does not clear
+ * first, and it must not. A day recorded offline exists locally and not yet on
+ * the server, so a clear-then-refill would delete precisely the rows that have
+ * not been backed up. The table is append-only on both sides (migration 004
+ * grants no UPDATE and no DELETE), so a merge can never leave it stale.
+ */
+export async function mirrorMergeCheckIns(rows: readonly PulledCheckIn[]): Promise<void> {
+  if (rows.length === 0) return
+  const db = await localDb()
+  await db.checkIns.bulkPut(rows.map((r) => ({ day_key: r.day_key, synced: 1 as const })))
 }
 
 // ---- delta-pull cursor (ROADMAP 6.4) ----

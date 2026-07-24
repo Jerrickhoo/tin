@@ -243,6 +243,19 @@ canvas {
    dark plum doesn't read as switched-off, and a scanline wash
    that turns it into a screen you're looking AT.
    Both inert (pointer-events:none), both below #root.
+
+   Calmed down 2026-07-24. What was here before stacked TWO
+   noise layers — 3px scanlines and a 4x4 ordered dither — at a
+   combined 0.5 opacity, and the sum read as grain rather than
+   as a screen. The dither is gone entirely and the scanlines
+   are less than half as strong.
+
+   Neither layer can affect text contrast: both sit at z-index 0
+   BEHIND #root, and every card paints an opaque --color-surface
+   over them. They are visible only in the gutters between
+   cards, which is exactly why the dither was not earning its
+   keep — it existed to stop banding on large flat fills, and
+   there are no large flat fills back there to band.
    ============================================================ */
 
 body::before,
@@ -261,20 +274,35 @@ body::after {
    what keeps it from looking like a smooth glow in a blocky UI. */
 body::before {
   background:
-    radial-gradient(30rem 22rem at 14% -6%, rgb(201 167 255 / 0.16), transparent 70%),
-    radial-gradient(22rem 18rem at 97% 4%, rgb(255 179 217 / 0.09), transparent 66%);
+    radial-gradient(30rem 22rem at 14% -6%, rgb(201 167 255 / 0.11), transparent 70%),
+    radial-gradient(22rem 18rem at 97% 4%, rgb(255 179 217 / 0.06), transparent 66%);
 }
 
-/* Scanlines + dither, in one layer.
-   The scanline period is 3px, not 2px: at 2px it beats against the device
-   pixel grid on 1.5x and 2.5x DPR screens (most mid-range Android) and crawls
-   when you scroll. The dither is a 4x4 ordered-dot SVG at low opacity, which
-   is what stops large flat panels from banding. */
+/* Scanlines, alone now.
+   The 3px period stays: at 2px it beats against the device pixel grid on 1.5x
+   and 2.5x DPR screens (most mid-range Android) and crawls when you scroll.
+   Only the strength changed. */
 body::after {
-  opacity: 0.5;
-  background-image:
-    repeating-linear-gradient(to bottom, rgb(0 0 0 / 0.13) 0 1px, transparent 1px 3px),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Crect width='1' height='1' x='0' y='0' fill='%23fff' opacity='0.05'/%3E%3Crect width='1' height='1' x='2' y='2' fill='%23fff' opacity='0.035'/%3E%3C/svg%3E");
+  opacity: 0.22;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgb(0 0 0 / 0.13) 0 1px,
+    transparent 1px 3px
+  );
+}
+
+/* Reduced texture — Settings ▸ Appearance, applied by lib/texture.ts.
+   The scanlines go entirely and the bloom drops to a tint. Kept as an
+   attribute on the root rather than a class so it can be set before React
+   mounts without touching className, and so the CSP's ban on inline scripts
+   costs nothing: the module sets one attribute at import time. */
+:root[data-texture='reduced'] body::after {
+  opacity: 0;
+}
+:root[data-texture='reduced'] body::before {
+  background:
+    radial-gradient(30rem 22rem at 14% -6%, rgb(201 167 255 / 0.05), transparent 70%),
+    radial-gradient(22rem 18rem at 97% 4%, rgb(255 179 217 / 0.03), transparent 66%);
 }
 
 #root {

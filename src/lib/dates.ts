@@ -20,6 +20,53 @@ export function manilaMonthKey(instant: Date): string {
   return manilaDayKey(instant).slice(0, 7)
 }
 
+const manilaHourFmt = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Manila',
+  hour: 'numeric',
+  hour12: false,
+})
+
+/**
+ * UTC instant → hour of the Philippine day, 0–23.
+ *
+ * PHT covers the whole country — Iloilo, Cebu and Manila are one zone at a
+ * fixed UTC+8 with no DST since 1978 — so this is the correct clock for every
+ * user of this app regardless of city. `Asia/Manila` is only the IANA name for
+ * that zone, not a claim about where anyone is.
+ */
+export function manilaHour(instant: Date): number {
+  // en-GB h23 can render midnight as "24"; normalise so callers can compare.
+  return Number(manilaHourFmt.format(instant)) % 24
+}
+
+/** Whole days from a day key, e.g. ("2026-03-01", -1) → "2026-02-28". */
+export function shiftDayKey(dayKey: string, days: number): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayKey)
+  if (!m) throw new RangeError(`invalid day key: ${dayKey}`)
+  // Noon UTC as the anchor: the arithmetic is calendar-only, and starting from
+  // midday means no rounding or offset could ever tip it into a neighbouring
+  // day before it is re-formatted.
+  const at = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12))
+  at.setUTCDate(at.getUTCDate() + days)
+  return at.toISOString().slice(0, 10)
+}
+
+/** Whole days between two day keys — positive when `to` is later. */
+export function daysBetweenKeys(from: string, to: string): number {
+  const parse = (key: string) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key)
+    if (!m) throw new RangeError(`invalid day key: ${key}`)
+    return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12)
+  }
+  return Math.round((parse(to) - parse(from)) / 86_400_000)
+}
+
+/** "2026-02" → 28. */
+export function daysInMonth(monthKey: string): number {
+  const { year, month } = parseMonthKey(monthKey)
+  return new Date(Date.UTC(year, month, 0)).getUTCDate()
+}
+
 const MANILA_UTC_OFFSET_MS = 8 * 60 * 60 * 1000
 
 export interface UtcRange {

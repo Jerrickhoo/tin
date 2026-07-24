@@ -7,8 +7,17 @@ import {
   hasAnyEntries,
   type Envelope,
 } from '../../db/entries'
-import { manilaDayKey } from '../../lib/dates'
-import { loggingStrip, spentOnDay, type LoggedDay } from '../../lib/logging-streak'
+import { readCheckIns } from '../../db/dexie'
+import { readStreakSaves, repairDay } from '../../db/streak'
+import { manilaDayKey, manilaHour } from '../../lib/dates'
+import {
+  computeStreak,
+  loggingStrip,
+  spentOnDay,
+  STREAK_WINDOW_DAYS,
+  type LoggedDay,
+  type StreakState,
+} from '../../lib/logging-streak'
 import { formatPHP } from '../../lib/money'
 import { OpeningBalancesSheet } from './OpeningBalancesSheet'
 
@@ -23,17 +32,11 @@ const manilaDate = new Intl.DateTimeFormat('en-PH', {
   month: 'long',
 })
 
-/** Manila hour, for the greeting. The whole app groups by Manila time; the
- *  greeting has no business using the device clock either. */
-function manilaHour(date: Date): number {
-  return Number(
-    new Intl.DateTimeFormat('en-GB', {
-      timeZone: 'Asia/Manila',
-      hour: 'numeric',
-      hour12: false,
-    }).format(date),
-  )
-}
+/** Weekday of a day key, for naming the gap a save would repair. */
+const gapDay = new Intl.DateTimeFormat('en-PH', {
+  timeZone: 'Asia/Manila',
+  weekday: 'long',
+})
 
 function greeting(hour: number): string {
   if (hour < 5) return 'Still up'
@@ -43,7 +46,7 @@ function greeting(hour: number): string {
 }
 
 export function Home() {
-  const { version } = useLedger()
+  const { version, bump } = useLedger()
   const toast = useToast()
   const addSheet = useAddSheet()
   const [cards, setCards] = useState<Card[] | null>(null)
@@ -56,21 +59,28 @@ export function Home() {
   const [offCardCentavos, setOffCardCentavos] = useState(0)
   const [strip, setStrip] = useState<LoggedDay[] | null>(null)
   const [todayCentavos, setTodayCentavos] = useState(0)
+  const [streak, setStreak] = useState<StreakState | null>(null)
+  const [repairing, setRepairing] = useState(false)
 
   useEffect(() => {
     let active = true
     ;(async () => {
       try {
-        // The strip window is 8 days, not 7: `loggingStrip` keys by Manila day
-        // while this query is a UTC range, so a straight 7-day window would cut
-        // off the earliest Manila day part-way through and under-report it.
-        const since = new Date(Date.now() - 8 * 86_400_000).toISOString()
+        // Widened from 8 days to ~13 months when the streak arrived: a run can
+        // be arbitrarily long, and a window that clipped it would silently cap
+        // the number. This is a Dexie read, so the extra rows cost no network
+        // and one personal ledger-year is a few thousand of them at most. The
+        // strip and today's spend keep taking their days out of the same
+        // result rather than issuing a second query.
+        const since = new Date(Date.now() - STREAK_WINDOW_DAYS * 86_400_000).toISOString()
         const until = new Date(Date.now() + 86_400_000).toISOString()
-        const [envs, balances, anyEntries, recent] = await Promise.all([
+        const [envs, balances, anyEntries, recent, saves, checkIns] = await Promise.all([
           fetchEnvelopes(),
           fetchBalances(),
           hasAnyEntries(),
           fetchEntriesBetween(since, until),
+          readStreakSaves(),
+          readCheckIns(),
         ])
         if (!active) return
         setCards(envs.map((env) => ({ ...env, balanceCentavos: balances.get(env.id) ?? 0 })))
@@ -79,9 +89,9 @@ export function Home() {
         for (const [id, balance] of balances) if (!onCard.has(id)) off += balance
         setOffCardCentavos(off)
         setEmpty(!anyEntries)
-        setStrip(loggingStrip(recent))
-        // Same 8-day window, second use — no extra query.
+        setStrip(loggingStrip(recent, checkIns))
         setTodayCentavos(spentOnDay(recent, manilaDayKey(new Date())))
+        setStreak(computeStreak(recent, saves, checkIns))
       } catch (err) {
         if (active) toast.show(err instanceof Error ? err.message : String(err), 'error')
       }
@@ -91,6 +101,21 @@ export function Home() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version])
+
+  // NOT named `useSave`: the hooks lint rule keys on the `use` prefix, and a
+  // "hook" called from an onClick is exactly what it exists to reject.
+  async function spendSave(dayKey: string) {
+    setRepairing(true)
+    try {
+      await repairDay(dayKey)
+      toast.show('Day repaired — your streak is intact.', 'ok')
+      bump() // re-reads the mirror syncNow just refreshed
+    } catch (err) {
+      toast.show(err instanceof Error ? err.message : String(err), 'error')
+    } finally {
+      setRepairing(false)
+    }
+  }
 
   const now = new Date()
   const total = (cards ?? []).reduce((sum, c) => sum + c.balanceCentavos, 0) + offCardCentavos
@@ -145,9 +170,29 @@ export function Home() {
               {formatPHP(todayCentavos)}
             </p>
           )}
-          {strip && <LoggingStrip days={strip} />}
+          {strip && <LoggingStrip days={strip} streak={streak} />}
         </div>
       </section>
+
+      {/* The two habit prompts, outside the hero so neither ever pushes the
+          balance off the first screen. At most one is shown: a repairable gap
+          is a decision with a deadline, so it outranks the evening reminder,
+          which is only ever a suggestion. */}
+      {streak?.repair ? (
+        <RepairPrompt
+          // Keyed by the day, so "Let it go" dismisses THAT gap and not the
+          // slot: if a different day later becomes repairable, the prompt is a
+          // new component and comes back.
+          key={streak.repair.dayKey}
+          dayKey={streak.repair.dayKey}
+          streakIfRepaired={streak.repair.streakIfRepaired}
+          savesLeft={streak.savesRemainingThisMonth}
+          busy={repairing}
+          onRepair={() => spendSave(streak.repair!.dayKey)}
+        />
+      ) : (
+        streak && !streak.todayHasEntry && <NoEntryYetBanner onAdd={() => addSheet.open()} />
+      )}
 
       {empty && cards && (
         <button
@@ -206,37 +251,177 @@ export function Home() {
  * and nothing else; putting an amount or an entry count here would turn a
  * glance into arithmetic, and would make a cheap day look like a bad one.
  *
+ * The streak now rides alongside it rather than replacing it, and the pairing
+ * is the point: the number is the motivator, the strip is the evidence. A
+ * streak alone can be true and still misleading (repairs are invisible in it);
+ * seven honest squares next to it keep the week legible.
+ *
  * Accessibility: the row is one labelled group with a text summary rather than
  * seven announced squares, because seven "logged / not logged" nodes is noise
  * to a screen reader. Colour is not the only encoding — today carries a border
  * as well as a fill, and the summary states the count in words.
  */
-function LoggingStrip({ days }: { days: LoggedDay[] }) {
-  const count = days.filter((d) => d.logged).length
+function LoggingStrip({ days, streak }: { days: LoggedDay[]; streak: StreakState | null }) {
+  const logged = days.filter((d) => d.logged).length
+  const checkedIn = days.filter((d) => d.checkedIn).length
+
+  // Three states, three fills. A check-in day is drawn as an outline rather
+  // than a fainter solid: at 10px, "dimmer" and "different" are the same
+  // thing to the eye, and the whole point of separating them is that you can
+  // tell at a glance which days you actually tracked money on.
+  const summary =
+    checkedIn > 0
+      ? `${logged} of the last ${days.length} days with entries, ${checkedIn} opened without logging`
+      : `Logged on ${logged} of the last ${days.length} days`
+
   return (
     <div className="mt-5">
-      <div
-        className="flex items-center gap-1"
-        role="img"
-        aria-label={`Logged on ${count} of the last ${days.length} days`}
-      >
+      <div className="flex items-center gap-1" role="img" aria-label={summary}>
         {days.map((d) => (
           <span
             key={d.dayKey}
             aria-hidden
             title={d.dayKey}
-            className={`h-2.5 flex-1 ${d.logged ? 'bg-accent' : 'bg-line'} ${
-              d.isToday ? 'ring-2 ring-ink-soft' : ''
-            }`}
+            className={`h-2.5 flex-1 ${
+              d.logged
+                ? 'bg-accent'
+                : d.checkedIn
+                  ? 'border-2 border-accent/60 bg-transparent'
+                  : 'bg-line'
+            } ${d.isToday ? 'ring-2 ring-ink-soft' : ''}`}
           />
         ))}
       </div>
-      <p className="mt-2 text-xs text-ink-mute">
-        {count === days.length
-          ? `every day this week — ${count}/${days.length}`
-          : `logged ${count} of the last ${days.length} days`}
-      </p>
+      <div className="mt-2 flex items-baseline justify-between gap-3 text-xs">
+        <p className="text-ink-mute">
+          {logged === days.length
+            ? `every day this week — ${logged}/${days.length}`
+            : `${logged} of ${days.length} days with entries`}
+          {checkedIn > 0 && ` · ${checkedIn} opened`}
+        </p>
+        {/* Hidden at zero. "0 day streak" is a scoreboard reading nil, which is
+            the discouraging framing this feature was built to avoid — with no
+            run going, the strip alone says everything true. */}
+        {streak && streak.current > 0 && (
+          <p className="shrink-0 font-semibold text-accent tabular-nums">
+            {streak.current}
+            <span className="ml-1 font-normal text-ink-mute">
+              day{streak.current === 1 ? '' : 's'}
+            </span>
+          </p>
+        )}
+      </div>
     </div>
+  )
+}
+
+/**
+ * The one place a save can be spent.
+ *
+ * Shown only when `computeStreak` found a single missed day flanked by logged
+ * ones, so by the time this renders the save is guaranteed to be worth
+ * something. `streakIfRepaired` is computed, never estimated — this card makes
+ * a promise about a number and then has to keep it.
+ *
+ * "Let it go" is a real, equally-weighted option rather than a dismissal X.
+ * The whole design rests on a broken streak being survivable; hiding the exit
+ * would say the opposite.
+ */
+function RepairPrompt({
+  dayKey,
+  streakIfRepaired,
+  savesLeft,
+  busy,
+  onRepair,
+}: {
+  dayKey: string
+  streakIfRepaired: number
+  savesLeft: number
+  busy: boolean
+  onRepair: () => void
+}) {
+  const [dismissed, setDismissed] = useState(false)
+  if (dismissed) return null
+
+  // Noon UTC parse: the key is a calendar day, and midday cannot be tipped
+  // into a neighbouring one by the +08:00 shift.
+  const weekday = gapDay.format(new Date(`${dayKey}T12:00:00.000Z`))
+
+  return (
+    <section className="card border-accent/50 px-4 py-3.5">
+      <h2 className="font-display text-[0.625rem] leading-relaxed text-accent">
+        YOU MISSED {weekday.toUpperCase()}
+      </h2>
+      <p className="mt-1.5 text-sm text-ink-soft">
+        Repair it and your streak stands at{' '}
+        <span className="font-semibold text-ink tabular-nums">{streakIfRepaired} days</span>.
+      </p>
+      <div className="mt-3 flex gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onRepair}
+          className="press flex-1 bg-accent px-3 py-2.5 font-semibold text-on-accent disabled:opacity-50"
+        >
+          {busy ? 'Repairing…' : `Use a save · ${savesLeft} left`}
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => setDismissed(true)}
+          className="press border-2 border-line px-3 py-2.5 text-sm text-ink-soft disabled:opacity-50"
+        >
+          Let it go
+        </button>
+      </div>
+      <p className="mt-2 text-xs text-ink-mute">
+        {savesLeft === 1 ? 'Last save this month.' : `${savesLeft} saves left this month.`} They
+        reset on the 1st.
+      </p>
+    </section>
+  )
+}
+
+/**
+ * Evening nudge when nothing has been recorded today.
+ *
+ * Gated to 18:00 PHT and later. Earlier than that it is noise — the day is
+ * young, and an app that pesters you at breakfast about midnight is one you
+ * learn to tune out, which costs it the one moment it needed to be heard.
+ *
+ * It deliberately does NOT mention the streak, and that is a correction rather
+ * than a style choice. Since opening the app keeps a streak alive, by the time
+ * you can read this the streak is already safe — the old copy ("your 12-day
+ * streak needs one entry") would have been claiming a risk that no longer
+ * exists. So it keys off `todayHasEntry`, not the streak, and asks the plain
+ * question instead. A prompt that lies about stakes is worth less than no
+ * prompt.
+ *
+ * This is the in-app half of the reminder. It cannot reach you with the app
+ * closed; that needs Web Push and a server to send it, which is deliberately
+ * not built (ROADMAP §9.3).
+ */
+function NoEntryYetBanner({ onAdd }: { onAdd: () => void }) {
+  if (manilaHour(new Date()) < 18) return null
+
+  return (
+    <section className="card border-line px-4 py-3.5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="font-display text-[0.625rem] leading-relaxed text-ink-soft">
+            NOTHING LOGGED TODAY
+          </h2>
+          <p className="mt-1.5 text-sm text-ink-soft">Spent anything you haven't put in yet?</p>
+        </div>
+        <button
+          type="button"
+          onClick={onAdd}
+          className="press shrink-0 bg-accent px-3.5 py-2.5 font-semibold text-on-accent"
+        >
+          Log now
+        </button>
+      </div>
+    </section>
   )
 }
 

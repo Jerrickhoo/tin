@@ -14,6 +14,7 @@ import {
 import { entriesToCsv, entriesToJson } from '../../lib/export'
 import { manilaDayKey } from '../../lib/dates'
 import { exportReminderStatus, getLastExport, recordExport } from '../../lib/exportReminder'
+import { getTexture, setTexture, type Texture } from '../../lib/texture'
 import { useSession } from '../auth/useSession'
 import { MfaSection } from './MfaSection'
 
@@ -132,6 +133,41 @@ function StuckWrites() {
   )
 }
 
+/**
+ * The one display preference in the app.
+ *
+ * Device-local, so no toast and no save button: it applies on the tap and the
+ * result is the whole confirmation. Anything more ceremonious would imply it
+ * travels with the account, which it deliberately does not (lib/texture.ts).
+ */
+function AppearanceSection() {
+  const [texture, setTextureState] = useState<Texture>(getTexture)
+
+  function choose(next: Texture) {
+    setTexture(next)
+    setTextureState(next)
+  }
+
+  return (
+    <section className="card p-4">
+      <h2 className="font-display text-[0.6875rem] leading-relaxed">Appearance</h2>
+      <p className="mt-1 mb-3 text-sm text-ink-soft">
+        The backdrop carries faint scanlines and a pastel bloom. Turn them off for a flat screen —
+        this device only.
+      </p>
+      <label className="flex cursor-pointer items-center justify-between gap-3">
+        <span className="text-sm">Reduce texture</span>
+        <input
+          type="checkbox"
+          checked={texture === 'reduced'}
+          onChange={(e) => choose(e.target.checked ? 'reduced' : 'full')}
+          className="size-5 shrink-0 accent-[var(--color-accent)]"
+        />
+      </label>
+    </section>
+  )
+}
+
 export function Settings() {
   const { session } = useSession()
   const toast = useToast()
@@ -241,6 +277,8 @@ export function Settings() {
       </section>
 
       <MfaSection />
+
+      <AppearanceSection />
 
       {/* Four independent destinations — a single column of them is a phone
           compromise, not a layout. They tile once there's room. */}

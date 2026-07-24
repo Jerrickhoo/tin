@@ -6,9 +6,9 @@
 
 ---
 
-## Status — all phases closed (2026-07-22)
+## Status — all phases closed (2026-07-22), Phase 9 added 2026-07-24
 
-**Live at <https://tin-jar.netlify.app>.** Phases 0–8 are done, plus a Phase 3.5 retrofit. 185 tests; lint, build and the AA-contrast script all clean. `git push` to `main` deploys.
+**Live at <https://tin-jar.netlify.app>.** Phases 0–9 are done, plus a Phase 3.5 retrofit. 305 tests; lint, build and the AA-contrast script all clean. `git push` to `main` deploys.
 
 | Phase | State |
 | ----- | ----- |
@@ -17,6 +17,7 @@
 | 3.5 Envelope/category management | ✅ **retrofit** — §0 promised it, no phase ever gave it a task line, so it was never built. Found by auditing prose against code. |
 | 4–7 Analytics, recurring, offline, hardening | ✅ |
 | 8 Statement importer | ✅ **closed** — importer shipped; the GCash-PDF-specific reader was **dropped by decision**, not left pending |
+| 9 Habit loop & insight rework | ✅ — streak + repair saves + check-ins, true-ratio spending breakdown, calmer backdrop. **Web Push explicitly NOT built** — see §9. |
 
 This document stops being a plan here and becomes the record of why things are the way they are. The parts worth reading before changing anything: **§1 engineering law**, the **§3** notes on composite ownership FKs and the missing sum-to-10000 check, **§6**'s known CVD gap, and the closure note on Phase 8.
 
@@ -664,4 +665,102 @@ All defined once in `src/styles/theme.css`; screens compose them, never re-roll 
 3. **An RLS mistake exposes your finances on a public URL.** One table created without RLS is world-readable via the anon key. _Mitigation:_ RLS lives in the same migration as `CREATE TABLE`; the two-account probe test is written in Phase 2 and re-run after every migration; `service_role` never leaves the dashboard.
 4. **Supabase free-tier project pause or loss.** Pauses after 7 days idle; free tier has no automated backups — a deleted project is gone. _Mitigation:_ keep-alive Action (₱0); migrations in the repo mean rebuild-from-zero is ~10 minutes; export button ships in Phase 3 and a monthly export reminder makes backups a habit. Your data outlives any Supabase project.
 5. **Perfectionism before dogfood (solo student edition).** Tinkering with analytics colors in week 2 while expenses still can't be logged, then exams hit and the repo goes cold. _Mitigation:_ the phase order **is** the mitigation — nothing about polish precedes daily usability; every phase ends deployed; if a phase stalls, cut its scope, not the shipping.
+
+---
+
+## 8. Phase 9 — habit loop & insight rework (2026-07-24)
+
+Four changes, requested together. Ordered here by how much of the app they touch.
+
+### 9.1 "Where it went" was a rank chart pretending to be a ratio chart
+
+**The bug:** each category bar was `spent / biggestCategory`, so the top bar was full-width in _every_ month — whether it was 90% of spending or 12%. The shape of the chart carried no information about the month.
+
+Now every width is a share of **total spending**, the percentage is stated in text next to the peso amount, and a stacked 100%-wide composition bar sits above the rows so the whole is visible at a glance.
+
+Two things the naive fix would have got wrong, both now handled in `lib/analytics.ts`:
+
+- **The denominator did not exist.** `summarizeMonth` counted every expense in `spendingCentavos` but only categorised ones in `perCategory`. Dividing by the former made the shares silently sum to <100%; dividing by the latter hid real money. There is now an `uncategorizedCentavos` field and an explicit **Uncategorized** row, so the column always adds to 100%.
+- **True shares are individually small.** Twelve categories means everything under ~4% is thinner than one cell of the segmented `.meter`. The tail folds into one **Other · N categories** row, expandable — and expanding _re-derives_ the breakdown rather than un-hiding rows, because the largest-remainder pass is what keeps the percentages summing to exactly 10000 bp either way.
+
+`sharesBpOf` is the inverse direction of `splitByLargestRemainder` (parts → shares instead of total → parts) and exists for the same reason: a breakdown that visibly fails to add up undermines every other number on the screen.
+
+### 9.2 Streak, with three repair saves a month
+
+`lib/logging-streak.ts` used to argue **against** a streak counter in its header comment — a number that resets to zero punishes one missed day so hard that people abandon the app rather than break the chain, which is the exact failure mode risk #1 describes. That objection was never answered, only deferred.
+
+**Repair saves answer it.** Three days a month can be bought back, so one missed day is recoverable rather than terminal. The old comment has been rewritten rather than deleted — the reasoning still matters, and a file that contradicts its own code is worse than either position.
+
+Rules, all pure and tested:
+
+- A day counts if it has any non-voided entry, **a check-in** (§9.7), **or** a save.
+- **Today never breaks a streak.** It is in progress until PHT midnight, so the run is measured from today when today counts and from yesterday when it does not. Only a missing _yesterday_ ends anything.
+- Repair is **manual, prompted, and bounded** — chosen over auto-consume, because a scarce resource should not be spent while you sleep.
+- Only a **single missed day flanked by logged days** can be repaired, and only within 2 days. Two consecutive misses is a genuinely broken chain; spending a save to paper over it would buy nothing.
+- The prompt states the streak you would end up with, and that number is **computed, never estimated** — it makes a promise and has to keep it.
+- Budget is charged to the **repaired day's month**, not the month you pressed the button in, so a save for the 31st is still spendable on the 1st.
+
+**Storage:** migration `003_streak_saves.sql` — `(user_id, day_key)` PK, which makes repair idempotent by construction. localStorage was rejected because logout wipes IndexedDB and the caches, and a streak you lose by signing in elsewhere is worse than no streak. The ledger was rejected because a save is not money, and a non-money row in an append-only money log corrupts every balance and export it touches.
+
+Writes are **online-only, direct to Supabase** (the `config.ts` precedent), not through the outbox. The outbox carries exactly two idempotent money ops on purpose; a save queued for two days could drain into a month whose budget was consumed meanwhile, and the queue has no way to reject it.
+
+Two deliberate deviations, both commented at their site:
+
+- `streak_saves` is the **only table with a DELETE policy**. Elsewhere deletes are denied because the rows are financial history. A save is a reversible choice about a habit counter, and nothing references it.
+- Its mirror **applies an empty pull**, unlike `mirrorReplaceEnvelopes`. Because a delete policy exists, zero rows is a state a user can genuinely reach — refusing it would leave a deleted save propping up a streak forever.
+
+### 9.3 The notification — in-app only, and why
+
+An app that is closed cannot notify you without a server. Built: an evening banner on Home, gated to **18:00 PHT and later**, when nothing has been logged today. Earlier than that it is false in spirit — an app that warns you at breakfast about a midnight deadline is noise you learn to ignore, which costs it the one moment it needed to be heard.
+
+It keys off `todayHasEntry`, **not** the streak — see §9.7 for why that distinction had to exist before check-ins could ship.
+
+**Web Push was deliberately not built.** It needs VAPID keys, a `push_subscriptions` table, a Supabase Edge Function on cron — and, the hidden cost, a migration from `generateSW` to `injectManifest` so the service worker has somewhere to put a `push` listener. That means hand-writing the SW that currently makes the app work offline. Also: iOS only delivers web push to a PWA added to the Home Screen, and the server would necessarily learn whether you logged today. **If this is ever picked up, it is its own phase**, not a bolt-on.
+
+### 9.4 Calmer backdrop
+
+The old `body::after` stacked **two** noise layers — 3px scanlines _and_ a 4x4 ordered dither — at a combined 0.5 opacity, and the sum read as grain rather than as a screen. The dither is gone outright: it existed to stop banding on large flat fills, and since every card paints an opaque `--color-surface` over it, it was only ever visible in the gutters where there is nothing to band. Scanlines are 0.5 → 0.22 and the blooms are ~30% weaker.
+
+**Settings ▸ Appearance ▸ Reduce texture** removes both entirely. Device-local (`lib/texture.ts`), because it describes _this screen_ — scanlines are far more noticeable on a low-DPR monitor than on a phone — so syncing it would push the wrong answer onto the other device. Applied from `main.tsx` **before React renders**: an effect runs after first paint and would flash the full texture every launch, and an inline script in `index.html` is blocked by `script-src 'self'` in production while working fine in dev.
+
+Neither layer can affect text contrast — both sit at `z-index: 0` behind `#root`. `npm run check:contrast` still passes with the same worst pairing.
+
+### 9.5 Smaller things in the same pass
+
+- **Insights restructured.** Added spending **pace** (₱/day + straight-line projection, live month only), a **vs last month** panel with the three biggest category movers, and a **streak** panel. Envelope flows demoted to a `<details>` — it is reference data, not insight.
+- **The ‹ arrow now stops** at the earliest month with entries (`earliestEntryAt`), instead of paging into empty months forever, which looked like data loss rather than the beginning of the ledger.
+- **"Manila" → "PHT"** in History. The Philippines is one zone (UTC+8, no DST since 1978), so `Asia/Manila` is the IANA _identifier_, not a claim about where the user lives — Iloilo was always correct, but the label read wrong. `manilaHour` moved into `lib/dates.ts` and normalises the ICU `"24"` midnight case, which would have silently inverted the `hour < 18` banner gate.
+
+### 9.6 Deploy order — this one bites
+
+`pullStreakSaves` runs inside the sync loop's `Promise.all`, so a missing table would take down **the entire sync pass, including the outbox drain that pushes money**. Deploys are not transactional: `git push` ships the client via Netlify while migration 003 is applied by hand.
+
+So the pull **swallows exactly one error** — "this table does not exist" (`PGRST205` / `42P01`) returns `[]`. Permission errors, network failures and everything else still throw, because those are real. Apply the migration when convenient; the app degrades to "no streak" until then instead of breaking. Migration 004 (§9.7) gets the same treatment through the shared `isMissingTable` helper.
+
+### 9.7 Check-ins — opening the app counts too
+
+**The rule shipped in 9.2 punished the wrong thing.** A day you spend nothing is a _good_ day, and requiring an entry meant frugality broke your chain. "Nothing to log" was indistinguishable from "didn't bother". So opening Tin now keeps a streak alive by itself.
+
+**The hazard was raised before this was built, not discovered after.** A streak is only ever _visible_ from inside the app — so if opening it marks the day, every day you look is a day that just turned green, and the count degenerates into a mirror that reads 7/7 forever.
+
+Three things keep that from happening, and they are the whole design:
+
+1. **The two kinds of day stay distinct all the way to the screen.** `logged` means money was recorded; `checkedIn` means you only showed up. The strip draws an entry day solid and a check-in day as an **outline** — not a fainter solid, because at 10px "dimmer" and "different" are the same thing to the eye. The summary counts them separately: _"4 of 7 days with entries · 2 opened"_.
+2. **They are mutually exclusive.** A day where you opened the app _and_ logged something is an entry day, full stop. Letting both be true would make the two counts overlap and stop summing to the week.
+3. **`currentWithEntries`** rides alongside `current`, so Insights can say _"12 days running · 5 of those days have entries"_. A streak inflated by attendance can never pass itself off as a tracking record.
+
+**`todayHasEntry` is kept apart from `todayCounted` for one concrete reason:** the evening nudge keys off entries. Keying it off the streak would have silently disabled the nudge the moment check-ins landed — the feature would have broken another feature on the way in, invisibly.
+
+**Storage is local-first — the only thing outside the money path that is.** Opening the app is the event _most_ likely to happen with no connection, and an online-only write would mean a day you opened Tin in a dead spot never counted, failing invisibly on exactly the days this protects. So `recordCheckIn` writes to Dexie before anything touches the network, and the sync loop pushes unsynced days on the next pass.
+
+This is **not** the outbox, and the distinction matters: the push is a blind idempotent upsert of a set of day keys, with no ordering requirement and nothing to reconcile. Every property that makes the outbox necessary for money is absent. Failure is free — the rows stay flagged and go again next pass.
+
+Four details that would each have been a silent bug:
+
+- **`add`, not `put`, in `recordCheckIn`.** Every app open calls it; `put` would reset an already-pushed day back to unsynced and re-upload it forever.
+- **`synced` is `0 | 1`, not a boolean.** IndexedDB cannot index booleans — Dexie accepts `where('synced').equals(false)` and matches nothing, which would have left every check-in stuck as unpushed while looking like it worked.
+- **The mirror merges, never replaces.** A day recorded offline exists locally and not yet on the server; clear-then-refill would delete precisely the rows not yet backed up. Safe because migration 004 grants no UPDATE and no DELETE, so the table is append-only on both sides.
+- **`PulledCheckIn` is a separate type from `CheckInRow`.** `synced` is local bookkeeping the server neither has nor needs; casting pulled rows to the stored type was a lie the compiler could not catch.
+
+Migration 004 is a **separate table from `streak_saves`**, not a `kind` column on it. Saves are capped at 3/month and that cap is a row count per month; folding unlimited check-ins into the same table would make every budget check filter on kind, and the first place that forgot would silently lock the user out of repairs for the month.
 

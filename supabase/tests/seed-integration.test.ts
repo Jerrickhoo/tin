@@ -32,9 +32,29 @@ describe.skipIf(!password)('first-run seeding against the live project', () => {
       { name: 'Wants', share_bp: 1000, sort_order: 2 },
     ])
 
-    const cats = await supabase.from('categories').select('id', { count: 'exact', head: true })
+    // Asserts the eight ACTIVE starter categories by name, not a total row
+    // count. The old `count === 8` over every row was guaranteed to break
+    // eventually: there is no DELETE policy on categories (001_core.sql), so a
+    // shared probe account can only ever accumulate — and it did, when a
+    // Phase 3.5 drive left an archived `ZZ Drive Test` behind on 2026-07-22
+    // that cannot be removed. Seeding's actual promise is about the active
+    // set, so that is what this checks.
+    const cats = await supabase
+      .from('categories')
+      .select('name')
+      .is('archived_at', null)
+      .order('name')
     expect(cats.error).toBeNull()
-    expect(cats.count).toBe(8)
+    expect((cats.data ?? []).map((c) => c.name).sort()).toEqual([
+      'Bills',
+      'Food',
+      'Fun',
+      'Games',
+      'School',
+      'Stash',
+      'Transport',
+      'Treats',
+    ])
 
     // the Home screen's balance query: the LEFT JOIN view must surface every
     // envelope even without live entries (probe-b's ledger holds only voided

@@ -290,7 +290,9 @@ function GroupCard({
             ))}
           </div>
           <p className="mt-2 text-xs text-ink-mute">
-            {manilaTime.format(new Date(group.occurredAt))} Manila
+            {/* "PHT", not "Manila": the zone covers the whole country, and the
+                city name read as a claim about where the user is. */}
+            {manilaTime.format(new Date(group.occurredAt))} PHT
             {group.note ? ` · ${group.note}` : ''}
           </p>
           {group.voided && leg0.void_reason && (

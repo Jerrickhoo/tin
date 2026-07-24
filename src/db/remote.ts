@@ -6,10 +6,25 @@
 import { supabase } from './supabase'
 import type { EntryRow } from '../lib/groups'
 import type { NewEntryRow } from './outbox'
-import type { CategoryRow, EnvelopeRow } from './dexie'
+import type { CategoryRow, EnvelopeRow, PulledCheckIn, StreakSaveRow } from './dexie'
 
 const ENTRY_COLUMNS =
   'id, group_id, kind, envelope_id, category_id, amount_centavos, note, occurred_at, voided_at, void_reason'
+
+/**
+ * "This table does not exist yet" — PGRST205 from PostgREST's schema cache,
+ * 42P01 from Postgres itself.
+ *
+ * Tolerated ONLY by the two habit tables (streak_saves, checkin_days), never
+ * by anything on the money path. Deploys are not transactional: `git push`
+ * ships the client via Netlify while migrations 003/004 are applied by hand,
+ * and these pulls share a Promise.all with the entry pull and the outbox
+ * drain. Throwing here would take the ledger's sync down over a habit counter
+ * for the length of that window.
+ */
+function isMissingTable(code: string | undefined): boolean {
+  return code === 'PGRST205' || code === '42P01'
+}
 
 export async function pushInsertEntries(rows: readonly NewEntryRow[]): Promise<void> {
   // upsert on the client-generated primary key: a retry after a lost response
@@ -90,4 +105,68 @@ export async function pullCategories(): Promise<CategoryRow[]> {
   const { data, error } = await supabase.from('categories').select('*').order('name')
   if (error) throw new Error(error.message)
   return (data ?? []) as CategoryRow[]
+}
+
+/**
+ * Every streak save, pulled whole rather than by delta.
+ *
+ * At three rows a month this table will not reach four figures in a decade, so
+ * a cursor would be more moving parts than the thing it optimises. Same
+ * reasoning as envelopes and categories above.
+ *
+ * A MISSING TABLE IS NOT AN ERROR HERE, and that exception is deliberate.
+ * This pull shares a Promise.all with the entry and envelope pulls, so a throw
+ * takes the whole sync pass down with it — including the outbox drain that
+ * pushes money. Deploys are not transactional: `git push` ships the client
+ * (Netlify auto-builds) while migration 003 is applied by hand, so there is a
+ * window where the new client is live against a database without the table.
+ * Breaking the ledger for the length of that window, over a habit counter,
+ * would be a spectacularly bad trade.
+ *
+ * Only "this table does not exist" is swallowed — PGRST205 from the schema
+ * cache, 42P01 from Postgres itself. A permission error, a network failure or
+ * anything else still throws, because those are real and the user needs the
+ * sync-stuck banner to tell them so.
+ */
+export async function pullStreakSaves(): Promise<StreakSaveRow[]> {
+  const { data, error } = await supabase.from('streak_saves').select('day_key').order('day_key')
+  if (error) {
+    if (isMissingTable(error.code)) return []
+    throw new Error(error.message)
+  }
+  return (data ?? []) as StreakSaveRow[]
+}
+
+/** Check-in days. Same whole-table pull and same missing-table tolerance. */
+export async function pullCheckIns(): Promise<PulledCheckIn[]> {
+  const { data, error } = await supabase.from('checkin_days').select('day_key').order('day_key')
+  if (error) {
+    if (isMissingTable(error.code)) return []
+    throw new Error(error.message)
+  }
+  return (data ?? []) as PulledCheckIn[]
+}
+
+/**
+ * Push days recorded offline.
+ *
+ * A blind upsert of everything this device has not had acknowledged: the
+ * client cannot know whether a previous attempt landed, and the
+ * (user_id, day_key) primary key means it never has to. `ignoreDuplicates`
+ * turns "already there" into success, which is the truth.
+ *
+ * A missing table is swallowed here too — the caller treats an empty result as
+ * "nothing was accepted" and simply leaves the rows unsynced for next time.
+ */
+export async function pushCheckIns(dayKeys: readonly string[]): Promise<boolean> {
+  if (dayKeys.length === 0) return true
+  const { error } = await supabase.from('checkin_days').upsert(
+    dayKeys.map((day_key) => ({ day_key })),
+    { onConflict: 'user_id,day_key', ignoreDuplicates: true },
+  )
+  if (error) {
+    if (isMissingTable(error.code)) return false
+    throw new Error(error.message)
+  }
+  return true
 }

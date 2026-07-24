@@ -8,12 +8,19 @@ import {
   applyLocalInsert,
   getCursor,
   mirrorApplyPulledEntries,
+  markCheckInsSynced,
+  mirrorMergeCheckIns,
   mirrorReplaceCategories,
   mirrorReplaceEnvelopes,
+  mirrorReplaceStreakSaves,
   openForUser,
   outboxCount,
   firstOutboxRow,
+  readCheckIns,
+  readStreakSaves,
+  recordCheckIn,
   setCursor,
+  unsyncedCheckIns,
   wipeLocalDb,
 } from './dexie'
 import { drainOutbox, type OutboxOp } from './outbox'
@@ -256,12 +263,61 @@ describe('local-first mirror + outbox', () => {
     expect(await getCursor()).toBe('2026-07-19T10:00:05+00:00')
   })
 
+  it('streak saves round-trip through the mirror', async () => {
+    await mirrorReplaceStreakSaves([{ day_key: '2026-07-11' }, { day_key: '2026-07-05' }])
+    expect((await readStreakSaves()).sort()).toEqual(['2026-07-05', '2026-07-11'])
+  })
+
+  it('applies an EMPTY streak-save pull, unlike envelopes and categories', async () => {
+    // The deliberate deviation from replaceAll. streak_saves is the one table
+    // with a DELETE policy, so "the server has none" is a state a user can
+    // actually reach — refusing it would leave a deleted save propping up a
+    // streak the server no longer supports.
+    await mirrorReplaceStreakSaves([])
+    expect(await readStreakSaves()).toEqual([])
+
+    // …while the tables whose empty pull can only ever be a transient still
+    // refuse it, which is the behaviour this must not have regressed.
+    expect(await mirrorReplaceEnvelopes([])).toBe(false)
+    expect(await entriesDb.fetchEnvelopes()).toHaveLength(3)
+  })
+
+  it('records a check-in locally, so an offline day counts immediately', async () => {
+    await recordCheckIn('2026-07-22')
+    expect(await readCheckIns()).toEqual(['2026-07-22'])
+    // Unsynced until a sync pass acknowledges it.
+    expect(await unsyncedCheckIns()).toEqual(['2026-07-22'])
+  })
+
+  it('re-recording the same day is a no-op that keeps the synced flag', async () => {
+    await markCheckInsSynced(['2026-07-22'])
+    expect(await unsyncedCheckIns()).toEqual([])
+    // Every app open calls this. If it used put() instead of add(), the day
+    // would flip back to unsynced and be re-uploaded forever.
+    await recordCheckIn('2026-07-22')
+    expect(await unsyncedCheckIns()).toEqual([])
+    expect(await readCheckIns()).toEqual(['2026-07-22'])
+  })
+
+  it('merges a pulled check-in without dropping an unsynced local one', async () => {
+    // The reason this mirror merges instead of replacing: a clear-then-refill
+    // would delete exactly the day that has not been backed up yet.
+    await recordCheckIn('2026-07-23')
+    await mirrorMergeCheckIns([{ day_key: '2026-07-20' }, { day_key: '2026-07-22' }])
+    expect((await readCheckIns()).sort()).toEqual(['2026-07-20', '2026-07-22', '2026-07-23'])
+    expect(await unsyncedCheckIns()).toEqual(['2026-07-23'])
+  })
+
   it('opening for a different user wipes everything', async () => {
+    await mirrorReplaceStreakSaves([{ day_key: '2026-07-11' }])
     await openForUser('user-b')
     expect(await entriesDb.hasAnyEntries()).toBe(false)
     expect(await entriesDb.fetchEnvelopes()).toEqual([])
     expect(await outboxCount()).toBe(0)
     expect(await getCursor()).toBeNull()
+    // A shared laptop must not show the previous account's streak either.
+    expect(await readStreakSaves()).toEqual([])
+    expect(await readCheckIns()).toEqual([])
   })
 
   it('wipeLocalDb deletes the database and the gate re-arms for the next login', async () => {

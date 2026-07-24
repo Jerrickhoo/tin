@@ -144,6 +144,20 @@ export async function hasAnyEntries(): Promise<boolean> {
   return (await db.entries.count()) > 0
 }
 
+/**
+ * `occurred_at` of the oldest entry, or null on an empty ledger.
+ *
+ * One indexed row, not a scan: Insights uses it to stop the month-back arrow
+ * at the beginning of the ledger instead of letting you page into empty months
+ * forever. Voided rows count — a month whose only entry was taken back still
+ * happened, and skipping it would put a hole in the middle of the timeline.
+ */
+export async function earliestEntryAt(): Promise<string | null> {
+  const db = await localDb()
+  const first = await db.entries.orderBy('occurred_at').first()
+  return first?.occurred_at ?? null
+}
+
 const nowIso = () => new Date().toISOString()
 
 async function insertRows(rows: NewEntryRow[]): Promise<void> {

@@ -6,12 +6,17 @@
 import { advanceCursor, pullWindowStart } from '../lib/sync-rules'
 import {
   getCursor,
+  markCheckInsSynced,
   mirrorApplyPulledEntries,
+  mirrorMergeCheckIns,
   mirrorReplaceCategories,
   mirrorReplaceEnvelopes,
+  mirrorReplaceStreakSaves,
   onOutboxChange,
   outboxCount,
+  readStreakSaves,
   setCursor,
+  unsyncedCheckIns,
 } from './dexie'
 import { drainOutbox, type OutboxOp } from './outbox'
 import * as remote from './remote'
@@ -92,15 +97,45 @@ async function runOnce(): Promise<void> {
   try {
     const drained = await drainOutbox(executeOp)
     changed = await pullEntries()
-    const [envelopes, categories] = await Promise.all([
+
+    // Check-ins recorded while offline go up before the pull, so the pull that
+    // follows already reflects them. This is NOT the outbox: it is a blind,
+    // idempotent upsert of a set of day keys with no ordering requirement and
+    // nothing to reconcile — the properties that make the outbox necessary for
+    // money are all absent here. Failure is free: the rows stay flagged
+    // unsynced and go again next pass.
+    const pendingCheckIns = await unsyncedCheckIns()
+    if (pendingCheckIns.length > 0 && (await remote.pushCheckIns(pendingCheckIns))) {
+      await markCheckInsSynced(pendingCheckIns)
+    }
+
+    const [envelopes, categories, streakSaves, checkIns] = await Promise.all([
       remote.pullEnvelopes(),
       remote.pullCategories(),
+      remote.pullStreakSaves(),
+      remote.pullCheckIns(),
     ])
     const envReplaced = await mirrorReplaceEnvelopes(envelopes)
     const catReplaced = await mirrorReplaceCategories(categories)
     if ((envReplaced && envelopes.length > 0) || (catReplaced && categories.length > 0)) {
       changed = true
     }
+    // Compared before writing, because this mirror always replaces (including
+    // with nothing) — so "did anything change" cannot be inferred from the
+    // write itself the way it can for envelopes and categories.
+    const savesBefore = await readStreakSaves()
+    const pulledKeys = streakSaves.map((r) => r.day_key)
+    await mirrorReplaceStreakSaves(streakSaves)
+    if (
+      savesBefore.length !== pulledKeys.length ||
+      pulledKeys.some((k) => !savesBefore.includes(k))
+    ) {
+      changed = true
+    }
+
+    // Merge, never replace — a day recorded offline is not on the server yet,
+    // and clearing first would delete exactly the rows still waiting to go up.
+    await mirrorMergeCheckIns(checkIns)
     patchSnapshot({ lastError: drained.blocked ? drained.error : null })
   } catch (err) {
     patchSnapshot({ lastError: err instanceof Error ? err.message : String(err) })

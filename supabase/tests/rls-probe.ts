@@ -121,6 +121,98 @@ console.log('\nB writing at A:')
   check("B's category cannot live under A's envelope (ownership FK)", r5.error !== null)
 }
 
+// ---- habit tables (003 streak_saves, 004 checkin_days) ----
+// These carry no money, but they are on the same public REST surface with the
+// same anon key, and "it's only a habit counter" is exactly the reasoning that
+// leaves a table world-readable. Same treatment as everything else.
+const saveDay = '2020-01-02' // fixed past dates: never collide with real usage
+const checkInDay = '2020-01-03'
+
+console.log('\nhabit tables — owner access:')
+{
+  const r = await asA
+    .from('streak_saves')
+    .upsert({ day_key: saveDay }, { onConflict: 'user_id,day_key', ignoreDuplicates: true })
+  check('A can record a streak save', !r.error, r.error?.message)
+
+  const r2 = await asA
+    .from('checkin_days')
+    .upsert({ day_key: checkInDay }, { onConflict: 'user_id,day_key', ignoreDuplicates: true })
+  check('A can record a check-in', !r2.error, r2.error?.message)
+
+  // The idempotency both features lean on: a retry after a lost response must
+  // collapse into the existing row, not error and not double-charge a budget.
+  const r3 = await asA
+    .from('streak_saves')
+    .upsert({ day_key: saveDay }, { onConflict: 'user_id,day_key', ignoreDuplicates: true })
+  check('re-recording the same save is idempotent, not an error', !r3.error, r3.error?.message)
+  const r4 = await asA
+    .from('checkin_days')
+    .upsert({ day_key: checkInDay }, { onConflict: 'user_id,day_key', ignoreDuplicates: true })
+  check('re-recording the same check-in is idempotent', !r4.error, r4.error?.message)
+
+  const r5 = await asA.from('streak_saves').select('day_key').eq('day_key', saveDay)
+  check('A can read their own saves', !r5.error && (r5.data ?? []).length === 1, r5.error?.message)
+}
+
+console.log('\nhabit tables — anon and cross-user:')
+{
+  const r = await anon.from('streak_saves').select('day_key')
+  check('anon sees zero streak saves', !r.error && (r.data ?? []).length === 0, r.error?.message)
+  const r2 = await anon.from('checkin_days').select('day_key')
+  check('anon sees zero check-ins', !r2.error && (r2.data ?? []).length === 0, r2.error?.message)
+
+  const r3 = await asB.from('streak_saves').select('day_key').eq('day_key', saveDay)
+  check("B cannot see A's streak saves", !r3.error && (r3.data ?? []).length === 0)
+  const r4 = await asB.from('checkin_days').select('day_key').eq('day_key', checkInDay)
+  check("B cannot see A's check-ins", !r4.error && (r4.data ?? []).length === 0)
+
+  // A save is a scarce resource (3/month). Planting one in someone else's
+  // account would consume their budget, so this is a real attack, not a
+  // hypothetical one.
+  const r5 = await asB.from('streak_saves').insert({ user_id: userA.id, day_key: '2020-01-04' })
+  check('B cannot plant a streak save in A’s account', r5.error !== null)
+  const r6 = await asB.from('checkin_days').insert({ user_id: userA.id, day_key: '2020-01-04' })
+  check('B cannot plant a check-in in A’s account', r6.error !== null)
+
+  const r7 = await asB.from('streak_saves').delete().eq('day_key', saveDay).select('day_key')
+  check("B's delete of A's save hits zero rows", !r7.error && (r7.data ?? []).length === 0)
+}
+
+console.log('\nhabit tables — append-only rules:')
+{
+  // No UPDATE grant on either table: a save/check-in is a fact about one
+  // specific day, and moving it is delete + insert so both months re-check.
+  const r = await asA
+    .from('streak_saves')
+    .update({ day_key: '2020-01-09' })
+    .eq('day_key', saveDay)
+    .select()
+  check(
+    'even the owner cannot move a streak save to another day',
+    r.error !== null || (r.data ?? []).length === 0,
+  )
+  const r2 = await asA
+    .from('checkin_days')
+    .update({ day_key: '2020-01-09' })
+    .eq('day_key', checkInDay)
+    .select()
+  check('even the owner cannot edit a check-in', r2.error !== null || (r2.data ?? []).length === 0)
+
+  // checkin_days has NO delete policy — a day either was opened or it wasn't.
+  const r3 = await asA.from('checkin_days').delete().eq('day_key', checkInDay).select('day_key')
+  check('deletes on check-ins are denied', r3.error !== null || (r3.data ?? []).length === 0)
+
+  // streak_saves DOES have one, deliberately (003 argues the case): a save is
+  // a spent resource the user must be able to take back.
+  const r4 = await asA.from('streak_saves').delete().eq('day_key', saveDay).select('day_key')
+  check(
+    'the owner CAN undo their own streak save (the one intentional delete policy)',
+    !r4.error && (r4.data ?? []).length === 1,
+    r4.error?.message,
+  )
+}
+
 console.log('\nappend-only ledger:')
 {
   // the only UPDATE the column grants allow on entries is voiding
