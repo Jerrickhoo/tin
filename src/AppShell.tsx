@@ -69,6 +69,37 @@ export function AppShell() {
   }, [])
   const toast = useMemo(() => ({ show }), [show])
 
+  // The Manila day this session last recorded a visit for. Held in a ref rather
+  // than derived, because the whole point is to notice when the wall clock has
+  // moved on while React has had no reason to re-render.
+  const checkedInDay = useRef<string | null>(null)
+
+  /**
+   * Record that Tin was opened today, if today is not already recorded.
+   *
+   * Called on boot AND whenever the tab becomes visible again, and the second
+   * half is the one that matters. This used to live only inside the once-per-
+   * session boot effect, which is correct exactly once: Tin is an installed
+   * PWA, so a daily user's app is very often still resident from yesterday, and
+   * the day they came back to it was never counted. The streak then quietly
+   * under-reported for precisely the people the feature exists to protect —
+   * silently, because a missing check-in looks identical to a day off.
+   *
+   * `recordCheckIn` is already idempotent; the ref only spares it a Dexie write
+   * on every tab focus. `bump` is what gets the strip and the streak to redraw
+   * on the day they changed.
+   */
+  const noteVisit = useCallback(async () => {
+    const today = manilaDayKey(new Date())
+    if (checkedInDay.current === today) return
+    await recordCheckIn(today)
+    checkedInDay.current = today
+    bump()
+    // A day recorded offline sits unsynced until a pass runs; the loop only
+    // wakes on outbox changes, and this is deliberately not an outbox write.
+    kickSync()
+  }, [bump])
+
   // Once per session, wherever the user lands: adopt the local mirror, start
   // the sync loop, seed idempotently, pull, then run the recurring catch-up
   // poster (ROADMAP 5.2) with an undo-all toast. Offline, everything but the
@@ -77,6 +108,7 @@ export function AppShell() {
   useEffect(() => {
     if (!session) {
       bootedFor.current = null // next login must boot again (mirror may be wiped)
+      checkedInDay.current = null // …and must re-record, into the new owner's mirror
       return
     }
     if (bootedFor.current === session.user.id) return
@@ -89,7 +121,7 @@ export function AppShell() {
         // check-in that only counted online would break the streak on exactly
         // the days this is meant to protect. It is a local Dexie write; the
         // sync loop pushes it whenever a connection next appears.
-        await recordCheckIn(manilaDayKey(new Date()))
+        await noteVisit()
         startSync({ onApplied: bump })
         bump() // mirror may already hold yesterday's data — show it now
         if (!isOffline()) {
@@ -120,7 +152,27 @@ export function AppShell() {
         show(err instanceof Error ? err.message : String(err), 'error')
       }
     })()
-  }, [session, bump, show])
+  }, [session, bump, show, noteVisit])
+
+  // The other half of the check-in fix: an installed PWA is frequently still
+  // resident from yesterday, so coming back to it is the ONLY signal that a new
+  // day started. `visibilitychange` is what sync.ts already keys its own wake-up
+  // off; `focus` covers a desktop window that never went hidden.
+  useEffect(() => {
+    if (!session) return
+    const onWake = () => {
+      if (document.visibilityState !== 'visible') return
+      void noteVisit().catch(() => {
+        /* a failed check-in is not worth a toast — the next wake retries it */
+      })
+    }
+    document.addEventListener('visibilitychange', onWake)
+    window.addEventListener('focus', onWake)
+    return () => {
+      document.removeEventListener('visibilitychange', onWake)
+      window.removeEventListener('focus', onWake)
+    }
+  }, [session, noteVisit])
 
   const [sheetOpen, setSheetOpen] = useState(launchShortcut !== undefined)
   const [sheetNonce, setSheetNonce] = useState(0)

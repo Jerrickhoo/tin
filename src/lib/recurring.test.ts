@@ -6,6 +6,7 @@ import {
   nextRunAfter,
   occurrenceInMonth,
 } from './recurring'
+import { daysInMonth, daysInYearMonth } from './dates'
 import { TIN_RECURRING_NAMESPACE, uuidv5 } from './uuidv5'
 
 describe('occurrenceInMonth / nextRunAfter (day 29–31 clamp)', () => {
@@ -70,5 +71,24 @@ describe('uuidv5', () => {
     expect(a).toBe(b)
     expect(new Set([a, c, d]).size).toBe(3)
     expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+  })
+})
+
+describe('shared calendar primitive', () => {
+  it('clamps to the same month length lib/dates reports, including leap years', () => {
+    // These two modules used to carry byte-identical private copies of the
+    // month-length calculation. They agreed by coincidence, and a divergence
+    // would have surfaced only as rent posting on the wrong day of February —
+    // the one place nobody would think to look. occurrenceInMonth now clamps
+    // with daysInYearMonth, so this test is what keeps the two in step.
+    for (const monthKey of ['2024-02', '2026-02', '2026-04', '2026-07', '2100-02']) {
+      const [year, month] = monthKey.split('-').map(Number)
+      const total = daysInMonth(monthKey)
+      expect(daysInYearMonth(year, month)).toBe(total)
+      // A day-31 rule always lands on the last day the month actually has.
+      expect(occurrenceInMonth(year, month, 31)).toBe(
+        `${monthKey}-${String(total).padStart(2, '0')}`,
+      )
+    }
   })
 })

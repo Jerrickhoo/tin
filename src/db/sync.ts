@@ -135,7 +135,9 @@ async function runOnce(): Promise<void> {
 
     // Merge, never replace — a day recorded offline is not on the server yet,
     // and clearing first would delete exactly the rows still waiting to go up.
-    await mirrorMergeCheckIns(checkIns)
+    // A day this mirror had not seen is a real change: another device's visit
+    // moves the streak, and every other pull in this function already says so.
+    if (await mirrorMergeCheckIns(checkIns)) changed = true
     patchSnapshot({ lastError: drained.blocked ? drained.error : null })
   } catch (err) {
     patchSnapshot({ lastError: err instanceof Error ? err.message : String(err) })

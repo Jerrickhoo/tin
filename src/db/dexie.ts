@@ -412,11 +412,22 @@ export async function markCheckInsSynced(dayKeys: readonly string[]): Promise<vo
  * the server, so a clear-then-refill would delete precisely the rows that have
  * not been backed up. The table is append-only on both sides (migration 004
  * grants no UPDATE and no DELETE), so a merge can never leave it stale.
+ *
+ * Returns whether any day was genuinely NEW here, which the sync loop needs to
+ * decide whether to redraw. It cannot be inferred from the write: `bulkPut`
+ * rewrites the rows this device already had (flipping `synced` to 1) just as
+ * happily as it adds another device's, so "we wrote something" is true on every
+ * single pass and would mean nothing. Without this the streak and the strip
+ * stayed on pre-pull state until some unrelated change happened to bump the
+ * ledger — the one pull in the file that told the UI nothing.
  */
-export async function mirrorMergeCheckIns(rows: readonly PulledCheckIn[]): Promise<void> {
-  if (rows.length === 0) return
+export async function mirrorMergeCheckIns(rows: readonly PulledCheckIn[]): Promise<boolean> {
+  if (rows.length === 0) return false
   const db = await localDb()
+  const keys = rows.map((r) => r.day_key)
+  const known = new Set((await db.checkIns.where('day_key').anyOf(keys).primaryKeys()) as string[])
   await db.checkIns.bulkPut(rows.map((r) => ({ day_key: r.day_key, synced: 1 as const })))
+  return keys.some((k) => !known.has(k))
 }
 
 // ---- delta-pull cursor (ROADMAP 6.4) ----

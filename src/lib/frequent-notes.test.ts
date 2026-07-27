@@ -37,6 +37,19 @@ describe('frequentNotes', () => {
     expect(frequentNotes(rows, 3, NOW)).toHaveLength(1)
   })
 
+  it('folds INTERNAL whitespace too, not just the ends', () => {
+    // trim() alone left these as two habits of one use each — so neither
+    // reached MIN_USES and the chip nobody could explain the absence of simply
+    // never appeared.
+    const rows = [
+      expense('Load  100', { occurred_at: daysAgo(3) }),
+      expense('load 100', { occurred_at: daysAgo(2) }),
+      expense('LOAD   100', { occurred_at: daysAgo(1) }),
+    ]
+    // One habit, three uses — and the newest spelling on it, as documented.
+    expect(frequentNotes(rows, 3, NOW)).toEqual(['LOAD   100'])
+  })
+
   it('shows the most recent spelling of a folded note', () => {
     const rows = [
       expense('jeepney', { occurred_at: daysAgo(10) }),

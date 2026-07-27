@@ -58,9 +58,16 @@ export async function createTemplate(params: {
   if (error) throw error
 }
 
+/**
+ * `kind` is required but never written — it is here purely to re-check the one
+ * rule an edit can break. A template's kind is immutable (the toggle is
+ * disabled in the edit sheet and this patch has never included the column), so
+ * the caller passes the stored value.
+ */
 export async function updateTemplate(
   id: string,
   params: {
+    kind: 'income' | 'expense'
     amountCentavos: number
     categoryId: string | null
     note: string
@@ -75,6 +82,14 @@ export async function updateTemplate(
   }
   if (!Number.isInteger(params.dayOfMonth) || params.dayOfMonth < 1 || params.dayOfMonth > 31) {
     throw new RangeError('day of month must be between 1 and 31')
+  }
+  // createTemplate has always refused this; the edit path did not, and neither
+  // does the schema — 001_core.sql declares `category_id uuid` with nothing
+  // tying it to `kind`. An expense template that loses its category is not
+  // rejected, it is ACCEPTED and then silently stuck: runCatchUp reports
+  // "its category is gone" on every open and posts nothing, forever.
+  if (params.kind === 'expense' && !params.categoryId) {
+    throw new RangeError('an expense template needs a category')
   }
   const patch: Record<string, unknown> = {
     amount_centavos: params.amountCentavos,

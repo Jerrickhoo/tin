@@ -13,7 +13,8 @@
 // meantime, and the queue has no way to reject it. Online-only keeps the
 // budget check and the write in the same instant.
 
-import { isRepairable } from '../lib/logging-streak'
+import { nextMonthKey } from '../lib/dates'
+import { isRepairable, SAVES_PER_MONTH } from '../lib/logging-streak'
 import { readStreakSaves } from './dexie'
 import { supabase } from './supabase'
 import { isOffline, syncNow } from './sync'
@@ -32,6 +33,15 @@ export { readStreakSaves }
  * The window is re-checked here even though the UI only ever offers a day
  * inside it: a tab left open overnight would still be showing yesterday's
  * prompt for a day that is now three days old.
+ *
+ * SO IS THE BUDGET, and against the server rather than the mirror. This module
+ * chose online-only writes precisely so the "3 per month" rule could be checked
+ * in the same instant as the write — and then did not check it at all, leaving
+ * `findRepair` hiding the prompt as the only enforcement. That is a rule
+ * standing on a stale read: the mirror is refreshed by the last sync, so a
+ * second device (or a tab open since this morning) can believe a month has room
+ * it no longer has. Counting server-side closes it for the cost of one query on
+ * a table with at most three rows in the month.
  */
 export async function repairDay(dayKey: string): Promise<void> {
   if (isOffline()) {
@@ -39,6 +49,27 @@ export async function repairDay(dayKey: string): Promise<void> {
   }
   if (!isRepairable(dayKey)) {
     throw new Error('That day is too far back to repair now.')
+  }
+
+  // Charged to the month of the repaired DAY, not the month the button was
+  // pressed in — the same rule findRepair applies, so a save for the 31st can
+  // still be spent on the 1st if that month had room.
+  const month = dayKey.slice(0, 7)
+  const { data: spent, error: budgetError } = await supabase
+    .from('streak_saves')
+    .select('day_key')
+    .gte('day_key', `${month}-01`)
+    .lt('day_key', `${nextMonthKey(month)}-01`)
+  if (budgetError) throw new Error(budgetError.message)
+
+  // Re-repairing a day already saved stays a no-op rather than an error: the
+  // row is idempotent at the primary key, and from the user's side "that day is
+  // saved" was already true. Only a genuinely new day spends from the budget.
+  const already = (spent ?? []).some((r) => (r as { day_key: string }).day_key === dayKey)
+  if (!already && (spent?.length ?? 0) >= SAVES_PER_MONTH) {
+    throw new Error(
+      `You've used all ${SAVES_PER_MONTH} saves for that month. They reset on the 1st.`,
+    )
   }
 
   const { error } = await supabase

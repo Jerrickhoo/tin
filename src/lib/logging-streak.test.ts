@@ -110,7 +110,7 @@ describe('computeStreak', () => {
     const s = computeStreak(days('2026-07-20', '2026-07-21', '2026-07-22'), [], [], NOW)
     expect(s.current).toBe(3)
     expect(s.todayHasEntry).toBe(true)
-    expect(s.atRisk).toBe(false)
+    expect(s.todayCounted).toBe(true)
   })
 
   it('keeps the streak alive when today is still empty', () => {
@@ -119,13 +119,16 @@ describe('computeStreak', () => {
     const s = computeStreak(days('2026-07-20', '2026-07-21'), [], [], NOW)
     expect(s.current).toBe(2)
     expect(s.todayHasEntry).toBe(false)
-    expect(s.atRisk).toBe(true)
+    // The run is intact and today is still blank — the state the evening nudge
+    // exists for. It reads `todayHasEntry`; the old `atRisk` flag that also
+    // described this was never rendered anywhere and has been removed.
+    expect(s.todayCounted).toBe(false)
   })
 
   it('ends the streak when yesterday was missed too', () => {
     const s = computeStreak(days('2026-07-19', '2026-07-20'), [], [], NOW)
     expect(s.current).toBe(0)
-    expect(s.atRisk).toBe(false) // over, not at risk — nothing to nudge about
+    expect(s.todayCounted).toBe(false) // over, not at risk — nothing to nudge about
   })
 
   it('never counts a voided entry as a logged day', () => {
@@ -176,7 +179,6 @@ describe('computeStreak', () => {
       // …but the nudge must still know no money was recorded, or it would
       // switch itself off the moment check-ins landed.
       expect(s.todayHasEntry).toBe(false)
-      expect(s.atRisk).toBe(false)
     })
 
     it('reports how much of the run is real logging', () => {

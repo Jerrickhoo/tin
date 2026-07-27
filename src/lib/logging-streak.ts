@@ -154,13 +154,13 @@ export interface StreakState {
   todayCounted: boolean
   /** days in the current run that carry a real entry, not just a check-in */
   currentWithEntries: number
-  /**
-   * True when the run is intact but today has nothing on it at all — the only
-   * state that genuinely threatens the streak. A streak of 0 is not "at risk";
-   * it is over, and shouting about it would be the punishment this design
-   * avoids.
-   */
-  atRisk: boolean
+  // REMOVED: `atRisk` (!todayCounted && current > 0). Nothing ever rendered it,
+  // and check-ins are why: opening the app marks today counted, so by the time
+  // any screen could read this flag it was almost always false. It was made
+  // obsolete by the 2026-07-24 check-in change rather than left unfinished, and
+  // a field that cannot fire is worse than no field — it reads like a signal
+  // the UI forgot to use. `todayHasEntry` is the live version of the question,
+  // and the evening nudge already keys off it.
   savesUsedThisMonth: number
   savesRemainingThisMonth: number
   repair: RepairCandidate | null
@@ -274,7 +274,6 @@ export function computeStreak(
     todayHasEntry,
     todayCounted,
     currentWithEntries,
-    atRisk: !todayCounted && current > 0,
     savesUsedThisMonth,
     savesRemainingThisMonth,
     repair: findRepair(counted, saves, todayKey, savesRemainingThisMonth),
@@ -306,11 +305,12 @@ function findRepair(
     // A gap must be flanked: something before it to reconnect to…
     if (!counted.has(shiftDayKey(dayKey, -1))) return null
     // …and nothing else missing between it and today, or one save is not enough.
-    let bridged = true
-    for (let after = back - 1; after >= 1; after--) {
-      if (!counted.has(shiftDayKey(todayKey, -after))) bridged = false
-    }
-    if (!bridged) return null
+    //
+    // That second half needs no test, and this comment is what replaced the
+    // loop that used to run it. Reaching `back = n` requires every earlier day
+    // to have hit the `continue` above — that IS the loop's exit condition — so
+    // days 1..n-1 are already known to count. The check could only ever confirm
+    // what getting here proved, for any value of REPAIR_WINDOW_DAYS.
 
     // Budget is per the repaired day's own month, so a save for the 31st can
     // still be spent on the 1st if that month had room.

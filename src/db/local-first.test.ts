@@ -303,9 +303,23 @@ describe('local-first mirror + outbox', () => {
     // The reason this mirror merges instead of replacing: a clear-then-refill
     // would delete exactly the day that has not been backed up yet.
     await recordCheckIn('2026-07-23')
-    await mirrorMergeCheckIns([{ day_key: '2026-07-20' }, { day_key: '2026-07-22' }])
+    expect(await mirrorMergeCheckIns([{ day_key: '2026-07-20' }, { day_key: '2026-07-22' }])).toBe(
+      true,
+    )
     expect((await readCheckIns()).sort()).toEqual(['2026-07-20', '2026-07-22', '2026-07-23'])
     expect(await unsyncedCheckIns()).toEqual(['2026-07-23'])
+  })
+
+  it('reports whether a merge brought anything genuinely new', async () => {
+    // What sync.ts redraws on. It cannot key off "the write happened": bulkPut
+    // rewrites the days this device already had on every single pass, so a
+    // truthy write would mean the UI redrew forever or — as it did — never.
+    await recordCheckIn('2026-07-23')
+    expect(await mirrorMergeCheckIns([{ day_key: '2026-07-24' }])).toBe(true)
+    // Same day again, and the local one echoed back by the server: nothing new.
+    expect(await mirrorMergeCheckIns([{ day_key: '2026-07-24' }])).toBe(false)
+    expect(await mirrorMergeCheckIns([{ day_key: '2026-07-23' }])).toBe(false)
+    expect(await mirrorMergeCheckIns([])).toBe(false)
   })
 
   it('opening for a different user wipes everything', async () => {

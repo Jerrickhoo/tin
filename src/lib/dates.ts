@@ -61,10 +61,25 @@ export function daysBetweenKeys(from: string, to: string): number {
   return Math.round((parse(to) - parse(from)) / 86_400_000)
 }
 
+/**
+ * How many days a 1-indexed month has. `Date.UTC(year, month, 0)` is day zero
+ * of the FOLLOWING month, i.e. the last day of this one, which is also why
+ * leap years need no special case.
+ *
+ * The (year, month) form is the primitive and the key form wraps it, so
+ * lib/recurring.ts — which works in numbers, not keys — can share this instead
+ * of keeping the second copy it used to have. Two implementations of the
+ * calendar that merely happened to agree was one refactor away from a
+ * clamped-recurring bug nobody would look for here.
+ */
+export function daysInYearMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate()
+}
+
 /** "2026-02" → 28. */
 export function daysInMonth(monthKey: string): number {
   const { year, month } = parseMonthKey(monthKey)
-  return new Date(Date.UTC(year, month, 0)).getUTCDate()
+  return daysInYearMonth(year, month)
 }
 
 /**
@@ -111,7 +126,8 @@ function parseMonthKey(monthKey: string): { year: number; month: number } {
   return { year, month }
 }
 
-const pad2 = (n: number) => String(n).padStart(2, '0')
+/** Zero-padded to two digits — the month/day half of every key in this app. */
+export const pad2 = (n: number) => String(n).padStart(2, '0')
 
 export function prevMonthKey(monthKey: string): string {
   const { year, month } = parseMonthKey(monthKey)

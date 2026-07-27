@@ -67,7 +67,12 @@ export function frequentNotes(
     const age = Math.max(0, (nowMs - at) / DAY_MS)
     if (age > WINDOW_DAYS) continue
 
-    const key = text.toLocaleLowerCase()
+    // Case AND whitespace, which is what the doc above has always claimed and
+    // what `trim()` alone does not deliver: it tidies the ends and leaves
+    // "Load  100" and "Load 100" as two separate habits, each below MIN_USES
+    // and so neither offered. Internal runs collapse the same way
+    // import-draft's normalizeDescription collapses a merchant name.
+    const key = text.replace(/\s+/g, ' ').toLocaleLowerCase()
     score.set(key, (score.get(key) ?? 0) + 0.5 ** (age / HALF_LIFE_DAYS))
     uses.set(key, (uses.get(key) ?? 0) + 1)
     const seen = display.get(key)

@@ -244,6 +244,10 @@ function TemplateSheet({
     try {
       if (template) {
         await updateTemplate(template.id, {
+          // The STORED kind, not the local toggle: they agree today only
+          // because the toggle is disabled while editing, and the guard on the
+          // other side is about what the row will actually be.
+          kind: template.kind,
           amountCentavos: centavos,
           categoryId: kind === 'expense' ? categoryId : null,
           note,

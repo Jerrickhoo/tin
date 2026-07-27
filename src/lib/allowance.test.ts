@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { allowancePerDay, envelopeAllowances, spentTodayByEnvelope } from './allowance'
+import { allowancePerDay, spentTodayByEnvelope } from './allowance'
 import type { EntryRow } from './groups'
 
 function row(over: Partial<EntryRow> = {}): EntryRow {
@@ -47,31 +47,6 @@ describe('allowancePerDay', () => {
     const before = allowancePerDay(80_000, 8)
     const afterSpending2000 = allowancePerDay(78_000, 8)
     expect(afterSpending2000).toBeLessThan(before)
-  })
-})
-
-describe('envelopeAllowances', () => {
-  it('returns one row per envelope, in the order given', () => {
-    const result = envelopeAllowances(
-      ['needs', 'savings', 'wants'],
-      new Map([
-        ['needs', 70_000],
-        ['savings', 20_000],
-        ['wants', 10_000],
-      ]),
-      new Map([['wants', 2_500]]),
-      10,
-    )
-    expect(result).toEqual([
-      { envelopeId: 'needs', perDayCentavos: 7_000, spentTodayCentavos: 0 },
-      { envelopeId: 'savings', perDayCentavos: 2_000, spentTodayCentavos: 0 },
-      { envelopeId: 'wants', perDayCentavos: 1_000, spentTodayCentavos: 2_500 },
-    ])
-  })
-
-  it('treats an envelope with no balance row as empty', () => {
-    const result = envelopeAllowances(['ghost'], new Map(), new Map(), 5)
-    expect(result).toEqual([{ envelopeId: 'ghost', perDayCentavos: 0, spentTodayCentavos: 0 }])
   })
 })
 

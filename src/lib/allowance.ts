@@ -20,14 +20,6 @@
 import { manilaDayKey } from './dates'
 import type { EntryRow } from './groups'
 
-export interface EnvelopeAllowance {
-  envelopeId: string
-  /** what this envelope can give you per day for the rest of the month */
-  perDayCentavos: number
-  /** already spent from this envelope today, positive centavos */
-  spentTodayCentavos: number
-}
-
 /**
  * Balance spread evenly over the days the month has left, today included.
  *
@@ -49,18 +41,12 @@ export function allowancePerDay(balanceCentavos: number, daysRemaining: number):
   return Math.floor(balanceCentavos / daysRemaining)
 }
 
-export function envelopeAllowances(
-  envelopeIds: readonly string[],
-  balances: ReadonlyMap<string, number>,
-  spentToday: ReadonlyMap<string, number>,
-  daysRemaining: number,
-): EnvelopeAllowance[] {
-  return envelopeIds.map((envelopeId) => ({
-    envelopeId,
-    perDayCentavos: allowancePerDay(balances.get(envelopeId) ?? 0, daysRemaining),
-    spentTodayCentavos: spentToday.get(envelopeId) ?? 0,
-  }))
-}
+// REMOVED: `envelopeAllowances` (and its `EnvelopeAllowance` shape), a
+// per-envelope mapper nothing ever called. Home composes the same figures
+// itself from `allowancePerDay` and `spentTodayByEnvelope`, because it needs
+// them alongside the pace meter rather than in a parallel array — so the
+// convenience wrapper was two tested functions' worth of indirection standing
+// between the screen and the two functions it actually uses.
 
 /**
  * Today's spending, split by envelope.

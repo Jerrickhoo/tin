@@ -6,9 +6,9 @@
 
 ---
 
-## Status — all phases closed (2026-07-22), Phases 9 and 10 added 2026-07-24, Phase 11 2026-07-28
+## Status — all phases closed (2026-07-22), Phases 9 and 10 added 2026-07-24, Phases 11-12 2026-07-28
 
-**Live at <https://tin-jar.netlify.app>.** Phases 0–11 are done, plus a Phase 3.5 retrofit. 424 tests; lint, build and the AA-contrast script all clean. `git push` to `main` deploys.
+**Live at <https://tin-jar.netlify.app>.** Phases 0–12 are done, plus a Phase 3.5 retrofit. 425 tests; lint, build and the AA-contrast script all clean. `git push` to `main` deploys.
 
 | Phase | State |
 | ----- | ----- |
@@ -20,6 +20,7 @@
 | 9 Habit loop & insight rework | ✅ — streak + repair saves + check-ins, true-ratio spending breakdown, calmer backdrop. **Web Push explicitly NOT built** — see §9. |
 | 10 The review surfaces | ✅ — History paging + whole-ledger search, **restore from a JSON export**, per-envelope daily allowance, note chips, 6-month trend. See §10. |
 | 11 The Home meter correction | ✅ — the envelope meter drew a target that **punished you for using the app correctly**; replaced with a drain-to-pace meter, and the days-left line deduplicated. See §11. |
+| 12 Whole-app logic audit | ✅ — the money core held; **check-ins only fired on a cold boot**, `repairDay` never checked the budget it was designed around, and `undoRepair` had a DELETE policy but no button. See §12. |
 
 This document stops being a plan here and becomes the record of why things are the way they are. The parts worth reading before changing anything: **§1 engineering law**, the **§3** notes on composite ownership FKs and the missing sum-to-10000 check, **§6**'s known CVD gap, and the closure note on Phase 8.
 
@@ -876,3 +877,45 @@ It is now stated once, in the hero's metadata line — `across 3 envelopes · 27
 The same pass took the cards from four rows to three by dropping what was already on them: `47% of your money` restated the bar, and the balance was already in the top-right corner. What remains is the size of the run and the rate it supports, neither of which is shown anywhere else. **No type got smaller** — the density came from deleting duplicated numbers.
 
 Ahead-or-behind is a comparison of two positions on a bar, so the meter carries an `aria-label` stating the same reading in words. The §6 colour-vision audit is why this codebase does not leave that kind of thing as the only channel.
+
+## 12. A logic audit of the whole app (2026-07-28)
+
+A read of every module in `src/lib` and `src/db`, plus the money-critical paths in the screens, asking one question: does this make sense? The money core came through clean — largest-remainder split, integer centavos, append-only voids, the FIFO-with-stuck-head outbox, keyset pagination on `(updated_at, id)`, the server-clock cursor, restore's name-remapping, chunk boundaries falling between groups in both the importer and restore. What follows is everything that did not.
+
+### 12.1 Check-ins only happened on a cold boot
+
+`recordCheckIn` lived inside the once-per-session boot effect in `AppShell`, guarded by `bootedFor`. It ran once and never again.
+
+Tin is an installed PWA. **A daily user's app is very often still resident from yesterday**, and the day they came back to it was never recorded. Nothing else re-anchored on a day rollover — `sync.ts` already listened for `visibilitychange`, but only to `kickSync()`.
+
+So the streak quietly under-reported for exactly the people §9 built check-ins to protect, and the failure was invisible: a missing check-in looks identical to a day you did not open the app. The fix is `noteVisit()` — idempotent, ref-guarded against the Manila day — called on boot *and* on `visibilitychange`/`focus`. It also `bump()`s, which incidentally fixes the header date and the days-left figure going stale on a screen left open past midnight.
+
+### 12.2 A pulled check-in never redrew anything
+
+Every other pull in `runOnce` sets `changed`; `mirrorMergeCheckIns` did not. Another device's visit landed in the mirror and the strip kept showing pre-pull state until something unrelated bumped the ledger.
+
+`mirrorMergeCheckIns` now returns whether any day was genuinely new. That **cannot be inferred from the write**: `bulkPut` rewrites the days this device already had (flipping `synced` to 1) on every single pass, so "we wrote something" is true always and means nothing. It reads the existing primary keys first and compares.
+
+### 12.3 `repairDay` never checked the budget it was built around
+
+`db/streak.ts` argues at length that saves are written online-only *because* the "3 per month" rule has to be checked against current server state at the instant of the write. It then checked `isOffline` and the repair window, and upserted. **The budget check did not exist.**
+
+Enforcement was `findRepair` declining to show the prompt — a rule standing on the mirror, which is only as fresh as the last sync. A second device, or a tab open since morning, could believe a month had room it no longer had. 003 declines to enforce it in the database (a per-month row-count check needs a trigger, and the only account that could cheat is your own), so the client is genuinely the enforcement and had to actually do it. Now counted server-side, charged to the repaired **day's** month, with re-repairing an already-saved day still an idempotent no-op rather than an error.
+
+### 12.4 `undoRepair` was built, granted a DELETE policy, and unreachable
+
+Migration 003 gives `streak_saves` **the only DELETE policy in the schema** and justifies it outright: *"the user must be able to take one back if they spend it on the wrong day."* `undoRepair` implemented it. Nothing called it.
+
+This is the §3.5 pattern exactly — promised in prose, plumbed at the database, never surfaced. It is now the Undo action on the repair toast, the same idiom AddSheet and the recurring catch-up already use, and the right moment for it: a save is scarce and the prompt is one tap, so a mis-tap gets noticed immediately.
+
+### 12.5 `atRisk` was computed, documented, and never read
+
+Six lines of comment explaining a flag no screen used. Check-ins are why: opening the app marks today counted, so by the time anything could read it, it was almost always false. It was **made obsolete by the 2026-07-24 check-in change rather than left unfinished** — and a field that cannot fire reads like a signal the UI forgot to use. Removed; `todayHasEntry` is the live version of that question and the evening nudge already keys off it.
+
+### 12.6 Smaller things that were also wrong
+
+- **`updateTemplate` dropped a guard `createTemplate` enforces.** An expense template with no category is not rejected by the schema (`category_id uuid`, nothing tying it to `kind`) — it is accepted and then silently stuck, with `runCatchUp` reporting "its category is gone" on every open, forever. Only the edit sheet's `ok` flag stood between the two. The guard is now on both paths; `kind` is passed in purely to check it, never written, because a template's kind is immutable.
+- **`frequentNotes` claimed whitespace-insensitive folding it did not do.** `trim()` tidies the ends; `"Load  100"` and `"Load 100"` stayed two habits of one use each, so neither reached `MIN_USES` and the chip simply never appeared. Internal runs now collapse, the same way `normalizeDescription` already collapsed a merchant name.
+- **`envelopeAllowances` had no callers.** A per-envelope mapper with two tests, standing between Home and the two functions it actually uses. Removed.
+- **An unreachable branch in `findRepair`.** Reaching `back = n` requires every earlier day to have hit the loop's `continue` — which *is* the thing the inner "bridged" loop then tested. It could only confirm what getting there proved, for any window size. Replaced with the comment explaining the invariant.
+- **`daysInMonth` and `pad2` existed twice**, in `lib/dates.ts` and `lib/recurring.ts`. Byte-identical, agreeing by coincidence. Month-length is precisely where a lone divergence would surface as rent posting on the wrong day of February and nowhere else. `daysInYearMonth` is now the shared primitive, with a test that holds the two modules in step.

@@ -1,11 +1,13 @@
 // Recurring catch-up math (ROADMAP 5.1). Pure — Manila-local date strings
 // (YYYY-MM-DD) in, due dates out. Day 29–31 rules clamp to month length.
+//
+// The calendar primitives come from ./dates rather than being redefined here.
+// This module used to carry its own byte-identical `daysInMonth` and `pad2`;
+// they agreed with the originals only by coincidence, and month-length is
+// exactly the arithmetic where a lone divergence would show up as rent posting
+// on the wrong day of February and nowhere else.
 
-function daysInMonth(year: number, month: number): number {
-  return new Date(Date.UTC(year, month, 0)).getUTCDate()
-}
-
-const pad2 = (n: number) => String(n).padStart(2, '0')
+import { daysInYearMonth, pad2 } from './dates'
 
 function parseDay(dateKey: string): { year: number; month: number; day: number } {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey)
@@ -15,7 +17,7 @@ function parseDay(dateKey: string): { year: number; month: number; day: number }
 
 /** The rule's occurrence within a given month, clamped (Feb + day 31 → Feb 28/29). */
 export function occurrenceInMonth(year: number, month: number, dayOfMonth: number): string {
-  const day = Math.min(dayOfMonth, daysInMonth(year, month))
+  const day = Math.min(dayOfMonth, daysInYearMonth(year, month))
   return `${year}-${pad2(month)}-${pad2(day)}`
 }
 

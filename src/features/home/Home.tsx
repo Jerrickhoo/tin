@@ -8,7 +8,7 @@ import {
   type Envelope,
 } from '../../db/entries'
 import { readCheckIns } from '../../db/dexie'
-import { readStreakSaves, repairDay } from '../../db/streak'
+import { readStreakSaves, repairDay, undoRepair } from '../../db/streak'
 import { allowancePerDay, spentTodayByEnvelope } from '../../lib/allowance'
 import { envelopePace, type EnvelopePace } from '../../lib/envelope-month'
 import { daysRemainingInMonth, manilaDayKey, manilaHour } from '../../lib/dates'
@@ -126,12 +126,32 @@ export function Home() {
     setRepairing(true)
     try {
       await repairDay(dayKey)
-      toast.show('Day repaired — your streak is intact.', 'ok')
+      // The undo migration 003 wrote its DELETE policy for. That policy exists
+      // on this one table — the only one in the schema with it — and its stated
+      // reason is that "the user must be able to take one back if they spend it
+      // on the wrong day". Until this toast there was no way to. A save is
+      // scarce and the prompt is one tap, so the moment it is spent is exactly
+      // when a mis-tap gets noticed; the same Undo idiom AddSheet and the
+      // recurring catch-up already use.
+      toast.show('Day repaired — your streak is intact.', 'ok', {
+        label: 'Undo',
+        run: () => void giveSaveBack(dayKey),
+      })
       bump() // re-reads the mirror syncNow just refreshed
     } catch (err) {
       toast.show(err instanceof Error ? err.message : String(err), 'error')
     } finally {
       setRepairing(false)
+    }
+  }
+
+  async function giveSaveBack(dayKey: string) {
+    try {
+      await undoRepair(dayKey)
+      toast.show('Save returned — that day is a gap again.', 'ok')
+      bump()
+    } catch (err) {
+      toast.show(err instanceof Error ? err.message : String(err), 'error')
     }
   }
 
