@@ -379,11 +379,16 @@ body::after {
 
 /* ============================================================
    Level meters
-   An envelope's balance as a share of all the money, with a tick
-   marking where the 70/20/10 plan says that share should be.
-   Now a segmented bar: the fill is masked into discrete cells,
-   so it reads as a game resource gauge and — usefully — makes
-   small differences countable instead of merely visible.
+   How much of an envelope is LEFT of what it was given, with a
+   tick marking where an even draw-down would have it by now.
+   The bar drains as you spend and the tick walks down with the
+   calendar, so above the line is good for every envelope —
+   including the savings one, which the app cannot identify.
+   (It used to draw share-of-all-money against the 70/20/10 plan
+   share, which was inverted: see lib/envelope-month.ts.)
+   Segmented: the fill is masked into discrete cells, so it reads
+   as a game resource gauge and — usefully — makes small
+   differences countable instead of merely visible.
    ============================================================ */
 
 .meter {
@@ -411,9 +416,16 @@ body::after {
   background: repeating-linear-gradient(to right, transparent 0 6px, rgb(23 19 31 / 0.85) 6px 8px);
 }
 
-/* Plan marker — where this envelope's share says the level should sit.
+/* Target ticks. Same mark, two meanings, and they are kept as separate names
+   because the meanings are not interchangeable:
+     .meter-pace — Home, where an even draw-down would put the level today
+     .meter-plan — Insights, where the 70/20/10 says the SPENDING mix should sit
+   Home's tick moved off the plan share deliberately (lib/envelope-month.ts);
+   Insights compares a finished month's spending against the plan, which is the
+   one place that comparison carries information.
    Light core + dark halo, because the tick lands on the empty track when
-   you're under plan and on top of the colored fill when you're over it. */
+   you're behind and on top of the colored fill when you're ahead. */
+.meter-pace,
 .meter-plan {
   position: absolute;
   top: 0;

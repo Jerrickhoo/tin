@@ -10,6 +10,7 @@ import {
 import { readCheckIns } from '../../db/dexie'
 import { readStreakSaves, repairDay } from '../../db/streak'
 import { allowancePerDay, spentTodayByEnvelope } from '../../lib/allowance'
+import { envelopePace, type EnvelopePace } from '../../lib/envelope-month'
 import { daysRemainingInMonth, manilaDayKey, manilaHour } from '../../lib/dates'
 import {
   computeStreak,
@@ -61,6 +62,7 @@ export function Home() {
   const [strip, setStrip] = useState<LoggedDay[] | null>(null)
   const [todayCentavos, setTodayCentavos] = useState(0)
   const [spentToday, setSpentToday] = useState<Map<string, number>>(new Map())
+  const [paces, setPaces] = useState<Map<string, EnvelopePace>>(new Map())
   const [streak, setStreak] = useState<StreakState | null>(null)
   const [repairing, setRepairing] = useState(false)
 
@@ -96,6 +98,17 @@ export function Home() {
         setTodayCentavos(spentOnDay(recent, todayKey))
         // Same window, third use — the per-envelope daily allowance. Free.
         setSpentToday(spentTodayByEnvelope(recent, todayKey))
+        // Fourth use, also free: each envelope's run since its last top-up.
+        // The 13-month window is what lets the anchor reach back past the 1st
+        // when this month has had no income yet.
+        setPaces(
+          new Map(
+            envs.map((env) => [
+              env.id,
+              envelopePace(recent, env.id, balances.get(env.id) ?? 0, todayKey),
+            ]),
+          ),
+        )
         setStreak(computeStreak(recent, saves, checkIns))
       } catch (err) {
         if (active) toast.show(err instanceof Error ? err.message : String(err), 'error')
@@ -124,15 +137,17 @@ export function Home() {
 
   const now = new Date()
   const total = (cards ?? []).reduce((sum, c) => sum + c.balanceCentavos, 0) + offCardCentavos
-  // Denominator for "share of your money": only envelopes actually holding
-  // money. Summing signed balances would let one overdrawn envelope push the
-  // others past 100% — the meters would lie.
-  const funded = (cards ?? []).reduce((sum, c) => sum + Math.max(0, c.balanceCentavos), 0)
   // The forward-looking half of the screen. Deliberately per envelope and never
   // summed into one "safe to spend" figure — see lib/allowance.ts: with no flag
   // marking which envelope is savings, an aggregate would quietly invite you to
   // spend the savings envelope.
+  //
+  // Stated ONCE, up in the hero, rather than on each card. It is the same
+  // number for all three, so "for the 27 days left" used to render three times
+  // identically on the screen you read ten times a day — the clutter was the
+  // repetition, not the wording.
   const daysLeft = daysRemainingInMonth(manilaDayKey(now))
+  const daysLeftLabel = daysLeft === 1 ? 'last day of the month' : `${daysLeft} days left`
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-5 py-7 md:max-w-4xl md:gap-5 md:px-8 md:py-10">
@@ -162,7 +177,15 @@ export function Home() {
             {!cards && <span className="blink text-accent">_</span>}
           </p>
           <p className="mt-2 text-xs text-ink-mute">
-            {cards ? `across ${cards.length} envelopes` : 'opening the tin…'}
+            {cards ? (
+              <>
+                across {cards.length} envelopes
+                <span className="mx-1.5 opacity-50">·</span>
+                {daysLeftLabel}
+              </>
+            ) : (
+              'opening the tin…'
+            )}
           </p>
           {cards && offCardCentavos !== 0 && (
             <p className="mt-1 text-xs text-ink-mute">
@@ -228,7 +251,7 @@ export function Home() {
             <EnvelopeCard
               key={card.id}
               card={card}
-              funded={funded}
+              pace={paces.get(card.id) ?? null}
               daysLeft={daysLeft}
               spentTodayCentavos={spentToday.get(card.id) ?? 0}
               onCover={() =>
@@ -476,26 +499,49 @@ function TinJar() {
   )
 }
 
+/**
+ * One envelope: what is left of it, and whether that is ahead of the calendar.
+ *
+ * The meter DRAINS (`left / setAside`) against a tick that walks down with the
+ * days, replacing a fill that drew this envelope's share of all money against
+ * its 70/20/10 plan share. That old pairing was inverted — see the header of
+ * lib/envelope-month.ts for the walk-through — and its practical effect was
+ * that a textbook month rendered as three cards which all looked wrong.
+ *
+ * Everything the new meter says is also said in words, in the label: the
+ * ahead/behind reading is a comparison of two positions on a bar, which is
+ * exactly the kind of encoding the §6 colour-vision audit made this codebase
+ * careful about leaving as the only channel.
+ */
 function EnvelopeCard({
   card,
-  funded,
+  pace,
   daysLeft,
   spentTodayCentavos,
   onCover,
 }: {
   card: Card
-  funded: number
+  pace: EnvelopePace | null
   daysLeft: number
   spentTodayCentavos: number
   onCover: () => void
 }) {
   const color = card.color ?? '#AFA7C2'
   const red = card.balanceCentavos < 0
-  const planPct = card.share_bp / 100
-  // An overdrawn envelope holds none of the money — its meter reads empty and
-  // the red state carries the meaning instead.
-  const actualPct = funded > 0 && !red ? (card.balanceCentavos / funded) * 100 : 0
   const perDay = allowancePerDay(card.balanceCentavos, daysLeft)
+  // Hidden on an envelope nothing has ever been spent from — the honest way to
+  // recognise savings without a flag the app cannot have. "₱82.66/day" on the
+  // savings card is an invitation to start, which is the one thing a 70/20/10
+  // tracker must not print.
+  const showRate = perDay > 0 && (pace?.hasSpending ?? false)
+  const ahead = pace !== null && pace.leftPct >= pace.pacePct
+
+  const meterLabel =
+    pace === null || pace.setAsideCentavos === 0
+      ? `${card.name}: ${formatPHP(card.balanceCentavos)}`
+      : `${card.name}: ${formatPHP(pace.leftCentavos)} left of ${formatPHP(
+          pace.setAsideCentavos,
+        )} set aside — ${ahead ? 'ahead of' : 'behind'} an even pace for the rest of the month`
 
   return (
     <article className="card px-4 pt-3.5 pb-4">
@@ -515,47 +561,60 @@ function EnvelopeCard({
         </span>
       </div>
 
-      <div className="meter mt-3">
+      <div className="meter mt-3" role="img" aria-label={meterLabel}>
         {/* Flat fill, not a gradient: the meter is already segmented into
             cells by theme.css, and a left-to-right ramp underneath made the
             first cells read as a different colour from the last. */}
         <div
           className="meter-fill"
-          style={{ width: `${Math.min(actualPct, 100)}%`, backgroundColor: color }}
+          style={{ width: `${pace?.leftPct ?? 0}%`, backgroundColor: color }}
         />
-        <span className="meter-plan" style={{ left: `${planPct}%` }} />
+        {/* Only drawn once the envelope has a run to be ahead or behind on. A
+            tick floating over an empty track would be a target with nothing
+            measured against it. */}
+        {pace !== null && pace.setAsideCentavos > 0 && (
+          <span className="meter-pace" style={{ left: `${pace.pacePct}%` }} />
+        )}
       </div>
 
-      <p className="mt-2 text-xs text-ink-mute tabular-nums">
+      {/* ONE line where there were two, carrying only what is not already on
+          the card: the balance is up in the corner and the share is the bar, so
+          restating either was the clutter. What is left is the size of the run
+          and the rate it supports — the rate being the only forward-looking
+          number on Home, and the one that answers "can I buy this?".
+          Each segment is nowrap, so a four-figure ledger wraps the line at a
+          separator rather than splitting "₱1,234.56/day" across two rows. */}
+      <p className="mt-2 text-xs tabular-nums">
         {red ? (
           <span className="text-neg">overdrawn</span>
         ) : (
-          <>{actualPct.toFixed(0)}% of your money</>
+          // Never `?? 0`: a card whose pace has not arrived would state "₱0.00
+          // set aside" beside a real balance, which is a lie rather than a
+          // placeholder. It says nothing until it can say something true.
+          pace !== null && (
+            <span className="whitespace-nowrap text-ink-mute">
+              {formatPHP(pace.setAsideCentavos)} set aside
+            </span>
+          )
         )}
-        <span className="mx-1.5 opacity-50">·</span>
-        plan {planPct}%
+        {showRate && (
+          <>
+            <span className="mx-1.5 text-ink-mute opacity-50">·</span>
+            <span className="whitespace-nowrap">
+              <span className="font-semibold text-ink">{formatPHP(perDay)}</span>
+              <span className="text-ink-mute">/day</span>
+            </span>
+          </>
+        )}
+        {spentTodayCentavos > 0 && (
+          <>
+            <span className="mx-1.5 text-ink-mute opacity-50">·</span>
+            <span className="whitespace-nowrap text-ink-soft">
+              {formatPHP(spentTodayCentavos)} today
+            </span>
+          </>
+        )}
       </p>
-
-      {/* The only forward-looking number on Home. Everything above it reports
-          what already happened; this one answers "can I buy this?", which is
-          the question the balance is actually being read for.
-          Hidden when the envelope has nothing to give — an overdrawn card's
-          message is the cover button below, and "₱0.00/day" underneath it would
-          just be the same bad news twice. */}
-      {perDay > 0 && (
-        <p className="mt-1.5 text-xs tabular-nums">
-          <span className="font-semibold text-ink">{formatPHP(perDay)}</span>
-          <span className="text-ink-mute">
-            /day for the {daysLeft === 1 ? 'last day' : `${daysLeft} days left`}
-          </span>
-          {spentTodayCentavos > 0 && (
-            <>
-              <span className="mx-1.5 text-ink-mute opacity-50">·</span>
-              <span className="text-ink-soft">{formatPHP(spentTodayCentavos)} today</span>
-            </>
-          )}
-        </p>
-      )}
 
       {red && (
         <button

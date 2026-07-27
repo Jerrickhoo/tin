@@ -6,9 +6,9 @@
 
 ---
 
-## Status — all phases closed (2026-07-22), Phases 9 and 10 added 2026-07-24
+## Status — all phases closed (2026-07-22), Phases 9 and 10 added 2026-07-24, Phase 11 2026-07-28
 
-**Live at <https://tin-jar.netlify.app>.** Phases 0–10 are done, plus a Phase 3.5 retrofit. 405 tests; lint, build and the AA-contrast script all clean. `git push` to `main` deploys.
+**Live at <https://tin-jar.netlify.app>.** Phases 0–11 are done, plus a Phase 3.5 retrofit. 424 tests; lint, build and the AA-contrast script all clean. `git push` to `main` deploys.
 
 | Phase | State |
 | ----- | ----- |
@@ -19,6 +19,7 @@
 | 8 Statement importer | ✅ **closed** — importer shipped; the GCash-PDF-specific reader was **dropped by decision**, not left pending |
 | 9 Habit loop & insight rework | ✅ — streak + repair saves + check-ins, true-ratio spending breakdown, calmer backdrop. **Web Push explicitly NOT built** — see §9. |
 | 10 The review surfaces | ✅ — History paging + whole-ledger search, **restore from a JSON export**, per-envelope daily allowance, note chips, 6-month trend. See §10. |
+| 11 The Home meter correction | ✅ — the envelope meter drew a target that **punished you for using the app correctly**; replaced with a drain-to-pace meter, and the days-left line deduplicated. See §11. |
 
 This document stops being a plan here and becomes the record of why things are the way they are. The parts worth reading before changing anything: **§1 engineering law**, the **§3** notes on composite ownership FKs and the missing sum-to-10000 check, **§6**'s known CVD gap, and the closure note on Phase 8.
 
@@ -812,6 +813,8 @@ Every figure on Home pointed backwards — what is in the tin, what left today. 
 
 The rate takes no "spent today" input and is **self-correcting**: the balance already reflects today's spending, so buying something now lowers the number on its own, with no before-and-after reconstruction that could drift. `floor`, never `round` — rounding up promises a peso the envelope cannot pay on the 31st.
 
+The rate is now **hidden on any envelope nothing has ever been spent from**, which is the honest way to recognise Savings without the flag this section says the app cannot have. Category presence cannot stand in for it — the starter seed gives Savings a "Stash" category, so every envelope looks spendable from the schema alone. Spending history is the only signal that comes from what you actually do.
+
 ### 10.5 Note chips in AddSheet
 
 The third feature squeezed out of the 90-day window the category ranking already fetches, after `frequentAmounts`. The note field is optional and hidden behind a disclosure, so the 2-tap path never passes through it and most entries carry no note — which is what left History's subtitles thin and gave 10.2's search little to match on.
@@ -835,3 +838,41 @@ Two details found by looking at the rendered chart rather than at the code:
 
 - **Code-splitting the 698 KB bundle.** It is a PWA served from the service worker after the first visit; the split buys a Lighthouse number on a screen you see once.
 - **App-icon badging as a push substitute.** It only updates while the app is running, which solves nothing the in-app evening banner does not already solve. Web Push remains out (§9.3).
+
+## 11. The Home meter correction (2026-07-28)
+
+### 11.1 The envelope meter was pointing the wrong way
+
+The level meter under each card drew that envelope's balance **as a share of all money now**, against a tick at its 70/20/10 **plan share**. That is correct for exactly one instant — the moment income lands — and then inverts.
+
+Walk a good month through it. ₱10,000 on the 1st; by the 20th you have spent ₱5,000 of Needs and ₱800 of Wants and left Savings alone:
+
+| | Day 1 | Day 20 |
+| --- | --- | --- |
+| Needs | 70% vs plan 70% | 47.6% vs plan 70% — **under** |
+| Savings | 20% vs plan 20% | 47.6% vs plan 20% — **way over** |
+| Wants | 10% vs plan 10% | 4.8% vs plan 10% — **under** |
+
+A textbook month rendered as three cards that all looked wrong, and it worsened as the month went on: the ideal end state — Needs empty, Wants empty, Savings intact — is the point of *maximum* divergence from the ticks.
+
+**The implicit instruction was the damning part.** The only way to hold all three meters on their ticks is to draw the envelopes down proportionally, which means spending 20% of your savings every month. §10.4 spends three paragraphs refusing to build an aggregate that could invite raiding savings; the meter two components over was inviting it in pictures.
+
+It was redundant besides. The 70/20/10 is enforced at income time by `splitByLargestRemainder`, so the card was showing a target the app had already hit on your behalf. The version of that comparison which carries information — actual **spending mix** vs plan — is `splitAdherence` on Insights, and a backward-looking verdict belongs there.
+
+**What replaced it drains instead of filling.** Per envelope: `setAside = balance + expenses since the last top-up`, bar = `left / setAside`, tick = the fraction of the run still ahead on the calendar. The property that makes it work with no savings flag is that **above the line is good for every envelope**: Needs on pace sits on its tick, an untouched Savings stays pinned at 100% while the tick slides away beneath it, and a *raided* Savings falls toward the tick and reads as bad — correctly. One rule, one direction.
+
+**The run is anchored to the last top-up, not to the 1st**, and the two halves have to agree or the meter contradicts itself. `setAside` counts expenses since the anchor and the tick's line starts at the anchor, so at the instant money lands both read 100% and drain together. A month-window `setAside` under a top-up-anchored tick would disagree the moment you were paid twice — spending before the second payday measured against a clock already reset.
+
+The consequence is deliberate: **each allowance drop starts a fresh run**, so a top-up on the 28th after a blown month reads full again. For irregular income that is the correct mental model, and a tracker that keeps scolding you about money you no longer have is one you stop opening. The month-level verdict stays on Insights. Transfers deliberately do **not** re-anchor — otherwise covering an overdraft from Wants would hand Needs a fresh 100% meter, laundering a blown budget by shuffling.
+
+`left + used = setAside` is an identity rather than a second measurement, so the two can never drift and the fill is provably within its own track for any non-negative balance. Nothing to clamp.
+
+### 11.2 Decluttering the days-left line
+
+Each card read `₱74.07/day for the 27 days left`. The clutter was **repetition, not wording**: `daysLeft` is one number computed once and passed to every card, so those five words rendered three times identically on the screen you read ten times a day.
+
+It is now stated once, in the hero's metadata line — `across 3 envelopes · 27 days left` — and the cards carry only `₱181/day`.
+
+The same pass took the cards from four rows to three by dropping what was already on them: `47% of your money` restated the bar, and the balance was already in the top-right corner. What remains is the size of the run and the rate it supports, neither of which is shown anywhere else. **No type got smaller** — the density came from deleting duplicated numbers.
+
+Ahead-or-behind is a comparison of two positions on a bar, so the meter carries an `aria-label` stating the same reading in words. The §6 colour-vision audit is why this codebase does not leave that kind of thing as the only channel.
