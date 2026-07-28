@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useLocation } from 'react-router'
 import { useAddSheet, useLedger, useToast } from '../../app-context'
 import {
   fetchAllEntriesNewestFirst,
@@ -6,6 +7,7 @@ import {
   fetchEntryPage,
   fetchEnvelopes,
   HISTORY_PAGE_ROWS,
+  OPENING_BALANCE_NOTE,
   voidGroup,
   type Category,
   type Envelope,
@@ -45,6 +47,29 @@ function toggle<T>(list: readonly T[], value: T): T[] {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value]
 }
 
+/**
+ * A filter handed over by another screen — Insights sends one when you tap a
+ * category on "Where it went" or on the movers list.
+ *
+ * Router STATE rather than a query string, deliberately. A category id is a
+ * UUID that means nothing to a human, so it would make an ugly shareable URL
+ * that nobody would ever want to share — and this app has no cross-device deep
+ * links to honour. State also survives the back button correctly: going back to
+ * Insights and forward again restores the same filter without the URL ever
+ * having to describe it.
+ *
+ * Validated rather than trusted: `location.state` is whatever the last
+ * navigation put there, including a stale shape from an older deploy still held
+ * in the history entry. A malformed one falls back to no filter instead of
+ * putting a non-string into a query the filter code assumes is `string[]`.
+ */
+function incomingCategoryIds(state: unknown): string[] {
+  if (typeof state !== 'object' || state === null) return []
+  const ids = (state as { categoryIds?: unknown }).categoryIds
+  if (!Array.isArray(ids)) return []
+  return ids.filter((id): id is string => typeof id === 'string')
+}
+
 export function History() {
   const { version, bump } = useLedger()
   const toast = useToast()
@@ -60,9 +85,22 @@ export function History() {
   const [categories, setCategories] = useState<Map<string, Category>>(new Map())
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [text, setText] = useState('')
-  const [categoryIds, setCategoryIds] = useState<string[]>([])
+  // Seeded from the navigation that brought us here, so arriving from Insights
+  // lands on the filtered ledger instead of the full one with the work left to
+  // do. A lazy initialiser, not an effect: an effect would paint the unfiltered
+  // list first and then jump, and the jump is the whole thing you came to read.
+  const location = useLocation()
+  const [categoryIds, setCategoryIds] = useState<string[]>(() =>
+    incomingCategoryIds(location.state),
+  )
   const [kinds, setKinds] = useState<EntryKind[]>([])
-  const [filtersOpen, setFiltersOpen] = useState(false)
+  // Opened when a filter arrived with the navigation. The result bar states the
+  // totals, but a filtered ledger whose filter is folded away is a screen that
+  // looks like it is missing entries — and the control that would explain it is
+  // the one thing not on screen.
+  const [filtersOpen, setFiltersOpen] = useState(
+    () => incomingCategoryIds(location.state).length > 0,
+  )
 
   const query = useMemo<LedgerQuery>(
     () => ({ text, categoryIds, kinds }),
@@ -482,7 +520,7 @@ function GroupCard({
     glyph = '⇄'
     tint = '#B49BF5'
   } else {
-    title = group.note === 'Opening balance' ? 'Opening balance' : 'Adjustment'
+    title = group.note === OPENING_BALANCE_NOTE ? OPENING_BALANCE_NOTE : 'Adjustment'
     subtitle = `${group.legs.length} envelope${group.legs.length > 1 ? 's' : ''}`
     amountClass = group.totalCentavos < 0 ? 'text-neg' : 'text-ink-soft'
     if (group.totalCentavos > 0) amountText = `+${amountText}`

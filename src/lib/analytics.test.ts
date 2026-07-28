@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   categoryMoves,
+  entriesThroughDayOfMonth,
   monthPace,
   OTHER,
+  PROJECTION_MIN_DAYS,
   spendBreakdown,
   spendTrend,
   splitAdherence,
@@ -209,6 +211,47 @@ describe('monthPace', () => {
   it('never divides by zero on day one', () => {
     expect(monthPace(5000, 0, 31).perDayCentavos).toBe(5000)
   })
+
+  it('flags the first days of a month as too early to project', () => {
+    // One ₱3,000 purchase on the 2nd projects ₱46,500 — arithmetically correct
+    // and worthless. The flag is what lets the UI decline to print it.
+    expect(monthPace(300000, 2, 31)).toMatchObject({ isEarly: true, isPartial: true })
+    expect(monthPace(300000, PROJECTION_MIN_DAYS, 31).isEarly).toBe(false)
+  })
+
+  it('never calls a finished month early, however short', () => {
+    // A 3-day month is impossible, but a complete month is never projected at
+    // all — calling it unreliable would disclaim a number nobody is shown.
+    expect(monthPace(150000, 3, 3).isEarly).toBe(false)
+    expect(monthPace(150000, 28, 28).isEarly).toBe(false)
+  })
+})
+
+describe('entriesThroughDayOfMonth', () => {
+  it('keeps only the days up to and including the cutoff', () => {
+    const rows = [
+      row({ occurred_at: '2026-06-01T04:00:00.000Z' }),
+      row({ occurred_at: '2026-06-08T04:00:00.000Z' }),
+      row({ occurred_at: '2026-06-20T04:00:00.000Z' }),
+    ]
+    expect(entriesThroughDayOfMonth(rows, 8)).toHaveLength(2)
+    expect(entriesThroughDayOfMonth(rows, 31)).toHaveLength(3)
+  })
+
+  it('cuts on the MANILA day, not the UTC one', () => {
+    // 16:00Z is midnight in Manila — the row belongs to the 9th, so a cutoff of
+    // 8 must drop it. Cutting on the UTC date would have kept it, and the
+    // comparison it feeds would count a day the other side of the window does
+    // not have.
+    const justOver = row({ occurred_at: '2026-06-08T16:00:00.000Z' })
+    const justUnder = row({ occurred_at: '2026-06-08T15:59:00.000Z' })
+    expect(entriesThroughDayOfMonth([justOver, justUnder], 8)).toEqual([justUnder])
+  })
+
+  it('keeps a row whose timestamp will not parse rather than dropping it', () => {
+    const bad = row({ occurred_at: 'not-a-date' })
+    expect(entriesThroughDayOfMonth([bad], 5)).toEqual([bad])
+  })
 })
 
 describe('splitAdherence', () => {
@@ -316,5 +359,18 @@ describe('spendTrend', () => {
     const trend = spendTrend([month('2026-07', [])], ['needs'])
     expect(trend.peakTotalCentavos).toBe(0)
     expect(trend.peakPerEnvelopeCentavos).toEqual([0])
+  })
+
+  it('carries the envelope ids back out so labels cannot drift off the values', () => {
+    // The renderer used to pair its own envelope list against these arrays by
+    // index. Both are filled in by different async effects, so a mid-flight
+    // envelope change drew every row under the wrong name; resolving through
+    // these ids is what makes that unrepresentable.
+    const ids = ['needs', 'savings', 'wants']
+    const trend = spendTrend([month('2026-07', [['needs', 500_00]])], ids)
+    expect(trend.envelopeIds).toEqual(ids)
+    // A copy, not the caller's array: the caller's list is React state and must
+    // not be reachable for mutation through a derived result.
+    expect(trend.envelopeIds).not.toBe(ids)
   })
 })

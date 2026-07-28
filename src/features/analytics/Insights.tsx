@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import { useNavigate } from 'react-router'
 import { useLedger, useToast } from '../../app-context'
 import {
   earliestEntryAt,
@@ -12,6 +13,7 @@ import { readCheckIns } from '../../db/dexie'
 import { readStreakSaves } from '../../db/streak'
 import {
   categoryMoves,
+  entriesThroughDayOfMonth,
   monthPace,
   OTHER,
   spendBreakdown,
@@ -50,17 +52,34 @@ const shortMonthFmt = new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila'
 const shortMonthLabel = (monthKey: string): string =>
   shortMonthFmt.format(new Date(`${monthKey}-15T12:00:00+08:00`))
 
+/**
+ * A month's rows, carrying the month they belong to.
+ *
+ * The two used to be separate pieces of state, and the gap between them was
+ * visible: tapping ‹ changed the header immediately while the fetch that
+ * refills the numbers resolved a frame or several later, so every month change
+ * painted the OLD month's totals under the NEW month's name. On a warm mirror
+ * that is a flicker; on a cold one it is a screenshot-able wrong answer.
+ * Keeping them in one state value makes the mismatch unrepresentable.
+ */
+interface LoadedMonth {
+  monthKey: string
+  rows: EntryRow[]
+  /** the month before it, for the comparison panel */
+  previousRows: EntryRow[]
+}
+
 export function Insights() {
   const { version } = useLedger()
   const toast = useToast()
+  const navigate = useNavigate()
   const currentMonth = manilaMonthKey(new Date())
   const [monthKey, setMonthKey] = useState(currentMonth)
-  const [rows, setRows] = useState<EntryRow[] | null>(null)
   // The previous month is fetched alongside the current one purely to power the
   // comparison panel. It is a Dexie range read, so the second window costs no
   // network — and without it every number on this screen is a value with
   // nothing to be judged against.
-  const [previousRows, setPreviousRows] = useState<EntryRow[]>([])
+  const [loaded, setLoaded] = useState<LoadedMonth | null>(null)
   const [envelopes, setEnvelopes] = useState<Envelope[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [earliestMonth, setEarliestMonth] = useState<string | null>(null)
@@ -79,8 +98,7 @@ export function Insights() {
           earliestEntryAt(),
         ])
         if (!active) return
-        setRows(entries)
-        setPreviousRows(previous)
+        setLoaded({ monthKey, rows: entries, previousRows: previous })
         setEnvelopes(envs)
         setCategories(cats)
         setEarliestMonth(earliest === null ? null : manilaMonthKey(new Date(earliest)))
@@ -153,8 +171,28 @@ export function Insights() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trendKeys, envelopeIds, version])
 
+  // Only rows that belong to the month on screen are ever summarised. While a
+  // month change is in flight `loaded` still holds the previous one, and
+  // showing it would put last month's totals under this month's heading.
+  const fresh = loaded !== null && loaded.monthKey === monthKey
+  const rows = fresh ? loaded.rows : null
+
+  const isCurrentMonth = monthKey === currentMonth
+  const dayOfMonth = Number(manilaDayKey(new Date()).slice(8, 10))
+
   const summary = useMemo(() => summarizeMonth(rows ?? []), [rows])
-  const previousSummary = useMemo(() => summarizeMonth(previousRows), [previousRows])
+
+  // THE COMPARISON IS TRIMMED TO THE SAME SPAN. A live month is only as long as
+  // today; measuring it against a whole finished month made "vs last month"
+  // report a saving on the 3rd and a wash on the 31st regardless of how the
+  // month was actually going. Past months are complete on both sides and pass
+  // through untouched.
+  const previousSpan = useMemo(() => {
+    const previous = fresh ? loaded.previousRows : []
+    return isCurrentMonth ? entriesThroughDayOfMonth(previous, dayOfMonth) : previous
+  }, [fresh, loaded, isCurrentMonth, dayOfMonth])
+  const previousSummary = useMemo(() => summarizeMonth(previousSpan), [previousSpan])
+
   const adherence = useMemo(
     () => splitAdherence(summary.spendingByEnvelope, envelopes),
     [summary, envelopes],
@@ -166,17 +204,34 @@ export function Insights() {
   )
   const maxTopLine = Math.max(summary.incomeCentavos, summary.spendingCentavos)
 
-  const isCurrentMonth = monthKey === currentMonth
+  // Spending charged to envelopes that are not on the list `splitAdherence`
+  // measures against — archived ones, or ones the mirror has not pulled yet.
+  // The adherence panel divides by the listed envelopes alone, so without this
+  // its percentages are shares of a smaller total than "Where it went" uses,
+  // and the two panels quietly disagree about the same month.
+  const unlistedSpendCentavos = useMemo(() => {
+    let listed = 0
+    for (const env of envelopes) listed += summary.spendingByEnvelope.get(env.id) ?? 0
+    return Math.max(0, summary.spendingCentavos - listed)
+  }, [summary, envelopes])
+
   const pace = useMemo(() => {
     const total = daysInMonth(monthKey)
     // Only the live month is partially elapsed. A past month is complete by
     // definition, so its "pace" is just its total spread evenly — true, but
     // not a projection, and the UI says so.
-    const elapsed = isCurrentMonth ? Number(manilaDayKey(new Date()).slice(8, 10)) : total
+    const elapsed = isCurrentMonth ? dayOfMonth : total
     return monthPace(summary.spendingCentavos, elapsed, total)
-  }, [summary, monthKey, isCurrentMonth])
+  }, [summary, monthKey, isCurrentMonth, dayOfMonth])
 
   const atEarliest = earliestMonth !== null && monthKey <= earliestMonth
+
+  // One tap from "Food was 32% of July" to the entries behind it. History owns
+  // the filter UI; this hands it a starting query through router state rather
+  // than duplicating a category picker here.
+  const showCategoryInHistory = (categoryId: string) => {
+    void navigate('/history', { state: { categoryIds: [categoryId] } })
+  }
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-5 py-7 md:max-w-4xl md:px-8 md:py-10">
@@ -195,7 +250,9 @@ export function Insights() {
           >
             ‹
           </button>
-          <span className="w-24 text-center text-xs font-semibold">{monthLabel(monthKey)}</span>
+          <span className="w-24 text-center text-xs font-semibold" aria-live="polite">
+            {monthLabel(monthKey)}
+          </span>
           <button
             type="button"
             aria-label="Next month"
@@ -207,6 +264,19 @@ export function Insights() {
           </button>
         </div>
       </div>
+
+      {/* The way home. Paging back six months took six taps to undo, and ›
+          disables itself the moment you arrive, so there was no signal that you
+          were ever anywhere else. Shown only when it would do something. */}
+      {!isCurrentMonth && (
+        <button
+          type="button"
+          onClick={() => setMonthKey(currentMonth)}
+          className="press self-start text-xs text-accent"
+        >
+          ← Back to {monthLabel(currentMonth)}
+        </button>
+      )}
 
       {!rows && <p className="text-ink-mute">Counting the centavos…</p>}
 
@@ -245,11 +315,24 @@ export function Insights() {
                   <span className="text-ink-mute">spending </span>
                   {formatPHP(pace.perDayCentavos)}
                   <span className="text-ink-mute">/day</span>
-                  {pace.isPartial && (
+                  {/* The projection waits out the first days of the month. A
+                      straight line off two days multiplies whatever happened in
+                      them by fifteen, and printing that beside real totals lends
+                      a coin flip the same authority as a measurement. The line
+                      says what it is waiting for rather than going blank. */}
+                  {pace.isPartial && !pace.isEarly && (
                     <>
                       <span className="mx-1.5 text-ink-mute opacity-50">·</span>
                       <span className="text-ink-mute">on track for </span>
                       {formatPHP(pace.projectedCentavos)}
+                    </>
+                  )}
+                  {pace.isPartial && pace.isEarly && (
+                    <>
+                      <span className="mx-1.5 text-ink-mute opacity-50">·</span>
+                      <span className="text-ink-mute">
+                        too early in the month to project a total
+                      </span>
                     </>
                   )}
                 </p>
@@ -290,6 +373,7 @@ export function Insights() {
                   summary={summary}
                   categoriesById={categoriesById}
                   envelopes={envelopes}
+                  onPickCategory={showCategoryInHistory}
                 />
               </Panel>
             )}
@@ -298,8 +382,13 @@ export function Insights() {
               currentCentavos={summary.spendingCentavos}
               previousCentavos={previousSummary.spendingCentavos}
               previousLabel={monthLabel(prevMonthKey(monthKey))}
+              // Null once the month is over — both sides are then whole months
+              // and the panel has nothing to disclose.
+              throughDay={isCurrentMonth ? dayOfMonth : null}
+              previousShortLabel={shortMonthLabel(prevMonthKey(monthKey))}
               moves={moves}
               categoriesById={categoriesById}
+              onPickCategory={showCategoryInHistory}
             />
 
             {trend && (
@@ -345,12 +434,32 @@ export function Insights() {
                             background: `linear-gradient(90deg, ${color}99, ${color})`,
                           }}
                         />
-                        <span className="meter-plan" style={{ left: `${row.planBp / 100}%` }} />
+                        {/* --tick, not left: theme.css clamps it so a 100%
+                            share does not park the mark outside the clipped
+                            track and disappear. */}
+                        <span
+                          className="meter-plan"
+                          style={{ '--tick': `${row.planBp / 100}%` } as CSSProperties}
+                        />
                       </div>
                     </div>
                   )
                 })}
               </div>
+              {/* Says out loud that these percentages have a smaller denominator
+                  than the rest of the screen. splitAdherence divides by spending
+                  in the LISTED envelopes only, so money charged to an archived
+                  one — or to one the mirror has not pulled yet — is missing from
+                  the mix while "Where it went" still counts it. Without this the
+                  two panels disagree about the same month and neither says why.
+                  The trend panel handles the identical case with its "Archived"
+                  row; this is the same disclosure in one line. */}
+              {unlistedSpendCentavos > 0 && (
+                <p className="mt-3.5 border-t border-line/70 pt-3 text-xs text-ink-mute">
+                  Excludes {formatPHP(unlistedSpendCentavos)} spent from envelopes not listed here —
+                  the mix above is of the rest.
+                </p>
+              )}
             </Panel>
 
             {/* Reference data, not insight — collapsed by default so it stops
@@ -406,10 +515,12 @@ function WhereItWent({
   summary,
   categoriesById,
   envelopes,
+  onPickCategory,
 }: {
   summary: MonthSummary
   categoriesById: Map<string, Category>
   envelopes: Envelope[]
+  onPickCategory: (categoryId: string) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   // Expanding re-derives rather than un-hiding rows: the shares must still sum
@@ -441,11 +552,17 @@ function WhereItWent({
   return (
     <div>
       {/* One bar, one hundred percent. Identity is carried by the rows below,
-          so this needs no legend — it is a magnitude picture, not a key. */}
+          so this needs no legend — it is a magnitude picture, not a key.
+          The label reads out the actual split rather than "split across 8
+          groups", which named the chart without conveying one number from it —
+          the rows are all in the DOM below, but a summary that omits the answer
+          makes the reader assemble it from eight separate lines. */}
       <div
         className="mb-4 flex h-3 w-full overflow-hidden border-2 border-line bg-black/45"
         role="img"
-        aria-label={`Spending split across ${breakdown.slices.length} groups`}
+        aria-label={`Spending split: ${breakdown.slices
+          .map((slice) => `${labelOf(slice)} ${(slice.shareBp / 100).toFixed(1)}%`)
+          .join(', ')}`}
       >
         {breakdown.slices.map((slice) => (
           <span
@@ -462,34 +579,69 @@ function WhereItWent({
       </div>
 
       <div className="flex flex-col gap-3">
-        {breakdown.slices.map((slice) => (
-          <div key={slice.key}>
-            <div className="mb-1.5 flex items-baseline justify-between gap-2 text-sm">
-              <span
-                className={`min-w-0 truncate ${slice.categoryId === null ? 'text-ink-soft' : ''}`}
-              >
-                {labelOf(slice)}
-              </span>
-              <span className="shrink-0 tabular-nums text-ink-soft">
-                {/* The percentage is the point of this panel, so it is stated
-                    and not left to be eyeballed off a bar. */}
-                <span className="font-semibold text-ink">{(slice.shareBp / 100).toFixed(1)}%</span>
-                <span className="mx-1.5 text-ink-mute opacity-50">·</span>
-                {formatPHP(slice.centavos)}
-              </span>
-            </div>
-            <div className="meter">
-              <div
-                className="meter-fill"
-                style={{
-                  width: `${slice.shareBp / 100}%`,
-                  backgroundColor: colorOf(slice.categoryId),
-                }}
-              />
-            </div>
-          </div>
-        ))}
+        {breakdown.slices.map((slice) => {
+          // A real category can be opened in History; the two sentinel rows
+          // cannot. "Other" is several categories at once and History filters by
+          // id, and there is no "has no category" filter for Uncategorized to
+          // point at — so they stay plain text rather than becoming buttons that
+          // look tappable and do nothing.
+          const drillable = slice.categoryId !== null
+          const body = (
+            <>
+              <div className="mb-1.5 flex items-baseline justify-between gap-2 text-sm">
+                <span
+                  className={`min-w-0 truncate ${slice.categoryId === null ? 'text-ink-soft' : ''}`}
+                >
+                  {labelOf(slice)}
+                </span>
+                <span className="shrink-0 tabular-nums text-ink-soft">
+                  {/* The percentage is the point of this panel, so it is stated
+                      and not left to be eyeballed off a bar. */}
+                  <span className="font-semibold text-ink">
+                    {(slice.shareBp / 100).toFixed(1)}%
+                  </span>
+                  <span className="mx-1.5 text-ink-mute opacity-50">·</span>
+                  {formatPHP(slice.centavos)}
+                </span>
+              </div>
+              <div className="meter">
+                <div
+                  className="meter-fill"
+                  style={{
+                    width: `${slice.shareBp / 100}%`,
+                    backgroundColor: colorOf(slice.categoryId),
+                  }}
+                />
+              </div>
+            </>
+          )
+
+          return drillable ? (
+            <button
+              key={slice.key}
+              type="button"
+              onClick={() => onPickCategory(slice.categoryId!)}
+              aria-label={`${labelOf(slice)}, ${(slice.shareBp / 100).toFixed(1)}% of spending, ${formatPHP(
+                slice.centavos,
+              )} — show these entries`}
+              className="press w-full text-left"
+            >
+              {body}
+            </button>
+          ) : (
+            <div key={slice.key}>{body}</div>
+          )
+        })}
       </div>
+
+      {/* Stated once, under the list, rather than as a chevron on every row:
+          eight identical "→" marks is decoration, and the rows are already
+          dense with a name, a percentage and an amount. Suppressed when nothing
+          on the list is actually tappable — a month of entirely uncategorized
+          spending would otherwise be told to tap rows that do nothing. */}
+      {breakdown.slices.some((slice) => slice.categoryId !== null) && (
+        <p className="mt-3 text-xs text-ink-mute">Tap a category to see those entries.</p>
+      )}
 
       {foldedCount > 0 && (
         <button
@@ -517,20 +669,34 @@ function VsLastMonth({
   currentCentavos,
   previousCentavos,
   previousLabel,
+  previousShortLabel,
+  throughDay,
   moves,
   categoriesById,
+  onPickCategory,
 }: {
   currentCentavos: number
   previousCentavos: number
   previousLabel: string
+  previousShortLabel: string
+  /** day of the month both sides are trimmed to; null when both are complete */
+  throughDay: number | null
   moves: ReturnType<typeof categoryMoves>
   categoriesById: Map<string, Category>
+  onPickCategory: (categoryId: string) => void
 }) {
+  // "the first 8 days of June", not "June". The panel is comparing equal spans
+  // now, and a hint that still said "June" would describe a month the numbers
+  // no longer cover.
+  const spanLabel = throughDay === null ? previousLabel : `${previousShortLabel} 1–${throughDay}`
+
   if (previousCentavos === 0 && moves.length === 0) {
     return (
-      <Panel title="vs last month" hint={previousLabel}>
+      <Panel title="vs last month" hint={spanLabel}>
         <p className="text-sm text-ink-mute">
-          Nothing logged in {previousLabel} — there is nothing to compare against yet.
+          {throughDay === null
+            ? `Nothing logged in ${previousLabel} — there is nothing to compare against yet.`
+            : `Nothing logged by this point in ${previousLabel} — there is nothing to compare against yet.`}
         </p>
       </Panel>
     )
@@ -540,32 +706,46 @@ function VsLastMonth({
   const pct = previousCentavos > 0 ? Math.round((delta / previousCentavos) * 100) : null
 
   return (
-    <Panel title="vs last month" hint={previousLabel}>
+    <Panel title="vs last month" hint={spanLabel}>
       <p className="text-sm">
         <span className={`text-lg font-bold tabular-nums ${delta > 0 ? 'text-neg' : 'text-pos'}`}>
           {delta > 0 ? '+' : delta < 0 ? '−' : ''}
           {formatPHP(Math.abs(delta))}
         </span>{' '}
         <span className="text-ink-soft">
-          {delta > 0 ? 'more' : delta < 0 ? 'less' : 'the same'} than {previousLabel}
+          {delta > 0 ? 'more' : delta < 0 ? 'less' : 'the same'} than {spanLabel}
           {pct !== null && delta !== 0 && (
             <span className="text-ink-mute"> ({Math.abs(pct)}%)</span>
           )}
         </span>
       </p>
 
+      {/* The disclosure that makes the number above readable. Comparing a month
+          in progress against a whole finished one is the difference between
+          "you are spending less" and "it is the 8th" — and the old panel could
+          not tell you which it meant. */}
+      {throughDay !== null && (
+        <p className="mt-1.5 text-xs text-ink-mute">
+          Same stretch of each month, so the comparison is like for like.
+        </p>
+      )}
+
       {moves.length > 0 && (
         <div className="mt-3.5 flex flex-col gap-2 border-t border-line/70 pt-3">
           {moves.map((move) => {
             const category = categoriesById.get(move.categoryId)
+            const name = category ? `${category.emoji ?? ''} ${category.name}`.trim() : 'Unknown'
             return (
-              <div
+              <button
                 key={move.categoryId}
-                className="flex items-baseline justify-between gap-2 text-sm"
+                type="button"
+                onClick={() => onPickCategory(move.categoryId)}
+                aria-label={`${name}, ${
+                  move.deltaCentavos > 0 ? 'up' : 'down'
+                } ${formatPHP(Math.abs(move.deltaCentavos))} — show these entries`}
+                className="press flex w-full items-baseline justify-between gap-2 text-left text-sm"
               >
-                <span className="min-w-0 truncate text-ink-soft">
-                  {category ? `${category.emoji ?? ''} ${category.name}`.trim() : 'Unknown'}
-                </span>
+                <span className="min-w-0 truncate text-ink-soft">{name}</span>
                 <span
                   className={`shrink-0 tabular-nums ${
                     move.deltaCentavos > 0 ? 'text-neg' : 'text-pos'
@@ -574,7 +754,7 @@ function VsLastMonth({
                   {move.deltaCentavos > 0 ? '+' : '−'}
                   {formatPHP(Math.abs(move.deltaCentavos))}
                 </span>
-              </div>
+              </button>
             )
           })}
         </div>
@@ -613,7 +793,21 @@ function TrendPanel({
   currentMonth: string
   className?: string
 }) {
+  // Which month the value gutter reports. Null means the latest, which is the
+  // question the panel answers by default ("where am I now?").
+  //
+  // HELD AS A MONTH KEY, NOT AN INDEX. Paging the picker slides the whole
+  // six-month window, so slot 2 stops meaning the month that was tapped — an
+  // index would silently re-point at a different month. A key that has slid out
+  // of the window simply stops matching and the panel falls back to the latest,
+  // and one still in it stays selected, which is the behaviour you want when
+  // stepping back a month to see the same column.
+  const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const selectedAt = trend.months.findIndex((m) => m.monthKey === selectedKey)
+  const selected = selectedAt === -1 ? null : selectedAt
+
   const anyArchived = trend.months.some((m) => m.otherCentavos > 0)
+  const byId = new Map(envelopes.map((e) => [e.id, e]))
   const rows: {
     key: string
     label: string
@@ -628,13 +822,26 @@ function TrendPanel({
       values: trend.months.map((m) => m.totalCentavos),
       peak: trend.peakTotalCentavos,
     },
-    ...envelopes.map((env, i) => ({
-      key: env.id,
-      label: env.name,
-      color: env.color ?? '#AFA7C2',
-      values: trend.months.map((m) => m.perEnvelopeCentavos[i] ?? 0),
-      peak: trend.peakPerEnvelopeCentavos[i] ?? 0,
-    })),
+    // Driven by the ids the TREND was computed against, not by the current
+    // envelope list. The two are the same list almost always — but they are
+    // filled in by different async effects, so while a refetch is in flight
+    // `envelopes[i]` and `perEnvelopeCentavos[i]` can be different envelopes,
+    // and the old positional pairing drew each row under someone else's name
+    // for the length of six range reads. An id with no envelope to name it is
+    // dropped instead of guessed at.
+    ...trend.envelopeIds.flatMap((id, i) => {
+      const env = byId.get(id)
+      if (!env) return []
+      return [
+        {
+          key: id,
+          label: env.name,
+          color: env.color ?? '#AFA7C2',
+          values: trend.months.map((m) => m.perEnvelopeCentavos[i] ?? 0),
+          peak: trend.peakPerEnvelopeCentavos[i] ?? 0,
+        },
+      ]
+    }),
   ]
   if (anyArchived) {
     rows.push({
@@ -656,8 +863,29 @@ function TrendPanel({
     )
   }
 
+  const selectedMonth = selected === null ? null : trend.months[selected]
+
+  const footnotes: string[] = []
+  if (trend.months.some((m) => m.monthKey === currentMonth)) {
+    footnotes.push('… this month is still running')
+  }
+  // Retired once a month is picked: by then the affordance has been found, and
+  // the hint would be telling you to do the thing you just did.
+  if (selectedMonth === null) footnotes.push('tap a month to read every row at that month')
+
   return (
-    <Panel title="Last 6 months" hint="each row on its own scale" className={className}>
+    <Panel
+      title="Last 6 months"
+      // The hint carries the scale caveat by default and the selection when
+      // there is one — the right-hand column changes meaning, so the label for
+      // it has to change with it.
+      hint={
+        selectedMonth === null
+          ? 'each row on its own scale'
+          : `showing ${shortMonthLabel(selectedMonth.monthKey)}`
+      }
+      className={className}
+    >
       <div className="flex flex-col gap-2.5">
         {rows.map((row) => (
           <TrendRow
@@ -665,30 +893,58 @@ function TrendPanel({
             row={row}
             monthKeys={trend.months.map((m) => m.monthKey)}
             currentMonth={currentMonth}
+            selected={selected}
           />
         ))}
       </div>
-      {/* The axis, once, under all the rows. An in-progress month is marked in
-          TEXT rather than by a paler bar: a partial column is the one value on
-          this chart that is not comparable to its neighbours, and encoding that
-          in colour or opacity alone would hide it from exactly the readers the
-          small-multiples layout was chosen to serve. */}
-      {/* Mirrors TrendRow's own three-part layout — label gutter, plot, value
-          gutter — so the ticks sit under the bars they name. */}
+      {/* The axis, once, under all the rows, mirroring TrendRow's own three-part
+          layout — label gutter, plot, value gutter — so the ticks sit under the
+          bars they name. An in-progress month is marked in TEXT rather than by a
+          paler bar: a partial column is the one value on this chart that is not
+          comparable to its neighbours, and encoding that in colour or opacity
+          alone would hide it from exactly the readers the small-multiples layout
+          was chosen to serve.
+
+          THE AXIS IS ALSO THE CONTROL, and that is what makes this panel usable
+          on a phone. Every per-month figure used to live in a `title` attribute
+          — which never fires on touch — so on the device this app is built for,
+          five of the six columns in every row were unreadable. Six buttons on
+          the axis move all rows to the same month at once, which answers a
+          better question than any single bar could ("what did March look like
+          across the board?"). The bars themselves stay non-interactive: six
+          months by five rows would be thirty tap targets and thirty announced
+          nodes, and each row already carries a full spoken summary. */}
       <div className="mt-2 flex items-center gap-2 border-t border-line/70 pt-1.5">
         <span aria-hidden className="w-20 shrink-0" />
         <div className="flex flex-1 gap-[2px]">
-          {trend.months.map((m) => (
-            <span key={m.monthKey} className="flex-1 text-center text-[0.625rem] text-ink-mute">
-              {shortMonthLabel(m.monthKey)}
-              {m.monthKey === currentMonth ? '…' : ''}
-            </span>
-          ))}
+          {trend.months.map((m, i) => {
+            const isSelected = selected === i
+            return (
+              <button
+                key={m.monthKey}
+                type="button"
+                aria-pressed={isSelected}
+                // Tapping the selected month again returns the panel to its
+                // default. Without it the only way out of a selection is to
+                // pick a different one, which is a trap rather than a filter.
+                onClick={() => setSelectedKey(isSelected ? null : m.monthKey)}
+                className={`press flex-1 py-0.5 text-center text-[0.625rem] ${
+                  isSelected ? 'bg-accent font-semibold text-on-accent' : 'text-ink-mute'
+                }`}
+              >
+                {shortMonthLabel(m.monthKey)}
+                {m.monthKey === currentMonth ? '…' : ''}
+              </button>
+            )
+          })}
         </div>
         <span aria-hidden className="w-20 shrink-0" />
       </div>
-      {trend.months.some((m) => m.monthKey === currentMonth) && (
-        <p className="mt-1.5 text-[0.625rem] text-ink-mute">… this month is still running</p>
+      {/* Built as a list and dropped entirely when empty, rather than left as a
+          paragraph holding its own margin open over nothing — the caption has
+          two independent parts and both can be absent at once. */}
+      {footnotes.length > 0 && (
+        <p className="mt-1.5 text-[0.625rem] text-ink-mute">{footnotes.join(' · ')}</p>
       )}
     </Panel>
   )
@@ -698,12 +954,16 @@ function TrendRow({
   row,
   monthKeys,
   currentMonth,
+  selected,
 }: {
   row: { label: string; color: string | null; values: number[]; peak: number }
   monthKeys: string[]
   currentMonth: string
+  /** index of the month the value gutter reports; null means the latest */
+  selected: number | null
 }) {
-  const latest = row.values[row.values.length - 1] ?? 0
+  const shown = selected === null ? row.values.length - 1 : selected
+  const shownValue = row.values[shown] ?? 0
   const summary = `${row.label}: ${monthKeys
     .map(
       (key, i) =>
@@ -735,7 +995,14 @@ function TrendRow({
               key={monthKeys[i]}
               aria-hidden
               title={`${shortMonthLabel(monthKeys[i])} — ${formatPHP(value)}`}
-              className="flex flex-1 items-end border-b-2 border-line/60"
+              // The selected column is marked on the TRACK, not by recolouring
+              // the bar: the bar's colour is the envelope's identity, and
+              // borrowing it to mean "selected" would make two different things
+              // share one channel on the chart that exists because this app
+              // takes colour-vision seriously.
+              className={`flex flex-1 items-end border-b-2 ${
+                selected === i ? 'border-accent bg-accent/12' : 'border-line/60'
+              }`}
             >
               <span
                 className="w-full"
@@ -750,7 +1017,7 @@ function TrendRow({
         })}
       </div>
       <span className="w-20 shrink-0 text-right text-xs tabular-nums text-ink-soft">
-        {formatPHP(latest)}
+        {formatPHP(shownValue)}
       </span>
     </div>
   )

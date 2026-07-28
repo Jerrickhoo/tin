@@ -919,3 +919,68 @@ Six lines of comment explaining a flag no screen used. Check-ins are why: openin
 - **`envelopeAllowances` had no callers.** A per-envelope mapper with two tests, standing between Home and the two functions it actually uses. Removed.
 - **An unreachable branch in `findRepair`.** Reaching `back = n` requires every earlier day to have hit the loop's `continue` — which *is* the thing the inner "bridged" loop then tested. It could only confirm what getting there proved, for any window size. Replaced with the comment explaining the invariant.
 - **`daysInMonth` and `pad2` existed twice**, in `lib/dates.ts` and `lib/recurring.ts`. Byte-identical, agreeing by coincidence. Month-length is precisely where a lone divergence would surface as rent posting on the wrong day of February and nowhere else. `daysInYearMonth` is now the shared primitive, with a test that holds the two modules in step.
+
+## 13. Insights — the panel that was measuring the calendar (2026-07-28)
+
+§12 asked "does this make sense?" of every module. This asks it of one screen. The month math came through clean — largest-remainder shares summing to exactly 10000 bp either way the tail is folded, transfers held out of the top line, gap months drawn as gaps rather than closed up, small multiples chosen over a stacked column on a measured colour-vision result. What follows is everything that did not.
+
+### 13.1 "vs last month" was measuring the calendar, not the spending
+
+The panel compared **a month in progress against a whole finished month**. On the 8th of July it put 8 days of July against 31 days of June and reported the shortfall as an improvement. Every early-month visit said you were doing brilliantly; the same panel said "about the same" on the 31st. **The sign of the number was decided by the date, not by anything the user did** — and the three category movers underneath it were drawn from the same mismatched pair, so the "biggest changes" were mostly just categories that had had more days to accumulate.
+
+`entriesThroughDayOfMonth` trims the previous month to the current day-of-month, so both sides are the same length. The hint reads `Jun 1–8` rather than `June 2026`, because a label naming a whole month over numbers that cover eight days of it is the same bug in words.
+
+Day-of-month rather than elapsed days, deliberately: it keeps both windows anchored to the same calendar dates, and a shorter previous month simply contributes every day it had. The cut is on the **Manila** day — cutting on the UTC date would include an evening the other side of the window does not have, which is the whole failure in miniature.
+
+### 13.2 The projection ran from day one
+
+One ₱3,000 purchase on the 2nd projected ₱46,500 for the month. Arithmetically exact, and worthless — a straight line multiplies whatever the first days held by up to 31, so the figure halves if you log nothing tomorrow. It sat in the same type and the same row as the real totals, which lent a coin flip the authority of a measurement.
+
+`monthPace` now reports `isEarly` and the line says _"too early in the month to project a total"_ until day 5. Five is a judgement, not a derivation: roughly where one unusual day stops being able to move the projection by more than its own size, with ~85% of the month still left to act on the answer. A **complete** month is never early however short it is, because a finished month is not projected at all and disclaiming a number nobody is shown is just noise.
+
+### 13.3 Month totals painted under the wrong month's name
+
+`monthKey` updated on tap; `rows` updated when the Dexie read resolved. In between — every single ‹ tap — the screen showed the previous month's totals under the new month's heading. On a warm mirror that is a flicker; on a cold one it is a screenshot-able wrong answer, and nothing on screen admitted it.
+
+The two are now one state value, so the mismatch is unrepresentable rather than merely unlikely. The cost is that paging shows the loading line for a beat instead of stale numbers, which is the correct trade: **this app's entire pitch is that its numbers are honest.**
+
+### 13.4 The trend chart could draw every row under someone else's name
+
+`TrendPanel` paired `envelopes[i]` against `perEnvelopeCentavos[i]`. Those two arrays are filled in by **different async effects** — the month effect sets `envelopes`, and a separate effect then issues six range reads before `trend` catches up. Add or archive an envelope and, for the length of those six reads, every row on the chart is labelled with the wrong envelope's name and colour. Nothing crashed and nothing looked broken.
+
+`spendTrend` now carries its `envelopeIds` back out and labels resolve through them. An id with no envelope to name it is dropped rather than guessed at. The array is copied on the way out, because the caller's list is React state and must not be reachable for mutation through a derived result.
+
+### 13.5 Two panels divided by different totals and neither said so
+
+`splitAdherence` divides by spending in the **listed** envelopes; "Where it went" divides by **all** spending. Money charged to an archived envelope therefore appeared in one panel and silently vanished from the other's denominator, so the same month produced two disagreeing sets of percentages with nothing explaining the gap.
+
+The trend panel already handles this exact case honestly, with its "Archived" row. The adherence panel now makes the same disclosure in one line. Same rule as `uncategorizedCentavos` in §9.1: **when a breakdown has a hole in it, name the hole.**
+
+### 13.6 Everything the trend chart knew was locked in a `title` attribute
+
+Six months × five rows of per-month figures, every one of them reachable only by **hovering** — which never happens on a phone. On the device this app exists for, five of the six columns in every row were unreadable, and the panel's own `aria-label` summary was doing more for a screen-reader user than the visual chart did for a sighted one.
+
+**The axis is now also the control.** Tapping a month moves every row to that month at once, which answers a better question than any single bar could — "what did March look like across the board?" The bars stay non-interactive: six months by five rows is thirty tap targets and thirty announced nodes, and each row already carries a full spoken summary.
+
+Two details that would each have been a bug:
+
+- **The selection is held as a month key, not an index.** Paging the picker slides the whole six-month window, so slot 2 stops meaning the month that was tapped — an index would silently re-point at a different month. A key that slides out of the window stops matching and the panel falls back to the latest; one still in it stays selected, which is what you want when stepping back a month to read the same column.
+- **The selected column is marked on the track, not by recolouring the bar.** The bar's colour _is_ the envelope's identity. Borrowing it to also mean "selected" would put two meanings on one channel, on the chart that exists in small-multiples form precisely because §6 measured mint against orchid at ΔE 3.2 under deuteranopia.
+
+### 13.7 Nowhere to go from a number
+
+"Food, 32%, ₱4,200" and no path to **on what?** — which is the only question anyone asks next. Category rows and the movers list now hand History a starting filter through router state, and History opens with its filter panel expanded, because a filtered ledger whose filter is folded away looks like a screen that has lost entries.
+
+Router **state** rather than a query string: a category id is a UUID that means nothing to a human, so it would make a URL nobody would ever want to share, and this app has no cross-device deep links to honour. The incoming value is validated rather than trusted — `location.state` holds whatever the last navigation put there, including a stale shape from an older deploy still sitting in a history entry.
+
+### 13.8 Smaller things in the same pass
+
+- **"Back to July 2026".** Paging back six months took six taps to undo, and › disables itself the moment you arrive, so nothing on screen said you had ever moved.
+- **The composition bar told a screen reader nothing.** Its label was _"Spending split across 8 groups"_ — naming the chart without conveying one number from it. It now reads the split.
+- **A month where every category is uncategorized** no longer prints "Tap a category to see those entries" over a list of rows that do nothing.
+
+### 13.9 Still open
+
+- **`UNCATEGORIZED` and `OTHER` begin with a literal NUL byte**, not the space the neighbouring `' total'` and `' archived'` keys use. Harmless at runtime — the values are sentinels, never persisted — but it makes git treat `lib/analytics.ts` as **binary**, so `git diff` on the file that holds every number on this screen shows nothing at all. Left as a decision rather than folded into an unrelated commit.
+- **No render tests.** 436 unit tests cover the math; nothing covers the screen. Every finding above except 13.1 and 13.2 was invisible to the suite because it lived in the wiring, not in the functions.
+- **Not built, considered:** biggest single expense of the month, and a weekday spending pattern. Both computable from data already fetched. Both new scope rather than corrections, which is why they are here and not above.
