@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   categoryMoves,
+  comparableSpanDay,
   entriesThroughDayOfMonth,
   monthPace,
   OTHER,
@@ -224,6 +225,26 @@ describe('monthPace', () => {
     // all — calling it unreliable would disclaim a number nobody is shown.
     expect(monthPace(150000, 3, 3).isEarly).toBe(false)
     expect(monthPace(150000, 28, 28).isEarly).toBe(false)
+  })
+})
+
+describe('comparableSpanDay', () => {
+  it('trims to today when the previous month is long enough to reach', () => {
+    expect(comparableSpanDay(8, 30)).toBe(8)
+  })
+
+  it('gives up the trim when the previous month is SHORTER than today', () => {
+    // 29 March against February: there is no 29th to trim to. Unguarded, the
+    // panel labelled itself "Feb 1–29" — a day that does not exist — over a
+    // comparison of 29 days against 28 that still claimed to be like for like.
+    expect(comparableSpanDay(29, 28)).toBeNull()
+    expect(comparableSpanDay(31, 30)).toBeNull()
+  })
+
+  it('gives up on the exact day the previous month runs out', () => {
+    // Day 28 of a 28-day February is the whole month, so there is nothing left
+    // to trim and the panel should name February in full rather than "Feb 1–28".
+    expect(comparableSpanDay(28, 28)).toBeNull()
   })
 })
 

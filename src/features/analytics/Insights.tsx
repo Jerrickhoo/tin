@@ -13,6 +13,7 @@ import { readCheckIns } from '../../db/dexie'
 import { readStreakSaves } from '../../db/streak'
 import {
   categoryMoves,
+  comparableSpanDay,
   entriesThroughDayOfMonth,
   monthPace,
   OTHER,
@@ -186,11 +187,15 @@ export function Insights() {
   // today; measuring it against a whole finished month made "vs last month"
   // report a saving on the 3rd and a wash on the 31st regardless of how the
   // month was actually going. Past months are complete on both sides and pass
-  // through untouched.
+  // through untouched — and so does a previous month shorter than today's date,
+  // which has no day left to trim to (see `comparableSpanDay`).
+  const throughDay = isCurrentMonth
+    ? comparableSpanDay(dayOfMonth, daysInMonth(prevMonthKey(monthKey)))
+    : null
   const previousSpan = useMemo(() => {
     const previous = fresh ? loaded.previousRows : []
-    return isCurrentMonth ? entriesThroughDayOfMonth(previous, dayOfMonth) : previous
-  }, [fresh, loaded, isCurrentMonth, dayOfMonth])
+    return throughDay === null ? previous : entriesThroughDayOfMonth(previous, throughDay)
+  }, [fresh, loaded, throughDay])
   const previousSummary = useMemo(() => summarizeMonth(previousSpan), [previousSpan])
 
   const adherence = useMemo(
@@ -382,9 +387,10 @@ export function Insights() {
               currentCentavos={summary.spendingCentavos}
               previousCentavos={previousSummary.spendingCentavos}
               previousLabel={monthLabel(prevMonthKey(monthKey))}
-              // Null once the month is over — both sides are then whole months
-              // and the panel has nothing to disclose.
-              throughDay={isCurrentMonth ? dayOfMonth : null}
+              // Null once the whole previous month is in scope — the month is
+              // over, or it is shorter than today's date. Either way the panel
+              // names it in full and makes no like-for-like claim.
+              throughDay={throughDay}
               previousShortLabel={shortMonthLabel(prevMonthKey(monthKey))}
               moves={moves}
               categoriesById={categoriesById}
@@ -679,7 +685,7 @@ function VsLastMonth({
   previousCentavos: number
   previousLabel: string
   previousShortLabel: string
-  /** day of the month both sides are trimmed to; null when both are complete */
+  /** day both sides are trimmed to; null when the whole previous month is in scope */
   throughDay: number | null
   moves: ReturnType<typeof categoryMoves>
   categoriesById: Map<string, Category>

@@ -930,7 +930,9 @@ The panel compared **a month in progress against a whole finished month**. On th
 
 `entriesThroughDayOfMonth` trims the previous month to the current day-of-month, so both sides are the same length. The hint reads `Jun 1–8` rather than `June 2026`, because a label naming a whole month over numbers that cover eight days of it is the same bug in words.
 
-Day-of-month rather than elapsed days, deliberately: it keeps both windows anchored to the same calendar dates, and a shorter previous month simply contributes every day it had. The cut is on the **Manila** day — cutting on the UTC date would include an evening the other side of the window does not have, which is the whole failure in miniature.
+Day-of-month rather than elapsed days, deliberately: it keeps both windows anchored to the same calendar dates. The cut is on the **Manila** day — cutting on the UTC date would include an evening the other side of the window does not have, which is the whole failure in miniature.
+
+**The first version of this fix shipped its own version of the same bug, caught on review before merge.** The trim exists to make two spans equal, and there is a case where it cannot: the previous month may be **shorter than today's date**. On 29 March there is no 29th of February to trim to. The data was right — a shorter month simply contributes every day it had — but the panel labelled itself `Feb 1–29`, naming a day that does not exist, and printed "same stretch of each month" over a comparison of 29 days against 28. `comparableSpanDay` returns null once the previous month is exhausted, which is the same state a finished month is in: name it in full, make no like-for-like claim. It is a pure function with its own tests **because the original bug was in the wiring, where the suite could not see it** — the point §13.9 makes about this whole pass.
 
 ### 13.2 The projection ran from day one
 
