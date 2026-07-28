@@ -409,62 +409,79 @@ export function Insights() {
             {streak && <StreakPanel streak={streak} />}
 
             <Panel title="Spending mix vs the plan" hint="bar = actual share · tick = plan">
-              <div className="flex flex-col gap-3.5">
-                {adherence.map((row) => {
-                  const env = envelopes.find((e) => e.id === row.envelopeId)
-                  if (!env) return null
-                  const color = env.color ?? '#AFA7C2'
-                  return (
-                    <div key={row.envelopeId}>
-                      <div className="mb-1.5 flex items-baseline justify-between gap-2 text-sm">
-                        <span className="flex min-w-0 items-center gap-2">
-                          <Dot color={color} />
-                          <span className="truncate">{env.name}</span>
-                        </span>
-                        {/* Values wear ink, not the series color — the dot
+              {/* Empty is a real state, not a loading one, and it is reachable:
+                  sync pulls entries before it pulls envelopes, so a fresh device
+                  genuinely holds spending whose envelopes the mirror has not
+                  seen yet. Rendering the panel's body against `[]` left an empty
+                  card — and the footnote below it then claimed "the mix above is
+                  of the rest" with no mix above at all. Same lesson as §3.5:
+                  `[]` is truthy, so it is not a loading guard. */}
+              {adherence.length === 0 ? (
+                <p className="text-sm text-ink-mute">
+                  Envelopes haven't reached this device yet — the mix fills in once they sync.
+                </p>
+              ) : (
+                <>
+                  <div className="flex flex-col gap-3.5">
+                    {adherence.map((row) => {
+                      const env = envelopes.find((e) => e.id === row.envelopeId)
+                      if (!env) return null
+                      const color = env.color ?? '#AFA7C2'
+                      return (
+                        <div key={row.envelopeId}>
+                          <div className="mb-1.5 flex items-baseline justify-between gap-2 text-sm">
+                            <span className="flex min-w-0 items-center gap-2">
+                              <Dot color={color} />
+                              <span className="truncate">{env.name}</span>
+                            </span>
+                            {/* Values wear ink, not the series color — the dot
                           carries identity (dataviz: text tokens for text). */}
-                        <span className="shrink-0 tabular-nums text-ink-soft">
-                          {row.actualBp === null ? '—' : `${(row.actualBp / 100).toFixed(0)}%`}
-                          <span className="text-ink-mute"> of {row.planBp / 100}%</span>
-                        </span>
-                      </div>
-                      {/* Both the fill and the tick are shares of the month's
+                            <span className="shrink-0 tabular-nums text-ink-soft">
+                              {row.actualBp === null ? '—' : `${(row.actualBp / 100).toFixed(0)}%`}
+                              <span className="text-ink-mute"> of {row.planBp / 100}%</span>
+                            </span>
+                          </div>
+                          {/* Both the fill and the tick are shares of the month's
                           spending, which is the only reason one scale can carry
                           them: actualBp and planBp are both basis points out of
                           10000, so /100 puts each on the same 0–100 axis. */}
-                      <div className="meter">
-                        <div
-                          className="meter-fill"
-                          style={{
-                            width: `${Math.min((row.actualBp ?? 0) / 100, 100)}%`,
-                            background: `linear-gradient(90deg, ${color}99, ${color})`,
-                          }}
-                        />
-                        {/* --tick, not left: theme.css clamps it so a 100%
+                          <div className="meter">
+                            <div
+                              className="meter-fill"
+                              style={{
+                                width: `${Math.min((row.actualBp ?? 0) / 100, 100)}%`,
+                                background: `linear-gradient(90deg, ${color}99, ${color})`,
+                              }}
+                            />
+                            {/* --tick, not left: theme.css clamps it so a 100%
                             share does not park the mark outside the clipped
                             track and disappear. */}
-                        <span
-                          className="meter-plan"
-                          style={{ '--tick': `${row.planBp / 100}%` } as CSSProperties}
-                        />
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-              {/* Says out loud that these percentages have a smaller denominator
-                  than the rest of the screen. splitAdherence divides by spending
-                  in the LISTED envelopes only, so money charged to an archived
-                  one — or to one the mirror has not pulled yet — is missing from
-                  the mix while "Where it went" still counts it. Without this the
-                  two panels disagree about the same month and neither says why.
-                  The trend panel handles the identical case with its "Archived"
-                  row; this is the same disclosure in one line. */}
-              {unlistedSpendCentavos > 0 && (
-                <p className="mt-3.5 border-t border-line/70 pt-3 text-xs text-ink-mute">
-                  Excludes {formatPHP(unlistedSpendCentavos)} spent from envelopes not listed here —
-                  the mix above is of the rest.
-                </p>
+                            <span
+                              className="meter-plan"
+                              style={{ '--tick': `${row.planBp / 100}%` } as CSSProperties}
+                            />
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  {/* Says out loud that these percentages have a smaller
+                      denominator than the rest of the screen. splitAdherence
+                      divides by spending in the LISTED envelopes only, so money
+                      charged to an archived one is missing from the mix while
+                      "Where it went" still counts it. Without this the two
+                      panels disagree about the same month and neither says why.
+                      The trend panel handles the identical case with its
+                      "Archived" row; this is the same disclosure in one line.
+                      Inside the non-empty branch on purpose — "the mix above"
+                      has to have a mix above it. */}
+                  {unlistedSpendCentavos > 0 && (
+                    <p className="mt-3.5 border-t border-line/70 pt-3 text-xs text-ink-mute">
+                      Excludes {formatPHP(unlistedSpendCentavos)} spent from envelopes not listed
+                      here — the mix above is of the rest.
+                    </p>
+                  )}
+                </>
               )}
             </Panel>
 

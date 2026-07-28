@@ -958,6 +958,8 @@ The two are now one state value, so the mismatch is unrepresentable rather than 
 
 The trend panel already handles this exact case honestly, with its "Archived" row. The adherence panel now makes the same disclosure in one line. Same rule as `uncategorizedCentavos` in §9.1: **when a breakdown has a hole in it, name the hole.**
 
+**The disclosure needed a guard of its own, also caught on review.** With no envelopes yet, `splitAdherence` returns `[]`, the panel body rendered nothing — and the new footnote then read *"…the mix above is of the rest"* over no mix at all. That state is reachable, not theoretical: sync pulls entries before it pulls envelopes, so a fresh device genuinely holds spending whose envelopes the mirror has not seen. The panel now has an explicit empty state and the footnote lives inside the non-empty branch. **§3.5 learned this once already** — `[]` is truthy, so `{list && …}` is not a loading guard — and it cost an evening then too.
+
 ### 13.6 Everything the trend chart knew was locked in a `title` attribute
 
 Six months × five rows of per-month figures, every one of them reachable only by **hovering** — which never happens on a phone. On the device this app exists for, five of the six columns in every row were unreadable, and the panel's own `aria-label` summary was doing more for a screen-reader user than the visual chart did for a sighted one.
