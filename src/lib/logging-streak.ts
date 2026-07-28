@@ -135,6 +135,19 @@ export interface RepairCandidate {
   dayKey: string
   /** what `current` becomes if this day is saved — never guessed, always computed */
   streakIfRepaired: number
+  /**
+   * Saves still available in the REPAIRED DAY'S month, before this one is spent.
+   *
+   * Carried on the candidate rather than left to the caller, because the caller
+   * cannot derive it. The budget is charged per the gap day's own month, so on
+   * the 1st and 2nd — when the only repairable gap is in the month just ended —
+   * `savesRemainingThisMonth` describes a fresh, untouched budget that is not
+   * the one being spent. The prompt read "Use a save · 3 left" while drawing on
+   * a month that had one, and its footnote explained the wrong budget's reset.
+   */
+  savesRemaining: number
+  /** True when the gap falls in the month it is being repaired from. */
+  inCurrentMonth: boolean
 }
 
 export interface StreakState {
@@ -315,10 +328,10 @@ function findRepair(
     // Budget is per the repaired day's own month, so a save for the 31st can
     // still be spent on the 1st if that month had room.
     const month = dayKey.slice(0, 7)
-    const remaining =
-      month === todayKey.slice(0, 7)
-        ? savesRemainingThisMonth
-        : SAVES_PER_MONTH - saves.filter((k) => k.slice(0, 7) === month).length
+    const inCurrentMonth = month === todayKey.slice(0, 7)
+    const remaining = inCurrentMonth
+      ? savesRemainingThisMonth
+      : Math.max(0, SAVES_PER_MONTH - saves.filter((k) => k.slice(0, 7) === month).length)
     if (remaining <= 0) return null
 
     const repaired = new Set(counted)
@@ -328,7 +341,7 @@ function findRepair(
     const streakIfRepaired = repaired.has(todayKey)
       ? runEndingAt(repaired, todayKey)
       : runEndingAt(repaired, shiftDayKey(todayKey, -1))
-    return { dayKey, streakIfRepaired }
+    return { dayKey, streakIfRepaired, savesRemaining: remaining, inCurrentMonth }
   }
   return null
 }

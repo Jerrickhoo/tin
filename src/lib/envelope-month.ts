@@ -34,8 +34,27 @@
 //
 // Pure — no React, no IO, no clock of its own.
 
-import { daysBetweenKeys, daysRemainingInMonth, manilaDayKey } from './dates'
+import { daysBetweenKeys, daysRemainingInMonth, manilaDayKey, shiftDayKey } from './dates'
 import type { EntryRow } from './groups'
+
+/**
+ * How far back `hasSpending` looks for evidence that an envelope gets spent
+ * from. Deliberately NOT the caller's read window and NOT the run.
+ *
+ * The read window is ~13 months, sized for the streak, and scanning all of it
+ * made this flag nearly always true: one ₱200 withdrawal from Savings eleven
+ * months ago switched on a daily rate that then never went away — the exact
+ * invitation the flag exists to withhold.
+ *
+ * Scoping it to the run instead would fail the other way. An envelope reads as
+ * un-spent-from for the first days after every top-up, so Needs would hide its
+ * daily rate on payday, which is when that number is most worth having.
+ *
+ * Sixty days is about two income cycles: long enough that a frugal month cannot
+ * make a spending envelope look like a savings one, short enough that a single
+ * old raid stops speaking for the envelope forever.
+ */
+export const SPENDING_LOOKBACK_DAYS = 60
 
 export interface EnvelopePace {
   /** what the envelope has had to work with since its last top-up */
@@ -51,7 +70,7 @@ export interface EnvelopePace {
   /** Manila day the run started — the last top-up, or the 1st as a fallback */
   anchorDayKey: string
   /**
-   * Whether money has EVER left this envelope in the window the caller read.
+   * Whether money has left this envelope in the last `SPENDING_LOOKBACK_DAYS`.
    *
    * The one honest way to tell a spending envelope from a savings one without
    * asking. Home uses it to suppress the daily-allowance line, because
@@ -117,6 +136,15 @@ export function lastInflowDayKey(rows: readonly EntryRow[], envelopeId: string):
  * An overdrawn envelope returns zeroes: it has nothing left and no run to be
  * ahead or behind on. The card's red state and its cover button carry that
  * instead, and a meter drawn backwards would say it twice and less clearly.
+ *
+ * A balance of exactly ZERO does NOT take that path, and the distinction is the
+ * point. Drawn to nothing is a real, finished run — `setAside` is still the
+ * money the envelope was given, the meter reads a truthful empty, and the tick
+ * still says how far into the month you emptied it. Lumping it in with the
+ * overdrawn case made Home print "₱0.00 set aside" beside an envelope that had
+ * been given ₱5,000 and spent it, which is the exact lie the card's own comment
+ * swears off. Only a run with nothing in it — never funded, never spent — falls
+ * back to zeroes, because a meter with no track has no story to tell.
  */
 export function envelopePace(
   rows: readonly EntryRow[],
@@ -125,6 +153,7 @@ export function envelopePace(
   todayKey: string,
 ): EnvelopePace {
   const anchorDayKey = lastInflowDayKey(rows, envelopeId) ?? `${todayKey.slice(0, 7)}-01`
+  const spendingSince = shiftDayKey(todayKey, -SPENDING_LOOKBACK_DAYS)
 
   let usedCentavos = 0
   let hasSpending = false
@@ -134,12 +163,18 @@ export function envelopePace(
     if (row.kind !== 'expense') continue
     const at = new Date(row.occurred_at)
     if (Number.isNaN(at.getTime())) continue
-    hasSpending = true
-    if (manilaDayKey(at) < anchorDayKey) continue
+    const dayKey = manilaDayKey(at)
+    // Two different windows on the same row, deliberately. `used` is the run,
+    // measured from the top-up so it agrees with the tick. `hasSpending` is a
+    // question about the envelope's character rather than its current run, so
+    // it reaches back past the anchor — see SPENDING_LOOKBACK_DAYS.
+    if (dayKey >= spendingSince) hasSpending = true
+    if (dayKey < anchorDayKey) continue
     usedCentavos += Math.abs(row.amount_centavos)
   }
 
-  if (balanceCentavos <= 0) {
+  const setAsideCentavos = balanceCentavos + usedCentavos
+  if (balanceCentavos < 0 || setAsideCentavos <= 0) {
     return {
       setAsideCentavos: 0,
       leftCentavos: balanceCentavos,
@@ -151,7 +186,6 @@ export function envelopePace(
     }
   }
 
-  const setAsideCentavos = balanceCentavos + usedCentavos
   const daysLeft = daysRemainingInMonth(todayKey)
   // Days the run covers: anchor → month end, inclusive of both. An anchor in a
   // previous month (no income yet this one) correctly stretches the line back

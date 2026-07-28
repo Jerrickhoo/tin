@@ -182,6 +182,30 @@ describe('envelopePace', () => {
     expect(pace.leftCentavos).toBe(-10_000)
   })
 
+  it('still reports the run for an envelope drawn to exactly zero', () => {
+    // Zero is a finished run, not an overdraft: the envelope really was given
+    // ₱700 and really did spend it. Lumping it in with the overdrawn case made
+    // Home print "₱0.00 set aside" on a card that had spent ₱700 that month.
+    const rows = [
+      row({ kind: 'income', amount_centavos: 70_000, occurred_at: at('2026-07-01') }),
+      row({ amount_centavos: -70_000, occurred_at: at('2026-07-10') }),
+    ]
+    const pace = envelopePace(rows, 'needs', 0, '2026-07-16')
+    expect(pace.setAsideCentavos).toBe(70_000)
+    expect(pace.usedCentavos).toBe(70_000)
+    expect(pace.leftPct).toBe(0)
+    expect(pace.pacePct).toBeGreaterThan(0)
+  })
+
+  it('returns zeroes for an envelope that was never funded, never spent', () => {
+    // setAside of 0 is a meter with no track — and, left unguarded, 0/0 = NaN
+    // straight into a width.
+    const pace = envelopePace([], 'needs', 0, '2026-07-16')
+    expect(pace.setAsideCentavos).toBe(0)
+    expect(pace.leftPct).toBe(0)
+    expect(pace.pacePct).toBe(0)
+  })
+
   it('never draws past its own track, whatever the rows say', () => {
     const rows = [
       row({ kind: 'income', amount_centavos: 70_000, occurred_at: at('2026-07-01') }),
@@ -194,12 +218,35 @@ describe('envelopePace', () => {
 
   it('flags spending from history even when the current run has none', () => {
     // Drives the daily-rate line: this envelope IS spent from, it just has not
-    // been touched since payday, so the rate should still show.
+    // been touched since payday, so the rate should still show. This is why the
+    // flag cannot be scoped to the run — Needs would hide its rate on payday,
+    // which is when the rate is most worth having.
     const rows = [
       row({ amount_centavos: -5_000, occurred_at: at('2026-07-05') }),
       row({ kind: 'income', amount_centavos: 70_000, occurred_at: at('2026-07-20') }),
     ]
     const pace = envelopePace(rows, 'needs', 70_000, '2026-07-20')
+    expect(pace.hasSpending).toBe(true)
+    expect(pace.usedCentavos).toBe(0)
+  })
+
+  it('forgets spending older than the lookback, so one old raid stops speaking', () => {
+    // The other half of the same rule. The caller reads ~13 months for the
+    // streak, and scanning all of it meant a single withdrawal from Savings last
+    // November switched on a daily rate that never went away again.
+    const rows = [
+      row({ envelope_id: 'savings', amount_centavos: -20_000, occurred_at: at('2026-04-02') }),
+    ]
+    const pace = envelopePace(rows, 'savings', 50_000, '2026-07-16')
+    expect(pace.hasSpending).toBe(false)
+  })
+
+  it('keeps the flag for spending inside the lookback but before the run', () => {
+    const rows = [
+      row({ amount_centavos: -5_000, occurred_at: at('2026-06-20') }),
+      row({ kind: 'income', amount_centavos: 70_000, occurred_at: at('2026-07-15') }),
+    ]
+    const pace = envelopePace(rows, 'needs', 70_000, '2026-07-16')
     expect(pace.hasSpending).toBe(true)
     expect(pace.usedCentavos).toBe(0)
   })

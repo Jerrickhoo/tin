@@ -13,6 +13,16 @@ import type { EntryRow } from '../lib/groups'
 import { applyLocalInsert, applyLocalVoidGroup, localDb } from './dexie'
 import type { NewEntryRow } from './outbox'
 
+/**
+ * The note that marks an opening-balance adjustment.
+ *
+ * Shared rather than spelled out at each site: `addOpeningBalances` writes it,
+ * `hasOpeningBalances` gates Home's onboarding card on it, and History titles
+ * the group with it. Three string literals that must agree is one typo away
+ * from a card that never closes.
+ */
+export const OPENING_BALANCE_NOTE = 'Opening balance'
+
 export interface Envelope {
   id: string
   name: string
@@ -207,6 +217,30 @@ export async function hasAnyEntries(): Promise<boolean> {
 }
 
 /**
+ * Whether the ledger already carries a live opening-balance group.
+ *
+ * Home's onboarding card used to be gated on `hasAnyEntries` instead, and that
+ * was a one-shot door: the realistic first session is install → log a coffee →
+ * *then* think "I should tell it what's in my GCash", and by then the only
+ * entry point to OpeningBalancesSheet was gone for good. There is no path to it
+ * from Settings or History, so the number the whole app is built around became
+ * unreachable after a single tap.
+ *
+ * Gated on the opening balances themselves, the card closes when it has been
+ * used rather than when anything at all has been logged — and voiding the group
+ * in History brings it back, which is exactly what the sheet's own copy
+ * promises ("you can void and redo this later").
+ *
+ * Voided rows do not count, and the note is the marker because it is what
+ * `addOpeningBalances` writes and what History already keys its label off.
+ */
+export async function hasOpeningBalances(): Promise<boolean> {
+  const db = await localDb()
+  const rows = await db.entries.filter((r) => r.note === OPENING_BALANCE_NOTE).toArray()
+  return rows.some((r) => r.kind === 'adjustment' && r.voided_at === null)
+}
+
+/**
  * `occurred_at` of the oldest entry, or null on an empty ledger.
  *
  * One indexed row, not a scan: Insights uses it to stop the month-back arrow
@@ -347,7 +381,7 @@ export async function addOpeningBalances(
       envelope_id: a.envelopeId,
       category_id: null,
       amount_centavos: a.amountCentavos,
-      note: 'Opening balance',
+      note: OPENING_BALANCE_NOTE,
       occurred_at: occurredAt,
     }))
   if (rows.length === 0) return null

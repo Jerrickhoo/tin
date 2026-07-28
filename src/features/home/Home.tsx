@@ -1,17 +1,18 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { useAddSheet, useLedger, useToast } from '../../app-context'
 import {
   fetchBalances,
   fetchEntriesBetween,
   fetchEnvelopes,
   hasAnyEntries,
+  hasOpeningBalances,
   type Envelope,
 } from '../../db/entries'
 import { readCheckIns } from '../../db/dexie'
 import { readStreakSaves, repairDay, undoRepair } from '../../db/streak'
 import { allowancePerDay, spentTodayByEnvelope } from '../../lib/allowance'
 import { envelopePace, type EnvelopePace } from '../../lib/envelope-month'
-import { daysRemainingInMonth, manilaDayKey, manilaHour } from '../../lib/dates'
+import { daysRemainingInMonth, manilaDayKey, manilaHour, monthLabel } from '../../lib/dates'
 import {
   computeStreak,
   loggingStrip,
@@ -40,6 +41,37 @@ const gapDay = new Intl.DateTimeFormat('en-PH', {
   weekday: 'long',
 })
 
+/**
+ * The gap the user has already said "let it go" about.
+ *
+ * Device-local and deliberately a SINGLE key rather than a set: only one gap is
+ * ever offered at a time, and a newer one is a new decision that should be
+ * asked about. That also means it needs no pruning — the next dismissal
+ * overwrites the last, and a stale key simply never matches again.
+ *
+ * localStorage rather than the ledger, because this is a UI choice about a
+ * prompt, not a fact about the money. Storage failures are swallowed the same
+ * way lib/texture.ts swallows them: the dismissal then holds for the session
+ * only, which is exactly the old behaviour.
+ */
+const DISMISSED_GAP_KEY = 'tin.repair-dismissed'
+
+function readDismissedGap(): string | null {
+  try {
+    return localStorage.getItem(DISMISSED_GAP_KEY)
+  } catch {
+    return null
+  }
+}
+
+function writeDismissedGap(dayKey: string): void {
+  try {
+    localStorage.setItem(DISMISSED_GAP_KEY, dayKey)
+  } catch {
+    /* private mode — the dismissal holds for this session and is forgotten */
+  }
+}
+
 function greeting(hour: number): string {
   if (hour < 5) return 'Still up'
   if (hour < 12) return 'Good morning'
@@ -52,7 +84,13 @@ export function Home() {
   const toast = useToast()
   const addSheet = useAddSheet()
   const [cards, setCards] = useState<Card[] | null>(null)
+  // Two different emptinesses, and they gate different things. `empty` is a
+  // ledger with nothing on it at all, which is the only state where the evening
+  // nudge is noise. `needsOpening` is a ledger that has never been told what was
+  // already in the tin, which can stay true forever — so gating the nudge on it
+  // too would silently retire the nudge for anyone who skips onboarding.
   const [empty, setEmpty] = useState(false)
+  const [needsOpening, setNeedsOpening] = useState(false)
   const [openingOpen, setOpeningOpen] = useState(false)
   // Balances cover every envelope; cards cover only the un-archived ones. The
   // difference is real money on the real ledger, so it belongs in the total
@@ -65,6 +103,15 @@ export function Home() {
   const [paces, setPaces] = useState<Map<string, EnvelopePace>>(new Map())
   const [streak, setStreak] = useState<StreakState | null>(null)
   const [repairing, setRepairing] = useState(false)
+  // A failed read used to leave `cards` at null forever, which renders as the
+  // loading state: a blinking cursor under "opening the tin…" on a screen that
+  // had in fact given up. The toast that carried the error was gone in four
+  // seconds and there was no way to try again short of reloading the app. This
+  // holds the failure so the hero can say so, and `reload` is what the retry
+  // button turns — separate from `version` so retrying costs no other screen a
+  // refetch.
+  const [error, setError] = useState<string | null>(null)
+  const [reload, setReload] = useState(0)
 
   useEffect(() => {
     let active = true
@@ -78,21 +125,25 @@ export function Home() {
         // result rather than issuing a second query.
         const since = new Date(Date.now() - STREAK_WINDOW_DAYS * 86_400_000).toISOString()
         const until = new Date(Date.now() + 86_400_000).toISOString()
-        const [envs, balances, anyEntries, recent, saves, checkIns] = await Promise.all([
-          fetchEnvelopes(),
-          fetchBalances(),
-          hasAnyEntries(),
-          fetchEntriesBetween(since, until),
-          readStreakSaves(),
-          readCheckIns(),
-        ])
+        const [envs, balances, anyEntries, openingDone, recent, saves, checkIns] =
+          await Promise.all([
+            fetchEnvelopes(),
+            fetchBalances(),
+            hasAnyEntries(),
+            hasOpeningBalances(),
+            fetchEntriesBetween(since, until),
+            readStreakSaves(),
+            readCheckIns(),
+          ])
         if (!active) return
+        setError(null)
         setCards(envs.map((env) => ({ ...env, balanceCentavos: balances.get(env.id) ?? 0 })))
         const onCard = new Set(envs.map((e) => e.id))
         let off = 0
         for (const [id, balance] of balances) if (!onCard.has(id)) off += balance
         setOffCardCentavos(off)
         setEmpty(!anyEntries)
+        setNeedsOpening(!openingDone)
         const todayKey = manilaDayKey(new Date())
         setStrip(loggingStrip(recent, checkIns))
         setTodayCentavos(spentOnDay(recent, todayKey))
@@ -111,14 +162,19 @@ export function Home() {
         )
         setStreak(computeStreak(recent, saves, checkIns))
       } catch (err) {
-        if (active) toast.show(err instanceof Error ? err.message : String(err), 'error')
+        // No toast: the hero carries this now, and a four-second toast beside a
+        // permanent error card would say the same thing twice and then take
+        // half of it away.
+        if (active) setError(err instanceof Error ? err.message : String(err))
       }
     })()
     return () => {
       active = false
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version])
+    // The exhaustive-deps suppression that used to live here is gone: the only
+    // thing it was covering for was `toast` in the catch, and the failure now
+    // goes to state instead. Everything else the effect touches is a setter.
+  }, [version, reload])
 
   // NOT named `useSave`: the hooks lint rule keys on the `use` prefix, and a
   // "hook" called from an onClick is exactly what it exists to reject.
@@ -194,22 +250,32 @@ export function Home() {
             }`}
           >
             {cards ? formatPHP(total) : '—'}
-            {!cards && <span className="blink text-accent">_</span>}
+            {/* The cursor blinks only while something is actually still coming.
+                Left running on a failed read it was the screen's one moving
+                part insisting on progress that had already stopped. */}
+            {!cards && !error && <span className="blink text-accent">_</span>}
           </p>
           <p className="mt-2 text-xs text-ink-mute">
             {cards ? (
               <>
-                across {cards.length} envelopes
+                across {cards.length} envelope{cards.length === 1 ? '' : 's'}
                 <span className="mx-1.5 opacity-50">·</span>
                 {daysLeftLabel}
               </>
+            ) : error ? (
+              <span className="text-neg">couldn't open the tin</span>
             ) : (
               'opening the tin…'
             )}
           </p>
+          {/* NOT "in archived envelopes". Nothing in the app can archive an
+              envelope, so the only way this line ships today is the other one:
+              sync pulls entries before it pulls envelopes, so a fresh device can
+              briefly hold money whose envelope the mirror has not seen yet.
+              Calling that "archived" is a confident wrong answer. */}
           {cards && offCardCentavos !== 0 && (
             <p className="mt-1 text-xs text-ink-mute">
-              includes {formatPHP(offCardCentavos)} in archived envelopes
+              includes {formatPHP(offCardCentavos)} in envelopes not listed here
             </p>
           )}
           {/* Today's spend, under the balance rather than on its own card: the
@@ -227,6 +293,27 @@ export function Home() {
         </div>
       </section>
 
+      {error && (
+        <section className="card border-neg/40 px-4 py-3.5">
+          <h2 className="font-display text-[0.625rem] leading-relaxed text-neg">
+            COULDN'T READ THE LEDGER
+          </h2>
+          <p className="mt-1.5 text-sm text-ink-soft">
+            Your entries are safe on this device — this screen just failed to open them.
+          </p>
+          <pre className="mt-2 overflow-x-auto border border-line bg-base p-2 text-xs text-ink-mute">
+            {error}
+          </pre>
+          <button
+            type="button"
+            onClick={() => setReload((n) => n + 1)}
+            className="press mt-3 bg-accent px-3.5 py-2.5 font-semibold text-on-accent"
+          >
+            Try again
+          </button>
+        </section>
+      )}
+
       {/* The two habit prompts, outside the hero so neither ever pushes the
           balance off the first screen. At most one is shown: a repairable gap
           is a decision with a deadline, so it outranks the evening reminder,
@@ -239,15 +326,24 @@ export function Home() {
           key={streak.repair.dayKey}
           dayKey={streak.repair.dayKey}
           streakIfRepaired={streak.repair.streakIfRepaired}
-          savesLeft={streak.savesRemainingThisMonth}
+          // The candidate's own month's budget, not this month's — see
+          // RepairCandidate.savesRemaining.
+          savesLeft={streak.repair.savesRemaining}
+          inCurrentMonth={streak.repair.inCurrentMonth}
           busy={repairing}
           onRepair={() => spendSave(streak.repair!.dayKey)}
         />
       ) : (
-        streak && !streak.todayHasEntry && <NoEntryYetBanner onAdd={() => addSheet.open()} />
+        // Suppressed on a ledger with nothing on it: "spent anything you haven't
+        // put in yet?" is a nudge about a habit that has not started, and it
+        // stacked directly on the setup card below, giving a first-run evening
+        // two competing calls to action.
+        streak &&
+        !streak.todayHasEntry &&
+        !empty && <NoEntryYetBanner onAdd={() => addSheet.open()} />
       )}
 
-      {empty && cards && (
+      {needsOpening && cards && (
         <button
           type="button"
           onClick={() => setOpeningOpen(true)}
@@ -380,27 +476,40 @@ function LoggingStrip({ days, streak }: { days: LoggedDay[]; streak: StreakState
  *
  * "Let it go" is a real, equally-weighted option rather than a dismissal X.
  * The whole design rests on a broken streak being survivable; hiding the exit
- * would say the opposite.
+ * would say the opposite — and the dismissal is persisted for the same reason.
+ * A gap stays repairable for two days, so a choice held only in component state
+ * meant letting it go in the morning and being asked again after lunch, which
+ * makes the exit decorative.
  */
 function RepairPrompt({
   dayKey,
   streakIfRepaired,
   savesLeft,
+  inCurrentMonth,
   busy,
   onRepair,
 }: {
   dayKey: string
   streakIfRepaired: number
   savesLeft: number
+  inCurrentMonth: boolean
   busy: boolean
   onRepair: () => void
 }) {
-  const [dismissed, setDismissed] = useState(false)
+  const [dismissed, setDismissed] = useState(() => readDismissedGap() === dayKey)
   if (dismissed) return null
+
+  function letItGo() {
+    writeDismissedGap(dayKey)
+    setDismissed(true)
+  }
 
   // Noon UTC parse: the key is a calendar day, and midday cannot be tipped
   // into a neighbouring one by the +08:00 shift.
   const weekday = gapDay.format(new Date(`${dayKey}T12:00:00.000Z`))
+  // Only ever the month just ended, and only on the 1st or 2nd — but on those
+  // days "this month" would name the wrong budget entirely.
+  const budgetMonth = monthLabel(dayKey.slice(0, 7))
 
   return (
     <section className="card border-accent/50 px-4 py-3.5">
@@ -423,15 +532,26 @@ function RepairPrompt({
         <button
           type="button"
           disabled={busy}
-          onClick={() => setDismissed(true)}
+          onClick={letItGo}
           className="press border-2 border-line px-3 py-2.5 text-sm text-ink-soft disabled:opacity-50"
         >
           Let it go
         </button>
       </div>
       <p className="mt-2 text-xs text-ink-mute">
-        {savesLeft === 1 ? 'Last save this month.' : `${savesLeft} saves left this month.`} They
-        reset on the 1st.
+        {inCurrentMonth ? (
+          <>
+            {savesLeft === 1 ? 'Last save this month.' : `${savesLeft} saves left this month.`} They
+            reset on the 1st.
+          </>
+        ) : (
+          <>
+            {savesLeft === 1
+              ? `Last save left for ${budgetMonth}.`
+              : `${savesLeft} saves left for ${budgetMonth}.`}{' '}
+            A repair spends the budget of the day it mends, not today's.
+          </>
+        )}
       </p>
     </section>
   )
@@ -549,19 +669,58 @@ function EnvelopeCard({
   const color = card.color ?? '#AFA7C2'
   const red = card.balanceCentavos < 0
   const perDay = allowancePerDay(card.balanceCentavos, daysLeft)
-  // Hidden on an envelope nothing has ever been spent from — the honest way to
-  // recognise savings without a flag the app cannot have. "₱82.66/day" on the
+  // Hidden on an envelope nothing has recently been spent from — the honest way
+  // to recognise savings without a flag the app cannot have. "₱82.66/day" on the
   // savings card is an invitation to start, which is the one thing a 70/20/10
   // tracker must not print.
   const showRate = perDay > 0 && (pace?.hasSpending ?? false)
   const ahead = pace !== null && pace.leftPct >= pace.pacePct
+  const hasRun = pace !== null && pace.setAsideCentavos > 0
 
-  const meterLabel =
-    pace === null || pace.setAsideCentavos === 0
-      ? `${card.name}: ${formatPHP(card.balanceCentavos)}`
-      : `${card.name}: ${formatPHP(pace.leftCentavos)} left of ${formatPHP(
-          pace.setAsideCentavos,
-        )} set aside — ${ahead ? 'ahead of' : 'behind'} an even pace for the rest of the month`
+  const meterLabel = !hasRun
+    ? `${card.name}: ${formatPHP(card.balanceCentavos)}`
+    : `${card.name}: ${formatPHP(pace.leftCentavos)} left of ${formatPHP(
+        pace.setAsideCentavos,
+      )} set aside — ${ahead ? 'ahead of' : 'behind'} an even pace for the rest of the month`
+
+  // Built as a list so the separators sit BETWEEN segments rather than being
+  // glued to the front of each one. With "set aside" now conditional on a real
+  // run, a card could otherwise open its line with a dangling "·".
+  const facts: ReactNode[] = []
+  if (red) {
+    facts.push(
+      <span key="over" className="text-neg">
+        overdrawn
+      </span>,
+    )
+  } else if (hasRun) {
+    // Never `?? 0`: a card whose pace has not arrived — or whose envelope was
+    // never funded — would state "₱0.00 set aside" beside a real balance, which
+    // is a lie rather than a placeholder. It says nothing until it can say
+    // something true. An envelope drawn to exactly zero DOES have a run and a
+    // true figure to report, which is why `hasRun` tests setAside and not the
+    // balance.
+    facts.push(
+      <span key="aside" className="whitespace-nowrap text-ink-mute">
+        {formatPHP(pace.setAsideCentavos)} set aside
+      </span>,
+    )
+  }
+  if (showRate) {
+    facts.push(
+      <span key="rate" className="whitespace-nowrap">
+        <span className="font-semibold text-ink">{formatPHP(perDay)}</span>
+        <span className="text-ink-mute">/day</span>
+      </span>,
+    )
+  }
+  if (spentTodayCentavos > 0) {
+    facts.push(
+      <span key="today" className="whitespace-nowrap text-ink-soft">
+        {formatPHP(spentTodayCentavos)} today
+      </span>,
+    )
+  }
 
   return (
     <article className="card px-4 pt-3.5 pb-4">
@@ -592,8 +751,11 @@ function EnvelopeCard({
         {/* Only drawn once the envelope has a run to be ahead or behind on. A
             tick floating over an empty track would be a target with nothing
             measured against it. */}
-        {pace !== null && pace.setAsideCentavos > 0 && (
-          <span className="meter-pace" style={{ left: `${pace.pacePct}%` }} />
+        {hasRun && (
+          // --tick, not left: theme.css clamps it, because the track clips and
+          // a tick at 100% — the day income lands — would otherwise sit just
+          // outside it and vanish.
+          <span className="meter-pace" style={{ '--tick': `${pace.pacePct}%` } as CSSProperties} />
         )}
       </div>
 
@@ -603,38 +765,19 @@ function EnvelopeCard({
           and the rate it supports — the rate being the only forward-looking
           number on Home, and the one that answers "can I buy this?".
           Each segment is nowrap, so a four-figure ledger wraps the line at a
-          separator rather than splitting "₱1,234.56/day" across two rows. */}
-      <p className="mt-2 text-xs tabular-nums">
-        {red ? (
-          <span className="text-neg">overdrawn</span>
-        ) : (
-          // Never `?? 0`: a card whose pace has not arrived would state "₱0.00
-          // set aside" beside a real balance, which is a lie rather than a
-          // placeholder. It says nothing until it can say something true.
-          pace !== null && (
-            <span className="whitespace-nowrap text-ink-mute">
-              {formatPHP(pace.setAsideCentavos)} set aside
+          separator rather than splitting "₱1,234.56/day" across two rows.
+          Dropped entirely when there is nothing true to put in it, rather than
+          left as an empty paragraph holding its own margin open. */}
+      {facts.length > 0 && (
+        <p className="mt-2 text-xs tabular-nums">
+          {facts.map((fact, i) => (
+            <span key={i}>
+              {i > 0 && <span className="mx-1.5 text-ink-mute opacity-50">·</span>}
+              {fact}
             </span>
-          )
-        )}
-        {showRate && (
-          <>
-            <span className="mx-1.5 text-ink-mute opacity-50">·</span>
-            <span className="whitespace-nowrap">
-              <span className="font-semibold text-ink">{formatPHP(perDay)}</span>
-              <span className="text-ink-mute">/day</span>
-            </span>
-          </>
-        )}
-        {spentTodayCentavos > 0 && (
-          <>
-            <span className="mx-1.5 text-ink-mute opacity-50">·</span>
-            <span className="whitespace-nowrap text-ink-soft">
-              {formatPHP(spentTodayCentavos)} today
-            </span>
-          </>
-        )}
-      </p>
+          ))}
+        </p>
+      )}
 
       {red && (
         <button

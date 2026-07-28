@@ -430,6 +430,13 @@ body::after {
   position: absolute;
   top: 0;
   bottom: 0;
+  /* Position comes in as --tick from the JSX rather than as `left`, so the
+     clamp can live here with the `overflow: hidden` that makes it necessary.
+     A tick at 100% starts at the track's right edge and is therefore entirely
+     outside it — invisible on exactly the day it reads best, the one income
+     lands and pace is 100%. Insights' plan tick has the same edge at a 100%
+     share. Held back by its own width so the mark itself stays on screen. */
+  left: min(var(--tick, 0%), 100% - var(--px-unit));
   width: var(--px-unit);
   background-color: var(--color-ink);
   box-shadow: 0 0 0 var(--px-unit) rgb(0 0 0 / 0.7);

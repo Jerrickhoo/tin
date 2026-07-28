@@ -221,7 +221,12 @@ describe('computeStreak', () => {
         [],
         NOW,
       )
-      expect(s.repair).toEqual({ dayKey: '2026-07-21', streakIfRepaired: 5 })
+      expect(s.repair).toEqual({
+        dayKey: '2026-07-21',
+        streakIfRepaired: 5,
+        savesRemaining: 3,
+        inCurrentMonth: true,
+      })
     })
 
     it('tells the truth about the resulting streak', () => {
@@ -238,7 +243,12 @@ describe('computeStreak', () => {
         [],
         NOW,
       )
-      expect(s.repair).toEqual({ dayKey: '2026-07-20', streakIfRepaired: 5 })
+      expect(s.repair).toEqual({
+        dayKey: '2026-07-20',
+        streakIfRepaired: 5,
+        savesRemaining: 3,
+        inCurrentMonth: true,
+      })
     })
 
     it('refuses two consecutive misses — one save would buy nothing', () => {
@@ -276,6 +286,23 @@ describe('computeStreak', () => {
       )
       expect(s.repair?.dayKey).toBe('2026-07-31')
       expect(s.savesUsedThisMonth).toBe(0) // August's own budget is untouched
+      // …and the candidate carries JULY's remaining count, not August's. The
+      // prompt used to render `savesRemainingThisMonth` here and so read "3
+      // left" while drawing on a month that had one.
+      expect(s.repair?.savesRemaining).toBe(1)
+      expect(s.repair?.inCurrentMonth).toBe(false)
+      expect(s.savesRemainingThisMonth).toBe(3)
+    })
+
+    it('carries this month’s remaining count when the gap is in this month', () => {
+      const s = computeStreak(
+        days('2026-07-19', '2026-07-20', '2026-07-22'),
+        ['2026-07-05'],
+        [],
+        NOW,
+      )
+      expect(s.repair?.savesRemaining).toBe(2)
+      expect(s.repair?.inCurrentMonth).toBe(true)
     })
 
     it('survives a malformed timestamp', () => {
