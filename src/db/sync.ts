@@ -179,6 +179,13 @@ export function syncNow(): Promise<void> {
     } while (dirty)
   })().finally(() => {
     inFlight = null
+    // A kick that landed in the teardown window — after `while (dirty)` read
+    // false, before this callback cleared `inFlight` — set the flag with no
+    // loop left to read it, and its write would then wait for an unrelated
+    // trigger. `dirty` is always false here otherwise (it is what ended the
+    // loop), so this can only fire for that case, and the pass it starts
+    // clears the flag on its first line.
+    if (dirty && !stopped) kickSync()
   })
   return inFlight
 }

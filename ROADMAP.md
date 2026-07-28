@@ -988,3 +988,47 @@ Router **state** rather than a query string: a category id is a UUID that means 
 - **`UNCATEGORIZED` and `OTHER` begin with a literal NUL byte**, not the space the neighbouring `' total'` and `' archived'` keys use. Harmless at runtime — the values are sentinels, never persisted — but it makes git treat `lib/analytics.ts` as **binary**, so `git diff` on the file that holds every number on this screen shows nothing at all. Left as a decision rather than folded into an unrelated commit.
 - **No render tests.** 436 unit tests cover the math; nothing covers the screen. Every finding above except 13.1 and 13.2 was invisible to the suite because it lived in the wiring, not in the functions.
 - **Not built, considered:** biggest single expense of the month, and a weekday spending pattern. Both computable from data already fetched. Both new scope rather than corrections, which is why they are here and not above.
+
+## 14. The conductors — testing the code that sequences the tested parts (2026-07-28)
+
+§12 asked "does this make sense?" of every module. §13 asked it of one screen. This pass asked a narrower question with a sharper edge: **which code decides that money moves, and has no test at all?**
+
+Three answers, all of them coordination code — the layer §13.9 had already named as the blind spot. The pieces underneath them were well covered (`drainOutbox` FIFO, cursor advancement, the mirror merges, the scheduling maths in `lib/recurring`); the code that *sequences* those pieces was not covered anywhere.
+
+### 14.1 A `.test.tsx` file would not have run
+
+`vite.config.ts` included `src/**/*.test.ts`. A render test — the thing §13.9 asks for by name — is a `.tsx` file, so it would have been **silently not collected**: never executed, never reported, suite still green. Anyone acting on §13.9 would have written passing-looking tests that never ran once.
+
+The glob now takes `{ts,tsx}`. The default environment stays `node` so the 439 existing tests keep their ~6 s; a render test opts into jsdom per file with `// @vitest-environment jsdom`.
+
+### 14.2 Recurring catch-up could invent money when an envelope was added
+
+The module header states the invariant outright: *"Random IDs here would double-post rent; determinism IS the correctness."* The posting ids are UUIDv5 of `(template, due date, leg index)`, and the mirror insert ignores duplicate ids — so re-running a due date was documented as harmless, and the failed-cursor-write path leans on that: *"the next open re-posts into a no-op."*
+
+**It is a no-op only while the envelope set is frozen.** The leg index runs over the *current* envelopes. Add a fourth envelope and the next catch-up mints `:3` — an id that has never existed — and it lands **alongside** the three original legs, which the dedupe correctly leaves alone. A ₱1,000 allowance became ₱1,100. The group's legs no longer sum to the template amount, and nothing anywhere reported an error.
+
+Reachable two ways, neither exotic: the cursor write is *allowed* to fail (the code says so, and treats it as safe), and a second device catches up the same date against whatever envelope set its mirror happens to hold.
+
+The same defect wearing a different hat: a posting the user **voided** was dedupable row by row, so an added envelope minted a leg index that had never been voided — and part of a deleted month came back alive.
+
+The fix is to stop identifying a posting by its rows. `group_id` is already UUIDv5 of `(template, due)` alone — the stable identity of "this month's posting", independent of how many legs it happened to have. `postedGroupExists` checks it before posting, and the cursor still advances past an already-posted date so it is not retried forever. **Voided rows count**: a group the user voided is still a group that happened, and skipping it is what stops the resurrection.
+
+`supabase/tests/recurring-integration.test.ts` claims to cover *"posts a due template once, idempotently"* — but it needs live credentials and self-skips, so it had never run in CI. A skipped test reads exactly like a covered path.
+
+### 14.3 A kick that arrived in the teardown window was dropped
+
+`syncNow` is single-flight with a dirty flag. `while (dirty)` reading false and the `.finally` clearing `inFlight` are two separate microtasks, and a `kickSync` landing between them set `dirty` with no loop left to read it. The write stayed local until an unrelated trigger — a tab focus, a connectivity change, another write — happened along.
+
+Narrow, and self-healing rather than lossy, because this app is local-first and the outbox row is already durable. Fixed anyway: `dirty` is false at that point in every other case, so re-checking it in the `.finally` can only fire for exactly that window.
+
+### 14.4 What the tests now hold
+
+`src/db/sync-loop.test.ts` (10) and `src/db/recurring-catchup.test.ts` (5), against a real Dexie on `fake-indexeddb` with only the network stubbed — 439 → 454.
+
+The sync loop came through **clean**: the offline short-circuit, cursor advancement on the server clock, single-flight coalescing, stuck-outbox reporting and recovery, and the §12.2 discipline of announcing a pass if and only if something genuinely changed. That is a result, not a blank — those were unverified assertions before and are now pinned.
+
+### 14.5 Still open
+
+- **Still no render tests.** 14.1 removed the trap in the way; it did not write them. Home, Insights and History remain the screens where a wrong number is worst.
+- **The `dirty` teardown window has no test.** The race is two adjacent microtasks deep inside `syncNow` and is not reachable deterministically without a hook in production code. The fix is defensive and provably inert otherwise, which is the trade taken.
+- **`AppShell.tsx` is still untested** — 7 effects, the boot sequence, and the check-in wake path that §12.1 already caught once.

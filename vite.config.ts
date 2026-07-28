@@ -75,8 +75,12 @@ export default defineConfig({
     }),
   ],
   test: {
+    // node by default — the math and db suites need no DOM and stay fast.
+    // A render test opts in per file with `// @vitest-environment jsdom`.
     environment: 'node',
-    include: ['src/**/*.test.ts', 'supabase/tests/**/*.test.ts'],
+    // `.tsx` matters: without it a render test is silently NOT COLLECTED, so
+    // the file never runs and the suite still reports green.
+    include: ['src/**/*.test.{ts,tsx}', 'supabase/tests/**/*.test.ts'],
     // the live integration tests share one probe account — never run them in parallel
     fileParallelism: false,
   },

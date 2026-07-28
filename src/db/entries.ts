@@ -267,6 +267,23 @@ export async function insertPostedRows(rows: NewEntryRow[]): Promise<void> {
   await insertRows(rows)
 }
 
+/**
+ * Has this due date already been posted? Row-level dedupe by deterministic id
+ * is NOT enough for income: the leg ids are `(template, due, index)` over the
+ * CURRENT envelopes, so adding an envelope makes the next catch-up mint a leg
+ * index that has never existed, which lands alongside the original legs and
+ * inflates the group past the template amount. The group id depends only on
+ * (template, due) — it is the stable identity of "this month's posting".
+ *
+ * Voided rows count. A group the user voided is still a group that happened,
+ * and skipping it is what stops a new envelope from resurrecting part of it.
+ */
+export async function postedGroupExists(groupId: string): Promise<boolean> {
+  const db = await localDb()
+  const hit = await db.entries.where('group_id').equals(groupId).first()
+  return hit !== undefined
+}
+
 export async function addExpense(params: {
   amountCentavos: number
   category: Category

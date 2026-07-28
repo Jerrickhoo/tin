@@ -4,7 +4,7 @@
 // here would double-post rent; determinism IS the correctness.
 
 import { supabase } from './supabase'
-import { fetchCategories, fetchEnvelopes, insertPostedRows } from './entries'
+import { fetchCategories, fetchEnvelopes, insertPostedRows, postedGroupExists } from './entries'
 import { isOffline } from './sync'
 import { manilaDayKey } from '../lib/dates'
 import { assertSplittable } from '../lib/shares'
@@ -184,6 +184,15 @@ export async function runCatchUp(): Promise<CatchUpResult> {
     for (const due of dueDates) {
       const groupId = await uuidv5(TIN_RECURRING_NAMESPACE, `${template.id}:${due}:group`)
       const occurredAt = dueDateOccurredAt(due)
+
+      // Already posted — advance the cursor past it, but do not count or
+      // announce it. Re-reaching a posted date is normal (the cursor write
+      // below is allowed to fail, and another device may have posted it and
+      // synced first); what must never follow is a second set of legs.
+      if (await postedGroupExists(groupId)) {
+        lastPosted = due
+        continue
+      }
 
       let rows: PostingRow[]
       if (template.kind === 'expense') {
