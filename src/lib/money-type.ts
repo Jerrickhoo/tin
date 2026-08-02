@@ -1,3 +1,4 @@
+import { MAX_CENTAVOS } from './money'
 import type { EntryRow } from './groups'
 
 export type MoneyType = 'online' | 'reallife'
@@ -29,21 +30,58 @@ export interface MoneyTypeSnapshot {
 const MONEY_TYPE_SNAPSHOT_KEY = 'tin.money-type-snapshot'
 
 export function sanitizeMoneyInput(value: string): string {
-  const normalized = value.replace(/,/g, '.')
-  const cleaned = normalized.replace(/[^\d.]/g, '')
-  if (!cleaned) return ''
-  const [whole, ...fractionParts] = cleaned.split('.')
+  const normalized = value.replace(/[^\d.,]/g, '')
+  if (!normalized) return ''
+
+  const hasDot = normalized.includes('.')
+  const hasComma = normalized.includes(',')
+  let cleaned = normalized
+
+  if (hasDot && hasComma) {
+    cleaned = normalized.replace(/,/g, '')
+  } else if (!hasDot && hasComma) {
+    const isGrouped = /^\d{1,3}(,\d{3})+$/.test(normalized)
+    cleaned = isGrouped ? normalized.replace(/,/g, '') : normalized.replace(/,/g, '.')
+  }
+
+  const parts = cleaned.split('.')
+  const whole = parts[0] ?? ''
+  const fractionParts = parts.slice(1)
   const fraction = fractionParts.join('').slice(0, 2)
-  if (!fraction) return whole ?? ''
-  return `${whole ?? ''}.${fraction}`
+  const endsWithDot = cleaned.endsWith('.') && fractionParts.length === 1 && fractionParts[0] === ''
+
+  if (endsWithDot) return `${whole}.`
+  if (!fraction) return whole
+  return `${whole}.${fraction}`
+}
+
+export function formatMoneyInput(value: string): string {
+  const cleaned = sanitizeMoneyInput(value)
+  if (!cleaned) return ''
+
+  const trailingDot = cleaned.endsWith('.')
+  const [whole, fraction = ''] = cleaned.split('.')
+  const formattedWhole = (whole || '0').replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+
+  if (trailingDot) return `${formattedWhole}.`
+  if (!fraction) return formattedWhole
+  return `${formattedWhole}.${fraction}`
 }
 
 export function parseMoneyInputToCentavos(value: string): number | null {
   const cleaned = sanitizeMoneyInput(value)
   if (!cleaned) return null
-  const parsed = Number(cleaned)
-  if (!Number.isFinite(parsed)) return null
-  return Math.round(parsed * 100)
+  if (cleaned === '.' || cleaned === ',') return null
+
+  const [whole, fraction = ''] = cleaned.split('.')
+  if (whole && !/^\d+$/.test(whole)) return null
+  if (fraction && !/^\d{1,2}$/.test(fraction)) return null
+
+  const wholeCentavos = BigInt(whole === '' ? '0' : whole) * 100n
+  const fractionCentavos = BigInt((fraction + '00').slice(0, 2))
+  const centavos = wholeCentavos + fractionCentavos
+  if (centavos > BigInt(MAX_CENTAVOS)) return null
+  return Number(centavos)
 }
 
 export function clampMoneyAmountToMax(amountCentavos: number, maxCentavos: number): number {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   clampMoneyAmountToMax,
+  formatMoneyInput,
   getMoneyTypeLabel,
   isRequiredMoneyTypeSelected,
   parseMoneyInputToCentavos,
@@ -65,6 +66,21 @@ describe('sanitizeMoneyInput', () => {
     expect(parseMoneyInputToCentavos('12.34')).toBe(1234)
     expect(parseMoneyInputToCentavos('abc')).toBeNull()
     expect(parseMoneyInputToCentavos('')).toBeNull()
+  })
+
+  it('accepts leading decimal entry and mobile comma separators', () => {
+    expect(sanitizeMoneyInput('.5')).toBe('.5')
+    expect(parseMoneyInputToCentavos('.5')).toBe(50)
+    expect(sanitizeMoneyInput(',5')).toBe('.5')
+    expect(parseMoneyInputToCentavos(',5')).toBe(50)
+    expect(sanitizeMoneyInput('1,234')).toBe('1234')
+    expect(parseMoneyInputToCentavos('1,234')).toBe(123400)
+  })
+
+  it('formats input with commas automatically for display', () => {
+    expect(formatMoneyInput('1234')).toBe('1,234')
+    expect(formatMoneyInput('1234567.8')).toBe('1,234,567.8')
+    expect(formatMoneyInput('1234567.89')).toBe('1,234,567.89')
   })
 
   it('caps values at the available balance', () => {

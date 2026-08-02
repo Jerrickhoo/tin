@@ -22,6 +22,7 @@ import { exportReminderStatus, getLastExport, recordExport } from '../../lib/exp
 import { getTexture, setTexture, type Texture } from '../../lib/texture'
 import {
   clampMoneyAmountToMax,
+  formatMoneyInput,
   getMoneyTypeLabel,
   parseMoneyInputToCentavos,
   readMoneyTypeSnapshot,
@@ -188,8 +189,14 @@ function MoneySummarySection() {
   const [liveBalances, setLiveBalances] = useState({ online: 0, reallife: 0 })
   const [liveTotal, setLiveTotal] = useState(0)
   const [inputValues, setInputValues] = useState<Record<'online' | 'reallife', string>>({
-    online: initialSnapshot.online === null ? '' : (initialSnapshot.online / 100).toFixed(2),
-    reallife: initialSnapshot.reallife === null ? '' : (initialSnapshot.reallife / 100).toFixed(2),
+    online:
+      initialSnapshot.online === null
+        ? ''
+        : formatMoneyInput((initialSnapshot.online / 100).toFixed(2)),
+    reallife:
+      initialSnapshot.reallife === null
+        ? ''
+        : formatMoneyInput((initialSnapshot.reallife / 100).toFixed(2)),
   })
 
   useEffect(() => {
@@ -221,7 +228,7 @@ function MoneySummarySection() {
     const otherKey = key === 'online' ? 'reallife' : 'online'
     const max = Math.max(0, liveTotal - (snapshot[otherKey] ?? 0))
     const nextValue = parsed === null ? null : clampMoneyAmountToMax(parsed, max)
-    setInputValues((current) => ({ ...current, [key]: cleaned }))
+    setInputValues((current) => ({ ...current, [key]: formatMoneyInput(cleaned) }))
     setSnapshot((current) => ({ ...current, [key]: nextValue }))
   }
 
