@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { useAddSheet, useLedger, useToast } from '../../app-context'
+import { buildEnvelopeCardFacts } from './envelope-card-facts'
 import {
   fetchBalances,
   fetchEntriesBetween,
@@ -653,57 +654,6 @@ function TinJar() {
  * exactly the kind of encoding the §6 colour-vision audit made this codebase
  * careful about leaving as the only channel.
  */
-export interface EnvelopeCardFact {
-  key: string
-  text: string
-  className: string
-}
-
-export function buildEnvelopeCardFacts(params: {
-  red: boolean
-  hasRun: boolean
-  pace: EnvelopePace | null
-  perDay: number
-  showRate: boolean
-  spentTodayCentavos: number
-}): EnvelopeCardFact[] {
-  const facts: EnvelopeCardFact[] = []
-
-  if (params.red) {
-    facts.push({ key: 'over', text: 'overdrawn', className: 'text-neg' })
-  } else if (params.hasRun && params.pace) {
-    // Never `?? 0`: a card whose pace has not arrived — or whose envelope was
-    // never funded — would state "₱0.00 set aside" beside a real balance, which
-    // is a lie rather than a placeholder. It says nothing until it can say
-    // something true. An envelope drawn to exactly zero DOES have a run and a
-    // true figure to report, which is why `hasRun` tests setAside and not the
-    // balance.
-    facts.push({
-      key: 'aside',
-      text: `${formatPHP(params.pace.setAsideCentavos)} set aside`,
-      className: 'whitespace-nowrap text-ink-mute',
-    })
-  }
-
-  if (params.showRate) {
-    facts.push({
-      key: 'rate',
-      text: `${formatPHP(params.perDay)}/day`,
-      className: 'whitespace-nowrap font-semibold text-ink',
-    })
-  }
-
-  if (params.spentTodayCentavos > 0) {
-    facts.push({
-      key: 'today',
-      text: `${formatPHP(params.spentTodayCentavos)} today`,
-      className: 'whitespace-nowrap text-ink-soft',
-    })
-  }
-
-  return facts
-}
-
 function EnvelopeCard({
   card,
   pace,

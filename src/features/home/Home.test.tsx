@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildEnvelopeCardFacts } from './Home'
+import { buildEnvelopeCardFacts } from './envelope-card-facts'
 
 describe('buildEnvelopeCardFacts', () => {
   it('keeps spent-today as a compact fact when present', () => {
