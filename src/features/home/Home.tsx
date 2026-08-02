@@ -740,11 +740,11 @@ function EnvelopeCard({
           Dropped entirely when there is nothing true to put in it, rather than
           left as an empty paragraph holding its own margin open. */}
       {facts.length > 0 && (
-        <div className="mt-2 flex flex-wrap items-center gap-1 text-[11px] leading-4 tabular-nums text-ink-soft">
+        <div className="mt-2 max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-[10px] leading-4 tabular-nums text-ink-soft sm:text-[11px]">
           {facts.map((fact, i) => (
-            <span key={fact.key} className="inline-flex min-w-0 items-center gap-1">
-              {i > 0 && <span className="shrink-0 text-ink-mute opacity-50">·</span>}
-              <span className={`min-w-0 truncate ${fact.className}`}>{fact.text}</span>
+            <span key={fact.key} className={`inline ${fact.className}`}>
+              {i > 0 && <span className="mx-1 text-ink-mute opacity-50">•</span>}
+              {fact.text}
             </span>
           ))}
         </div>

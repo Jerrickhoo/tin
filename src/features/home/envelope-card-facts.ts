@@ -22,7 +22,7 @@ export function buildEnvelopeCardFacts(params: {
   } else if (params.hasRun && params.pace) {
     facts.push({
       key: 'aside',
-      text: `${formatPHP(params.pace.setAsideCentavos)} set aside`,
+      text: `${formatPHP(params.pace.setAsideCentavos)} aside`,
       className: 'whitespace-nowrap text-ink-mute',
     })
   }
