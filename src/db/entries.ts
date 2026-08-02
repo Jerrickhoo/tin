@@ -318,18 +318,43 @@ export async function addIncome(params: {
   note?: string
   occurredAt?: string
   moneyType?: MoneyType | null
+  targetEnvelopeId?: string
 }): Promise<string> {
   if (!Number.isSafeInteger(params.totalCentavos) || params.totalCentavos <= 0) {
     throw new RangeError('income must be positive centavos')
   }
+
+  const groupId = crypto.randomUUID()
+  const occurredAt = params.occurredAt ?? nowIso()
+  const note = params.note?.trim() || null
+
+  if (params.targetEnvelopeId !== undefined) {
+    const targetEnvelope = params.envelopes.find((env) => env.id === params.targetEnvelopeId)
+    if (!targetEnvelope) {
+      throw new Error('income target envelope not found')
+    }
+
+    await insertRows([
+      {
+        id: crypto.randomUUID(),
+        group_id: groupId,
+        kind: 'income' as const,
+        envelope_id: targetEnvelope.id,
+        category_id: null,
+        amount_centavos: params.totalCentavos,
+        note,
+        occurred_at: occurredAt,
+        money_type: params.moneyType ?? null,
+      },
+    ])
+    return groupId
+  }
+
   assertSplittable(params.envelopes.map((e) => e.share_bp))
   const parts = splitByLargestRemainder(
     params.totalCentavos,
     params.envelopes.map((e) => e.share_bp),
   )
-  const groupId = crypto.randomUUID()
-  const occurredAt = params.occurredAt ?? nowIso()
-  const note = params.note?.trim() || null
   const rows = params.envelopes
     .map((env, i) => ({
       id: crypto.randomUUID(),

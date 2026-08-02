@@ -31,6 +31,9 @@ import {
   writeMoneyTypeSnapshot,
   type MoneyTypeSnapshot,
 } from '../../lib/money-type'
+import { applyKeypadKey, KEYPAD_PLACEHOLDER, type KeypadKey } from '../../lib/keypad'
+import { Keypad } from '../../components/Keypad'
+import { useCoarsePointer } from '../../components/useCoarsePointer'
 import { useSession } from '../auth/useSession'
 import { MfaSection } from './MfaSection'
 
@@ -188,6 +191,8 @@ function MoneySummarySection() {
   const [snapshot, setSnapshot] = useState<MoneyTypeSnapshot>(initialSnapshot)
   const [liveBalances, setLiveBalances] = useState({ online: 0, reallife: 0 })
   const [liveTotal, setLiveTotal] = useState(0)
+  const coarse = useCoarsePointer()
+  const [activeKeypad, setActiveKeypad] = useState<'online' | 'reallife'>('online')
   const [inputValues, setInputValues] = useState<Record<'online' | 'reallife', string>>({
     online:
       initialSnapshot.online === null
@@ -230,6 +235,13 @@ function MoneySummarySection() {
     const nextValue = parsed === null ? null : clampMoneyAmountToMax(parsed, max)
     setInputValues((current) => ({ ...current, [key]: formatMoneyInput(cleaned) }))
     setSnapshot((current) => ({ ...current, [key]: nextValue }))
+  }
+
+  function handleKeypadKey(key: KeypadKey) {
+    const keyName = activeKeypad
+    const raw = inputValues[keyName].replace(/,/g, '')
+    const next = applyKeypadKey(raw, key)
+    updateValue(keyName, next)
   }
 
   function clearValue(key: 'online' | 'reallife') {
@@ -293,11 +305,13 @@ function MoneySummarySection() {
                 <span className="text-[0.65rem] uppercase tracking-[0.24em] text-ink-soft">₱</span>
                 <input
                   type="text"
-                  inputMode="decimal"
+                  inputMode={coarse ? 'none' : 'decimal'}
+                  autoComplete="off"
                   value={inputValues[key]}
                   onChange={(e) => updateValue(key, e.target.value)}
+                  onFocus={() => setActiveKeypad(key)}
                   className="w-full border-0 bg-transparent p-0 text-lg font-semibold text-ink outline-none tabular-nums"
-                  placeholder="0.00"
+                  placeholder={KEYPAD_PLACEHOLDER}
                 />
                 <button
                   type="button"
@@ -320,6 +334,11 @@ function MoneySummarySection() {
           )
         })}
       </div>
+      {coarse && (
+        <div className="mt-4">
+          <Keypad onKey={handleKeypadKey} />
+        </div>
+      )}
       <button
         type="button"
         onClick={save}

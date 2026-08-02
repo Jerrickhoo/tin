@@ -132,6 +132,21 @@ describe('local-first mirror + outbox', () => {
     expect(balances.get('env-wants')).toBe(0)
   })
 
+  it('addIncome can put the full amount into one envelope', async () => {
+    const envelopes = await entriesDb.fetchEnvelopes()
+    const directIncomeGroup = await entriesDb.addIncome({
+      totalCentavos: 5000,
+      envelopes,
+      targetEnvelopeId: 'env-savings',
+      occurredAt: '2026-07-11T05:00:00.000Z',
+    })
+    const rows = await entriesDb.fetchEntries()
+    const legs = rows.filter((r) => r.group_id === directIncomeGroup)
+    expect(legs.map((l) => [l.envelope_id, l.amount_centavos])).toEqual([['env-savings', 5000]])
+    const balances = await entriesDb.fetchBalances()
+    expect(balances.get('env-savings')).toBe(1 + 5000)
+  })
+
   it('addTransfer writes two legs summing to zero', async () => {
     transferGroup = await entriesDb.addTransfer({
       amountCentavos: 5000,
@@ -142,7 +157,7 @@ describe('local-first mirror + outbox', () => {
     const rows = await entriesDb.fetchEntries()
     const legs = rows.filter((r) => r.group_id === transferGroup)
     expect(legs.reduce((s, l) => s + l.amount_centavos, 0)).toBe(0)
-    expect(await outboxCount()).toBe(3)
+    expect(await outboxCount()).toBe(4)
   })
 
   it('newest-first timeline order from the compound index', async () => {
@@ -245,16 +260,19 @@ describe('local-first mirror + outbox', () => {
     expect(executed.map((op) => op.op)).toEqual([
       'insert_entries', // expense
       'insert_entries', // income
+      'insert_entries', // direct income
       'insert_entries', // transfer
       'void_group', // void expense
       'insert_entries', // fixed recurring row
       'void_group', // void fixed group
       'insert_entries', // deterministic re-post (server upsert collapses it)
     ])
-    const voidOp = executed[3]
+    const voidOp = executed[4]
     expect(voidOp.op === 'void_group' && voidOp.groupId).toBe(expenseGroup)
     const incomeOp = executed[1]
     expect(incomeOp.op === 'insert_entries' && incomeOp.rows).toHaveLength(2)
+    const directIncomeOp = executed[2]
+    expect(directIncomeOp.op === 'insert_entries' && directIncomeOp.rows).toHaveLength(1)
   })
 
   it('cursor round-trips through meta', async () => {

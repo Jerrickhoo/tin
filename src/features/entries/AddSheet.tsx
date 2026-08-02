@@ -81,6 +81,8 @@ export function AddSheet({
   const [busy, setBusy] = useState(false)
   const [moneyType, setMoneyType] = useState<MoneyType | null>(null)
   const moneyTypeReady = isRequiredMoneyTypeSelected(moneyType)
+  const [incomeStrategy, setIncomeStrategy] = useState<'split' | 'single'>('split')
+  const [incomeEnvelopeId, setIncomeEnvelopeId] = useState('')
   const [envelopes, setEnvelopes] = useState<Envelope[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [quickAmounts, setQuickAmounts] = useState<number[]>([])
@@ -114,6 +116,12 @@ export function AddSheet({
       active = false
     }
   }, [open, toast, version])
+
+  useEffect(() => {
+    if (envelopes.length > 0 && !incomeEnvelopeId) {
+      setIncomeEnvelopeId(envelopes[0].id)
+    }
+  }, [envelopes, incomeEnvelopeId])
 
   const centavos = useMemo(() => parseAmountToCentavos(amount), [amount])
   const amountOk = centavos !== null && centavos > 0
@@ -197,6 +205,29 @@ export function AddSheet({
 
   function onSaveIncome() {
     if (!amountOk || occurredAt === null || busy || !moneyTypeReady) return
+
+    if (incomeStrategy === 'single') {
+      const selectedEnvelope = envById.get(incomeEnvelopeId)
+      if (!incomeEnvelopeId || !selectedEnvelope) {
+        toast.show('Pick an envelope for single-envelope income', 'error')
+        return
+      }
+
+      void run(
+        () =>
+          addIncome({
+            totalCentavos: centavos,
+            envelopes,
+            note,
+            occurredAt,
+            moneyType,
+            targetEnvelopeId: incomeEnvelopeId,
+          }),
+        `+${formatPHP(centavos)} to ${selectedEnvelope.name}`,
+      )
+      return
+    }
+
     void run(
       () => addIncome({ totalCentavos: centavos, envelopes, note, occurredAt, moneyType }),
       `+${formatPHP(centavos)} split across envelopes`,
@@ -412,28 +443,64 @@ export function AddSheet({
       )}
 
       {mode === 'income' && (
-        <div className="mt-5 flex flex-col gap-2">
-          <p className="text-sm text-ink-soft">Splitting at your current shares:</p>
-          {envelopes.map((env, i) => {
-            const color = env.color ?? '#AFA7C2'
-            return (
-              <div
-                key={env.id}
-                className="flex items-center justify-between rounded-xl border border-line/70 bg-base/40 px-3 py-2.5"
-              >
-                <span className="flex items-center gap-2 text-sm">
-                  <span aria-hidden className="size-2" style={{ backgroundColor: color }} />
-                  <span className="font-medium">{env.name}</span>
-                  <span className="text-ink-mute">{env.share_bp / 100}%</span>
-                </span>
-                <span className="text-sm font-bold tabular-nums text-pos">
-                  {splitParts ? `+${formatPHP(splitParts[i])}` : '—'}
-                </span>
-              </div>
-            )
-          })}
+        <div className="mt-5 flex flex-col gap-3">
+          <div className="flex gap-2 rounded-xl border border-line/70 bg-base/40 p-1">
+            <button
+              type="button"
+              onClick={() => setIncomeStrategy('split')}
+              className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                incomeStrategy === 'split' ? 'bg-raised text-ink' : 'text-ink-mute'
+              }`}
+            >
+              Split
+            </button>
+            <button
+              type="button"
+              onClick={() => setIncomeStrategy('single')}
+              className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                incomeStrategy === 'single' ? 'bg-raised text-ink' : 'text-ink-mute'
+              }`}
+            >
+              Single envelope
+            </button>
+          </div>
+
+          {incomeStrategy === 'single' ? (
+            <EnvelopePicker
+              label="Target envelope"
+              envelopes={envelopes}
+              value={incomeEnvelopeId}
+              disabledId=""
+              onChange={setIncomeEnvelopeId}
+            />
+          ) : (
+            <>
+              <p className="text-sm text-ink-soft">Splitting at your current shares:</p>
+              {envelopes.map((env, i) => {
+                const color = env.color ?? '#AFA7C2'
+                return (
+                  <div
+                    key={env.id}
+                    className="flex items-center justify-between rounded-xl border border-line/70 bg-base/40 px-3 py-2.5"
+                  >
+                    <span className="flex items-center gap-2 text-sm">
+                      <span aria-hidden className="size-2" style={{ backgroundColor: color }} />
+                      <span className="font-medium">{env.name}</span>
+                      <span className="text-ink-mute">{env.share_bp / 100}%</span>
+                    </span>
+                    <span className="text-sm font-bold tabular-nums text-pos">
+                      {splitParts ? `+${formatPHP(splitParts[i])}` : '—'}
+                    </span>
+                  </div>
+                )
+              })}
+            </>
+          )}
+
           <PrimaryButton
-            disabled={!amountOk || !whenOk || busy}
+            disabled={
+              !amountOk || !whenOk || busy || (incomeStrategy === 'single' && !incomeEnvelopeId)
+            }
             onClick={onSaveIncome}
             label={busy ? 'Saving…' : amountOk ? `Add ${formatPHP(centavos)} income` : 'Add income'}
           />
