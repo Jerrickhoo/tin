@@ -117,11 +117,7 @@ export function AddSheet({
     }
   }, [open, toast, version])
 
-  useEffect(() => {
-    if (envelopes.length > 0 && !incomeEnvelopeId) {
-      setIncomeEnvelopeId(envelopes[0].id)
-    }
-  }, [envelopes, incomeEnvelopeId])
+  const selectedIncomeEnvelopeId = incomeEnvelopeId || envelopes[0]?.id || ''
 
   const centavos = useMemo(() => parseAmountToCentavos(amount), [amount])
   const amountOk = centavos !== null && centavos > 0
@@ -207,8 +203,8 @@ export function AddSheet({
     if (!amountOk || occurredAt === null || busy || !moneyTypeReady) return
 
     if (incomeStrategy === 'single') {
-      const selectedEnvelope = envById.get(incomeEnvelopeId)
-      if (!incomeEnvelopeId || !selectedEnvelope) {
+      const selectedEnvelope = envById.get(selectedIncomeEnvelopeId)
+      if (!selectedIncomeEnvelopeId || !selectedEnvelope) {
         toast.show('Pick an envelope for single-envelope income', 'error')
         return
       }
@@ -221,7 +217,7 @@ export function AddSheet({
             note,
             occurredAt,
             moneyType,
-            targetEnvelopeId: incomeEnvelopeId,
+            targetEnvelopeId: selectedIncomeEnvelopeId,
           }),
         `+${formatPHP(centavos)} to ${selectedEnvelope.name}`,
       )
@@ -469,7 +465,7 @@ export function AddSheet({
             <EnvelopePicker
               label="Target envelope"
               envelopes={envelopes}
-              value={incomeEnvelopeId}
+              value={selectedIncomeEnvelopeId}
               disabledId=""
               onChange={setIncomeEnvelopeId}
             />
@@ -499,7 +495,10 @@ export function AddSheet({
 
           <PrimaryButton
             disabled={
-              !amountOk || !whenOk || busy || (incomeStrategy === 'single' && !incomeEnvelopeId)
+              !amountOk ||
+              !whenOk ||
+              busy ||
+              (incomeStrategy === 'single' && !selectedIncomeEnvelopeId)
             }
             onClick={onSaveIncome}
             label={busy ? 'Saving…' : amountOk ? `Add ${formatPHP(centavos)} income` : 'Add income'}
