@@ -40,7 +40,8 @@ function isMissingEntriesMoneyTypeColumn(
 
 function sanitizeEntryPayload(rows: readonly NewEntryRow[]): NewEntryRow[] {
   return rows.map((row) => {
-    const { money_type: _moneyType, ...sanitized } = row
+    const sanitized = { ...row }
+    delete sanitized.money_type
     return sanitized as NewEntryRow
   })
 }
