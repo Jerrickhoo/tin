@@ -26,11 +26,40 @@ function isMissingTable(code: string | undefined): boolean {
   return code === 'PGRST205' || code === '42P01'
 }
 
+function isMissingEntriesMoneyTypeColumn(
+  error: { code?: string; message?: string } | null | undefined,
+): boolean {
+  if (!error) return false
+  const message = error.message ?? ''
+  return (
+    error.code === '42703' ||
+    /could not find the ['"]money_type['"] column/i.test(message) ||
+    /column .*money_type.*does not exist/i.test(message)
+  )
+}
+
+function sanitizeEntryPayload(rows: readonly NewEntryRow[]): NewEntryRow[] {
+  return rows.map((row) => {
+    const { money_type: _moneyType, ...sanitized } = row
+    return sanitized as NewEntryRow
+  })
+}
+
 export async function pushInsertEntries(rows: readonly NewEntryRow[]): Promise<void> {
   // upsert on the client-generated primary key: a retry after a lost response
   // collapses into the already-landed rows instead of double-counting money
   const { error } = await supabase.from('entries').upsert([...rows], { ignoreDuplicates: true })
-  if (error) throw new Error(error.message)
+  if (!error) return
+
+  if (isMissingEntriesMoneyTypeColumn(error)) {
+    const { error: retryError } = await supabase
+      .from('entries')
+      .upsert(sanitizeEntryPayload(rows), { ignoreDuplicates: true })
+    if (!retryError) return
+    throw new Error(retryError.message)
+  }
+
+  throw new Error(error.message)
 }
 
 export async function pushVoidGroup(

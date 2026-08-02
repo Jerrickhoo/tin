@@ -58,6 +58,7 @@ create table public.entries (
   amount_centavos bigint not null check (amount_centavos <> 0),
   note            text check (char_length(note) <= 500),
   occurred_at     timestamptz not null,           -- editable; backdating lives here
+  money_type      text check (money_type in ('online','reallife')),
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now(),
   voided_at       timestamptz,
