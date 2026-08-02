@@ -55,6 +55,12 @@ describe('sanitizeMoneyInput', () => {
     expect(sanitizeMoneyInput('')).toBe('')
   })
 
+  it('accepts comma as a decimal separator on mobile keyboards', () => {
+    expect(sanitizeMoneyInput('12,34')).toBe('12.34')
+    expect(sanitizeMoneyInput('1,2,3')).toBe('1.23')
+    expect(parseMoneyInputToCentavos('12,34')).toBe(1234)
+  })
+
   it('parses cleaned input into centavos', () => {
     expect(parseMoneyInputToCentavos('12.34')).toBe(1234)
     expect(parseMoneyInputToCentavos('abc')).toBeNull()

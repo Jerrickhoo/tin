@@ -29,7 +29,8 @@ export interface MoneyTypeSnapshot {
 const MONEY_TYPE_SNAPSHOT_KEY = 'tin.money-type-snapshot'
 
 export function sanitizeMoneyInput(value: string): string {
-  const cleaned = value.replace(/[^\d.]/g, '')
+  const normalized = value.replace(/,/g, '.')
+  const cleaned = normalized.replace(/[^\d.]/g, '')
   if (!cleaned) return ''
   const [whole, ...fractionParts] = cleaned.split('.')
   const fraction = fractionParts.join('').slice(0, 2)
