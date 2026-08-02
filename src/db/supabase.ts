@@ -20,8 +20,8 @@ function createMissingSupabaseClient() {
           return new Proxy(
             {},
             {
-              get(_authTarget, _method) {
-                return async (..._args: unknown[]) => {
+              get() {
+                return async () => {
                   throwMissingConfig()
                 }
               },
