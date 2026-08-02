@@ -20,6 +20,11 @@ import { frequentNotes } from '../../lib/frequent-notes'
 import { applyKeypadKey, KEYPAD_PLACEHOLDER } from '../../lib/keypad'
 import { formatPHP, parseAmountToCentavos } from '../../lib/money'
 import { splitByLargestRemainder } from '../../lib/split'
+import {
+  getMoneyTypeLabel,
+  isRequiredMoneyTypeSelected,
+  type MoneyType,
+} from '../../lib/money-type'
 
 type Mode = 'expense' | 'income' | 'transfer'
 
@@ -74,6 +79,8 @@ export function AddSheet({
     prefill?.mode === 'transfer' ? (prefill.toEnvelopeId ?? '') : '',
   )
   const [busy, setBusy] = useState(false)
+  const [moneyType, setMoneyType] = useState<MoneyType | null>(null)
+  const moneyTypeReady = isRequiredMoneyTypeSelected(moneyType)
   const [envelopes, setEnvelopes] = useState<Envelope[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [quickAmounts, setQuickAmounts] = useState<number[]>([])
@@ -180,24 +187,24 @@ export function AddSheet({
 
   // 2-tap path (ROADMAP 3.2): open sheet, type amount, tap a category — saved.
   function onCategoryTap(category: Category) {
-    if (!amountOk || occurredAt === null || busy) return
+    if (!amountOk || occurredAt === null || busy || !moneyTypeReady) return
     const env = envById.get(category.envelope_id)
     void run(
-      () => addExpense({ amountCentavos: centavos, category, note, occurredAt }),
+      () => addExpense({ amountCentavos: centavos, category, note, occurredAt, moneyType }),
       `−${formatPHP(centavos)} · ${category.name}${env ? ` (${env.name})` : ''}`,
     )
   }
 
   function onSaveIncome() {
-    if (!amountOk || occurredAt === null || busy) return
+    if (!amountOk || occurredAt === null || busy || !moneyTypeReady) return
     void run(
-      () => addIncome({ totalCentavos: centavos, envelopes, note, occurredAt }),
+      () => addIncome({ totalCentavos: centavos, envelopes, note, occurredAt, moneyType }),
       `+${formatPHP(centavos)} split across envelopes`,
     )
   }
 
   function onSaveTransfer() {
-    if (!amountOk || occurredAt === null || busy || !fromId || !toId) return
+    if (!amountOk || occurredAt === null || busy || !fromId || !toId || !moneyTypeReady) return
     void run(
       () =>
         addTransfer({
@@ -206,6 +213,7 @@ export function AddSheet({
           toEnvelopeId: toId,
           note,
           occurredAt,
+          moneyType,
         }),
       `${formatPHP(centavos)} moved ${envById.get(fromId)?.name} → ${envById.get(toId)?.name}`,
     )
@@ -268,6 +276,35 @@ export function AddSheet({
       {amount.trim() !== '' && !amountOk && (
         <p className="mt-2 text-center text-sm text-neg">Up to two decimals, more than zero.</p>
       )}
+
+      <div className="mt-4 border-t border-line/70 pt-3">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.24em] text-ink-mute">
+            Money type
+          </p>
+          <p className="text-[0.65rem] text-ink-soft">Required</p>
+        </div>
+        <div className="flex gap-2 overflow-hidden rounded-xl border border-line/70 bg-base/50 p-1">
+          {(['online', 'reallife'] as const).map((value) => {
+            const selected = moneyType === value
+            return (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setMoneyType(value)}
+                className={`flex-1 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors ${
+                  selected ? 'bg-accent text-on-accent shadow-sm' : 'text-ink-soft'
+                }`}
+              >
+                {getMoneyTypeLabel(value)}
+              </button>
+            )
+          })}
+        </div>
+        {!moneyTypeReady && amountOk && (
+          <p className="mt-2 text-center text-sm text-neg">Pick Online or Cash before saving.</p>
+        )}
+      </div>
 
       {/* Amounts you actually repeat. Shown only while the field is empty:
           these are shortcuts to START an entry, and once you are typing they

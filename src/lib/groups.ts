@@ -3,6 +3,8 @@
 
 export type EntryKind = 'income' | 'expense' | 'transfer' | 'adjustment'
 
+import type { MoneyType } from './money-type'
+
 export interface EntryRow {
   id: string
   group_id: string
@@ -14,6 +16,7 @@ export interface EntryRow {
   occurred_at: string
   voided_at: string | null
   void_reason: string | null
+  money_type?: MoneyType | null
 }
 
 export interface LedgerGroup {

@@ -55,7 +55,7 @@ export function exportReminderStatus(
     neverExported: false,
     daysSince,
     message: due
-      ? `It's been ${daysSince} days since your last backup. Grab a fresh export?`
+      ? `It's been ${daysSince} days since your last backup. Export now?`
       : `Last backup ${daysSince === 0 ? 'today' : `${daysSince} day${daysSince === 1 ? '' : 's'} ago`}.`,
   }
 }

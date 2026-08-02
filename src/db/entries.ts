@@ -10,6 +10,7 @@ import { splitByLargestRemainder } from '../lib/split'
 import { assertSplittable } from '../lib/shares'
 import { balancesFromEntries } from '../lib/balances'
 import type { EntryRow } from '../lib/groups'
+import type { MoneyType } from '../lib/money-type'
 import { applyLocalInsert, applyLocalVoidGroup, localDb } from './dexie'
 import type { NewEntryRow } from './outbox'
 
@@ -289,6 +290,7 @@ export async function addExpense(params: {
   category: Category
   note?: string
   occurredAt?: string
+  moneyType?: MoneyType | null
 }): Promise<string> {
   if (!Number.isSafeInteger(params.amountCentavos) || params.amountCentavos <= 0) {
     throw new RangeError('expense amount must be positive centavos')
@@ -304,6 +306,7 @@ export async function addExpense(params: {
       amount_centavos: -params.amountCentavos,
       note: params.note?.trim() || null,
       occurred_at: params.occurredAt ?? nowIso(),
+      money_type: params.moneyType ?? null,
     },
   ])
   return groupId
@@ -314,6 +317,7 @@ export async function addIncome(params: {
   envelopes: Envelope[]
   note?: string
   occurredAt?: string
+  moneyType?: MoneyType | null
 }): Promise<string> {
   if (!Number.isSafeInteger(params.totalCentavos) || params.totalCentavos <= 0) {
     throw new RangeError('income must be positive centavos')
@@ -336,6 +340,7 @@ export async function addIncome(params: {
       amount_centavos: parts[i],
       note,
       occurred_at: occurredAt,
+      money_type: params.moneyType ?? null,
     }))
     // a 0% envelope gets no leg — amount_centavos <> 0 is a DB check
     .filter((r) => r.amount_centavos > 0)
@@ -349,6 +354,7 @@ export async function addTransfer(params: {
   toEnvelopeId: string
   note?: string
   occurredAt?: string
+  moneyType?: MoneyType | null
 }): Promise<string> {
   if (!Number.isSafeInteger(params.amountCentavos) || params.amountCentavos <= 0) {
     throw new RangeError('transfer amount must be positive centavos')
@@ -379,6 +385,7 @@ export async function addTransfer(params: {
       amount_centavos: params.amountCentavos,
       note,
       occurred_at: occurredAt,
+      money_type: params.moneyType ?? null,
     },
   ])
   return groupId
@@ -400,6 +407,7 @@ export async function addOpeningBalances(
       amount_centavos: a.amountCentavos,
       note: OPENING_BALANCE_NOTE,
       occurred_at: occurredAt,
+      money_type: null,
     }))
   if (rows.length === 0) return null
   await insertRows(rows)

@@ -236,10 +236,7 @@ function PasteStep({
     <>
       <section className="card p-4">
         <h2 className="font-display text-[0.6875rem] leading-relaxed">Paste your rows</h2>
-        <p className="mt-1 text-sm text-ink-soft">
-          Copy the transactions out of a spreadsheet, a CSV, or any table and paste them here.
-          Everything happens on this device — nothing is uploaded.
-        </p>
+        <p className="mt-1 text-sm text-ink-soft">Paste rows from a spreadsheet or CSV.</p>
         <textarea
           value={text}
           onChange={(e) => onChange(e.target.value)}
@@ -270,10 +267,7 @@ function PasteStep({
         Next — describe the columns
       </button>
 
-      <p className="text-sm text-ink-mute">
-        A GCash PDF reader isn't built yet (ROADMAP 8.2). When it lands it feeds this same review
-        screen — the mapping, duplicate checks and backdated insert below are already done.
-      </p>
+      <p className="text-sm text-ink-mute">PDF import is coming later.</p>
     </>
   )
 }
@@ -325,10 +319,7 @@ function MapStep({
     <>
       <section className="card p-4">
         <h2 className="font-display text-[0.6875rem] leading-relaxed">What is each column?</h2>
-        <p className="mt-1 text-sm text-ink-soft">
-          Date and amount are required. A reference number is worth mapping if you have one — it
-          makes re-importing the same statement exactly safe.
-        </p>
+        <p className="mt-1 text-sm text-ink-soft">Date and amount are required.</p>
         <div className="mt-3 flex flex-col gap-2">
           {sample.map((cell, i) => (
             <label key={i} className="flex items-center gap-3 text-sm">
@@ -548,7 +539,8 @@ function ReviewStep({
             {issues.length > 8 && <li className="text-ink-mute">…and {issues.length - 8} more</li>}
           </ul>
           <p className="mt-2 text-sm text-ink-mute">
-            They're skipped, not silently dropped. Fix them in the paste and run it again.
+            These rows were skipped. You can fix the pasted text and run the import again, or leave
+            them out and continue with the rows you can confirm.
           </p>
         </section>
       )}
@@ -647,7 +639,13 @@ function DraftCard({
           )}
           {draft.status.kind === 'possible-duplicate' && (
             <p className="mt-1 text-sm text-[color:var(--color-env-wants)]">
-              Possible duplicate — {draft.status.because}.
+              Possible duplicate — {draft.status.because}. Leave this unticked unless you really
+              mean to add it again.
+            </p>
+          )}
+          {isDebit && draft.categoryId === null && draft.include && !locked && (
+            <p className="mt-1 text-sm text-neg">
+              This expense still needs a category before it can be imported.
             </p>
           )}
 

@@ -9,14 +9,27 @@ import { getSyncSnapshot, kickSync, subscribeSync } from '../../db/sync'
 import {
   fetchAllCategoriesForExport,
   fetchAllEntriesForExport,
+  fetchAllEntriesNewestFirst,
   fetchAllEnvelopesForExport,
+  fetchBalances,
 } from '../../db/entries'
 import { applyRestore, planRestoreFromBundle } from '../../db/restore'
 import { entriesToCsv, entriesToJson } from '../../lib/export'
 import { isBlocked, parseBundle, type RestorePlan } from '../../lib/restore'
 import { manilaDayKey } from '../../lib/dates'
+import { formatPHP } from '../../lib/money'
 import { exportReminderStatus, getLastExport, recordExport } from '../../lib/exportReminder'
 import { getTexture, setTexture, type Texture } from '../../lib/texture'
+import {
+  clampMoneyAmountToMax,
+  getMoneyTypeLabel,
+  parseMoneyInputToCentavos,
+  readMoneyTypeSnapshot,
+  sanitizeMoneyInput,
+  summarizeMoneyTypeTotals,
+  writeMoneyTypeSnapshot,
+  type MoneyTypeSnapshot,
+} from '../../lib/money-type'
 import { useSession } from '../auth/useSession'
 import { MfaSection } from './MfaSection'
 
@@ -153,10 +166,7 @@ function AppearanceSection() {
   return (
     <section className="card p-4">
       <h2 className="font-display text-[0.6875rem] leading-relaxed">Appearance</h2>
-      <p className="mt-1 mb-3 text-sm text-ink-soft">
-        The backdrop carries faint scanlines and a pastel bloom. Turn them off for a flat screen —
-        this device only.
-      </p>
+      <p className="mt-1 mb-3 text-sm text-ink-soft">Turn the texture off for a flatter look.</p>
       <label className="flex cursor-pointer items-center justify-between gap-3">
         <span className="text-sm">Reduce texture</span>
         <input
@@ -166,6 +176,150 @@ function AppearanceSection() {
           className="size-5 shrink-0 accent-[var(--color-accent)]"
         />
       </label>
+    </section>
+  )
+}
+
+function MoneySummarySection() {
+  const toast = useToast()
+  const { version } = useLedger()
+  const initialSnapshot = readMoneyTypeSnapshot()
+  const [snapshot, setSnapshot] = useState<MoneyTypeSnapshot>(initialSnapshot)
+  const [liveBalances, setLiveBalances] = useState({ online: 0, reallife: 0 })
+  const [liveTotal, setLiveTotal] = useState(0)
+  const [inputValues, setInputValues] = useState<Record<'online' | 'reallife', string>>({
+    online: initialSnapshot.online === null ? '' : (initialSnapshot.online / 100).toFixed(2),
+    reallife: initialSnapshot.reallife === null ? '' : (initialSnapshot.reallife / 100).toFixed(2),
+  })
+
+  useEffect(() => {
+    let active = true
+    ;(async () => {
+      try {
+        const [rows, balances] = await Promise.all([fetchAllEntriesNewestFirst(), fetchBalances()])
+        if (!active) return
+        const totals = summarizeMoneyTypeTotals(rows)
+        const total = Array.from(balances.values()).reduce((sum, value) => sum + value, 0)
+        setLiveBalances({ online: totals.online, reallife: totals.reallife })
+        setLiveTotal(total)
+      } catch {
+        if (active) {
+          setLiveBalances({ online: 0, reallife: 0 })
+          setLiveTotal(0)
+        }
+      }
+    })()
+
+    return () => {
+      active = false
+    }
+  }, [version])
+
+  function updateValue(key: 'online' | 'reallife', value: string) {
+    const cleaned = sanitizeMoneyInput(value)
+    const parsed = parseMoneyInputToCentavos(cleaned)
+    const otherKey = key === 'online' ? 'reallife' : 'online'
+    const max = Math.max(0, liveTotal - (snapshot[otherKey] ?? 0))
+    const nextValue = parsed === null ? null : clampMoneyAmountToMax(parsed, max)
+    setInputValues((current) => ({ ...current, [key]: cleaned }))
+    setSnapshot((current) => ({ ...current, [key]: nextValue }))
+  }
+
+  function clearValue(key: 'online' | 'reallife') {
+    setInputValues((current) => ({ ...current, [key]: '' }))
+    setSnapshot((current) => ({ ...current, [key]: null }))
+  }
+
+  function save() {
+    writeMoneyTypeSnapshot(snapshot)
+    window.dispatchEvent(new Event('tin-money-type-updated'))
+    toast.show('Updated your current money view')
+  }
+
+  function compareDelta(value: number | null, key: 'online' | 'reallife') {
+    const live = liveBalances[key]
+    if (value === null) return null
+    return live - value
+  }
+
+  const totalLiveBalance = liveTotal
+  const totalSavedBalance = (snapshot.online ?? 0) + (snapshot.reallife ?? 0)
+  const totalDelta = totalLiveBalance - totalSavedBalance
+
+  return (
+    <section className="card p-4">
+      <h2 className="font-display text-[0.6875rem] leading-relaxed">Current money</h2>
+      <p className="mt-1 mb-3 text-sm text-ink-soft">
+        Keep a simple target in mind for Home and compare it with your live balance.
+      </p>
+      <div className="mb-3 rounded-2xl border border-line/70 bg-base/50 p-3">
+        <p className="text-[0.65rem] font-semibold uppercase tracking-[0.24em] text-ink-mute">
+          Available balance
+        </p>
+        <p className="mt-1 text-lg font-semibold text-ink tabular-nums">
+          {formatPHP(totalLiveBalance)}
+        </p>
+        <p className="mt-2 text-xs text-ink-soft">
+          {totalDelta === 0
+            ? 'Your saved targets match your current balance.'
+            : totalDelta > 0
+              ? `You still have ${formatPHP(totalDelta)} left to split.`
+              : `You are ${formatPHP(Math.abs(totalDelta))} over your current split target.`}
+        </p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {(['online', 'reallife'] as const).map((key) => {
+          const value = snapshot[key]
+          const delta = compareDelta(value, key)
+          const isAbove = (delta ?? 0) > 0
+          return (
+            <label key={key} className="rounded-2xl border border-line bg-base/50 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[0.65rem] font-semibold uppercase tracking-[0.24em] text-ink-mute">
+                  {getMoneyTypeLabel(key)}
+                </span>
+                <span className="text-[0.65rem] uppercase tracking-[0.24em] text-ink-soft">
+                  live {formatPHP(liveBalances[key])}
+                </span>
+              </div>
+              <div className="mt-2 flex items-center gap-2 rounded-xl border border-line/70 bg-base/40 px-2.5 py-2">
+                <span className="text-[0.65rem] uppercase tracking-[0.24em] text-ink-soft">₱</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={inputValues[key]}
+                  onChange={(e) => updateValue(key, e.target.value)}
+                  className="w-full border-0 bg-transparent p-0 text-lg font-semibold text-ink outline-none tabular-nums"
+                  placeholder="0.00"
+                />
+                <button
+                  type="button"
+                  onClick={() => clearValue(key)}
+                  className="text-[0.65rem] font-semibold uppercase tracking-[0.24em] text-ink-soft"
+                >
+                  clear
+                </button>
+              </div>
+              <p className="mt-2 text-xs text-ink-soft">
+                {value === null
+                  ? 'Leave it blank if you do not want a saved target for this bucket.'
+                  : delta === null || delta === 0
+                    ? 'This value is already aligned with your current balance.'
+                    : isAbove
+                      ? `This is ${formatPHP(delta)} above the current balance.`
+                      : `This is ${formatPHP(Math.abs(delta))} below the current balance.`}
+              </p>
+            </label>
+          )
+        })}
+      </div>
+      <button
+        type="button"
+        onClick={save}
+        className="mt-3 rounded-xl bg-accent px-3 py-2.5 font-semibold text-on-accent"
+      >
+        Save current money
+      </button>
     </section>
   )
 }
@@ -435,6 +589,8 @@ export function Settings() {
       <RestoreSection />
 
       <MfaSection />
+
+      <MoneySummarySection />
 
       <AppearanceSection />
 

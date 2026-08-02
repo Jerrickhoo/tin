@@ -34,6 +34,7 @@ describe('exportReminderStatus', () => {
     const s = exportReminderStatus(last, now)
     expect(s.due).toBe(true)
     expect(s.daysSince).toBe(30)
+    expect(s.message).toContain('Export now?')
   })
 
   it('respects a custom threshold', () => {

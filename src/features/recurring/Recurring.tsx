@@ -13,6 +13,7 @@ import {
   type RecurringTemplate,
 } from '../../db/recurring'
 import { formatPHP, parseAmountToCentavos } from '../../lib/money'
+import { formatEnvelopeShareSummary } from './recurring-share-summary'
 
 const ordinal = (n: number) =>
   `${n}${n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th'}`
@@ -86,10 +87,7 @@ export function Recurring() {
           New template
         </button>
       </div>
-      <p className="text-sm text-ink-soft">
-        Templates post themselves when you open Tin on or after their day — backdated to the due
-        date, with an undo toast. No server, no cron, no missed rent.
-      </p>
+      <p className="text-sm text-ink-soft">Templates post automatically on their due date.</p>
 
       {loadError && (
         <div className="card border-neg/40 p-4">
@@ -105,10 +103,7 @@ export function Recurring() {
       )}
       {!templates && !loadError && <p className="text-ink-mute">Loading templates…</p>}
       {templates && templates.length === 0 && (
-        <p className="text-ink-soft">
-          None yet. Rent, allowance, subscriptions — anything that happens every month on the same
-          day belongs here.
-        </p>
+        <p className="text-ink-soft">None yet. Add monthly bills, income, or subscriptions.</p>
       )}
 
       {templates?.map((template) => {
@@ -128,7 +123,7 @@ export function Recurring() {
                   every {ordinal(template.day_of_month)}
                   {template.kind === 'expense' && category
                     ? ` · ${category.emoji ?? ''} ${category.name}`
-                    : ' · full 70/20/10 split'}
+                    : ` · ${formatEnvelopeShareSummary(envelopes.filter((env) => env.share_bp > 0))}`}
                   {template.paused_at ? '' : ` · next ${template.next_run_on}`}
                 </p>
               </div>
@@ -351,6 +346,12 @@ function TemplateSheet({
           onChange={(e) => setNote(e.target.value)}
           className="w-full rounded-xl border border-line bg-base px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-mute focus:border-accent"
         />
+
+        <p className="rounded-xl border border-line/70 bg-base/50 px-3 py-2 text-sm text-ink-soft">
+          {kind === 'income'
+            ? `This will split the income across your current envelope shares (${formatEnvelopeShareSummary(envelopes.filter((env) => env.share_bp > 0))}), so future changes to the split do not rewrite old history.`
+            : 'Pick a category so the expense lands in the right envelope when the template posts.'}
+        </p>
 
         <button
           type="button"

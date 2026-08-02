@@ -16,6 +16,7 @@ import { manilaDayKey } from '../../lib/dates'
 import { groupEntries, type EntryKind, type EntryRow, type LedgerGroup } from '../../lib/groups'
 import { filterGroups, isQueryActive, totalsFor, type LedgerQuery } from '../../lib/ledger-filter'
 import { formatPHP } from '../../lib/money'
+import { getMoneyTypeLabel, summarizeMoneyTypeTotals } from '../../lib/money-type'
 
 const manilaTime = new Intl.DateTimeFormat('en-PH', {
   timeZone: 'Asia/Manila',
@@ -150,6 +151,7 @@ export function History() {
     [rows, query, names],
   )
   const totals = useMemo(() => totalsFor(matched), [matched])
+  const moneyTotals = useMemo(() => summarizeMoneyTypeTotals(rows ?? []), [rows])
 
   const days = useMemo(() => {
     const byDay = new Map<string, LedgerGroup[]>()
@@ -328,12 +330,28 @@ export function History() {
           </div>
         )}
 
-        {searching && rows && (
+        {(searching || Object.values(moneyTotals).some((value) => value !== 0)) && rows && (
           <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 px-0.5 text-xs">
             <p className="text-ink-soft tabular-nums">
               {totals.groups === 0
                 ? 'No matches'
                 : `${totals.groups} ${totals.groups === 1 ? 'entry' : 'entries'}`}
+              {moneyTotals.online !== 0 && (
+                <>
+                  <span className="mx-1.5 text-ink-mute opacity-50">·</span>
+                  <span className="text-accent">
+                    {getMoneyTypeLabel('online')} {formatPHP(moneyTotals.online)}
+                  </span>
+                </>
+              )}
+              {moneyTotals.reallife !== 0 && (
+                <>
+                  <span className="mx-1.5 text-ink-mute opacity-50">·</span>
+                  <span className="text-ink-soft">
+                    {getMoneyTypeLabel('reallife')} {formatPHP(moneyTotals.reallife)}
+                  </span>
+                </>
+              )}
               {totals.spentCentavos > 0 && (
                 <>
                   <span className="mx-1.5 text-ink-mute opacity-50">·</span>
@@ -552,7 +570,19 @@ function GroupCard({
               {group.note && group.kind !== 'adjustment' ? ` · ${group.note}` : ''}
             </p>
           </div>
-          <span className={`shrink-0 font-bold tabular-nums ${amountClass}`}>{amountText}</span>
+          <div className="flex shrink-0 items-center gap-2">
+            {group.legs.some((leg) => leg.money_type === 'online') && (
+              <span className="rounded-full border border-accent/35 bg-accent/10 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-accent">
+                {getMoneyTypeLabel('online')}
+              </span>
+            )}
+            {group.legs.some((leg) => leg.money_type === 'reallife') && (
+              <span className="rounded-full border border-line bg-base/40 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-ink-soft">
+                {getMoneyTypeLabel('reallife')}
+              </span>
+            )}
+            <span className={`font-bold tabular-nums ${amountClass}`}>{amountText}</span>
+          </div>
         </div>
       </button>
 

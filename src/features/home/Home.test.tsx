@@ -10,6 +10,7 @@ describe('buildEnvelopeCardFacts', () => {
       perDay: 1_500,
       showRate: true,
       hasRun: false,
+      balanceCentavos: 15_000,
     })
 
     expect(facts).toEqual([
@@ -22,6 +23,26 @@ describe('buildEnvelopeCardFacts', () => {
         key: 'today',
         text: '₱25.00 today',
         className: 'whitespace-nowrap text-ink-soft',
+      },
+    ])
+  })
+
+  it('adds a low-balance warning before an envelope turns negative', () => {
+    const facts = buildEnvelopeCardFacts({
+      pace: null,
+      spentTodayCentavos: 0,
+      red: false,
+      perDay: 0,
+      showRate: false,
+      hasRun: false,
+      balanceCentavos: 3_000,
+    })
+
+    expect(facts).toEqual([
+      {
+        key: 'low-balance',
+        text: 'Low balance — only ₱30.00 left',
+        className: 'whitespace-nowrap text-amber-600',
       },
     ])
   })

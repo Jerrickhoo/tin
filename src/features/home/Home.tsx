@@ -1,7 +1,15 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { useAddSheet, useLedger, useToast } from '../../app-context'
 import { buildEnvelopeCardFacts } from './envelope-card-facts'
+import { entriesToJson } from '../../lib/export'
 import {
+  fetchAllCategoriesForExport,
+  fetchAllEntriesForExport,
+  fetchAllEnvelopesForExport,
+} from '../../db/entries'
+import { recordExport, getLastExport, exportReminderStatus } from '../../lib/exportReminder'
+import {
+  fetchAllEntriesNewestFirst,
   fetchBalances,
   fetchEntriesBetween,
   fetchEnvelopes,
@@ -23,6 +31,12 @@ import {
   type StreakState,
 } from '../../lib/logging-streak'
 import { formatPHP } from '../../lib/money'
+import {
+  getMoneyTypeLabel,
+  readMoneyTypeSnapshot,
+  summarizeMoneyTypeSummaryItems,
+  type MoneyTypeSummaryItem,
+} from '../../lib/money-type'
 import { OpeningBalancesSheet } from './OpeningBalancesSheet'
 
 interface Card extends Envelope {
@@ -103,7 +117,11 @@ export function Home() {
   const [spentToday, setSpentToday] = useState<Map<string, number>>(new Map())
   const [paces, setPaces] = useState<Map<string, EnvelopePace>>(new Map())
   const [streak, setStreak] = useState<StreakState | null>(null)
+  const [moneyTypeSummary, setMoneyTypeSummary] = useState<MoneyTypeSummaryItem[]>(() =>
+    summarizeMoneyTypeSummaryItems([], readMoneyTypeSnapshot()),
+  )
   const [repairing, setRepairing] = useState(false)
+  const [exportBusy, setExportBusy] = useState(false)
   // A failed read used to leave `cards` at null forever, which renders as the
   // loading state: a blinking cursor under "opening the tin…" on a screen that
   // had in fact given up. The toast that carried the error was gone in four
@@ -113,6 +131,19 @@ export function Home() {
   // refetch.
   const [error, setError] = useState<string | null>(null)
   const [reload, setReload] = useState(0)
+
+  useEffect(() => {
+    const refreshMoneySummary = () => {
+      setMoneyTypeSummary(summarizeMoneyTypeSummaryItems([], readMoneyTypeSnapshot()))
+    }
+
+    const handleMoneyTypeUpdated = () => refreshMoneySummary()
+    window.addEventListener('tin-money-type-updated', handleMoneyTypeUpdated)
+
+    return () => {
+      window.removeEventListener('tin-money-type-updated', handleMoneyTypeUpdated)
+    }
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -126,7 +157,7 @@ export function Home() {
         // result rather than issuing a second query.
         const since = new Date(Date.now() - STREAK_WINDOW_DAYS * 86_400_000).toISOString()
         const until = new Date(Date.now() + 86_400_000).toISOString()
-        const [envs, balances, anyEntries, openingDone, recent, saves, checkIns] =
+        const [envs, balances, anyEntries, openingDone, recent, saves, checkIns, allEntries] =
           await Promise.all([
             fetchEnvelopes(),
             fetchBalances(),
@@ -135,6 +166,7 @@ export function Home() {
             fetchEntriesBetween(since, until),
             readStreakSaves(),
             readCheckIns(),
+            fetchAllEntriesNewestFirst(),
           ])
         if (!active) return
         setError(null)
@@ -162,6 +194,7 @@ export function Home() {
           ),
         )
         setStreak(computeStreak(recent, saves, checkIns))
+        setMoneyTypeSummary(summarizeMoneyTypeSummaryItems(allEntries, readMoneyTypeSnapshot()))
       } catch (err) {
         // No toast: the hero carries this now, and a four-second toast beside a
         // permanent error card would say the same thing twice and then take
@@ -212,6 +245,34 @@ export function Home() {
     }
   }
 
+  async function exportNow() {
+    if (exportBusy) return
+    setExportBusy(true)
+    try {
+      const [entries, envelopes, categories] = await Promise.all([
+        fetchAllEntriesForExport(),
+        fetchAllEnvelopesForExport(),
+        fetchAllCategoriesForExport(),
+      ])
+      const day = manilaDayKey(new Date())
+      const blob = new Blob([entriesToJson(entries, envelopes, categories)], {
+        type: 'application/json',
+      })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `tin-export-${day}.json`
+      link.click()
+      setTimeout(() => URL.revokeObjectURL(url), 0)
+      recordExport()
+      toast.show('Exported your ledger backup')
+    } catch (err) {
+      toast.show(err instanceof Error ? err.message : String(err), 'error')
+    } finally {
+      setExportBusy(false)
+    }
+  }
+
   const now = new Date()
   const total = (cards ?? []).reduce((sum, c) => sum + c.balanceCentavos, 0) + offCardCentavos
   // The forward-looking half of the screen. Deliberately per envelope and never
@@ -225,6 +286,7 @@ export function Home() {
   // repetition, not the wording.
   const daysLeft = daysRemainingInMonth(manilaDayKey(now))
   const daysLeftLabel = daysLeft === 1 ? 'last day of the month' : `${daysLeft} days left`
+  const backupReminder = exportReminderStatus(getLastExport(), now)
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-5 py-7 md:max-w-4xl md:gap-5 md:px-8 md:py-10">
@@ -295,23 +357,33 @@ export function Home() {
       </section>
 
       {error && (
-        <section className="card border-neg/40 px-4 py-3.5">
-          <h2 className="font-display text-[0.625rem] leading-relaxed text-neg">
-            COULDN'T READ THE LEDGER
-          </h2>
-          <p className="mt-1.5 text-sm text-ink-soft">
-            Your entries are safe on this device — this screen just failed to open them.
-          </p>
-          <pre className="mt-2 overflow-x-auto border border-line bg-base p-2 text-xs text-ink-mute">
-            {error}
-          </pre>
-          <button
-            type="button"
-            onClick={() => setReload((n) => n + 1)}
-            className="press mt-3 bg-accent px-3.5 py-2.5 font-semibold text-on-accent"
-          >
-            Try again
-          </button>
+        <section className="card border-neg/40 bg-neg/10 px-4 py-3.5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="font-display text-[0.625rem] leading-relaxed text-neg">
+                COULDN'T READ THE LEDGER
+              </h2>
+              <p className="mt-1.5 text-sm text-ink-soft">
+                The tin hit a ledger problem. Your data is still safe on this device — try again in
+                a moment.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setReload((n) => n + 1)}
+              className="press shrink-0 rounded-xl bg-accent px-3.5 py-2.5 text-sm font-semibold text-on-accent"
+            >
+              Try again
+            </button>
+          </div>
+          <div className="mt-3 rounded-xl border border-neg/20 bg-base/70 p-2.5">
+            <p className="text-[0.65rem] font-semibold uppercase tracking-[0.24em] text-ink-mute">
+              Details
+            </p>
+            <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words border-0 bg-transparent p-0 text-xs leading-relaxed text-ink-soft">
+              {error}
+            </pre>
+          </div>
         </section>
       )}
 
@@ -359,28 +431,126 @@ export function Home() {
         </button>
       )}
 
+      {empty && (
+        <section className="card border-accent/40 px-4 py-3.5">
+          <h2 className="font-display text-[0.625rem] leading-relaxed text-accent">
+            FIRST RUN: HOW TIN WORKS
+          </h2>
+          <p className="mt-1.5 text-sm text-ink-soft">
+            Start with your 70/20/10 split, then use categories to keep spending tidy. The Add entry
+            button is the main doorway for income, expenses, and transfers.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2 text-sm">
+            <button
+              type="button"
+              onClick={() => addSheet.open()}
+              className="rounded-xl bg-accent px-3 py-2 font-semibold text-on-accent"
+            >
+              Add entry
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpeningOpen(true)}
+              className="rounded-xl border border-line px-3 py-2 text-ink-soft"
+            >
+              Start with opening balances
+            </button>
+          </div>
+        </section>
+      )}
+
+      {backupReminder.due && (
+        <section className="card border-accent/40 px-4 py-3.5">
+          <h2 className="font-display text-[0.625rem] leading-relaxed text-accent">
+            BACK UP YOUR LEDGER
+          </h2>
+          <p className="mt-1.5 text-sm text-ink-soft">{backupReminder.message}</p>
+          <button
+            type="button"
+            disabled={exportBusy}
+            onClick={() => void exportNow()}
+            className="mt-3 rounded-xl bg-accent px-3 py-2 font-semibold text-on-accent disabled:opacity-50"
+          >
+            {exportBusy ? 'Exporting…' : 'Export now'}
+          </button>
+        </section>
+      )}
+
       {/* Stacked on a phone; side by side on a desktop, where three envelopes
           in a 384px column is a lot of scrolling past a lot of empty room —
           and where seeing all three meters at once is the whole point. */}
       {cards && (
-        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {cards.map((card) => (
-            <EnvelopeCard
-              key={card.id}
-              card={card}
-              pace={paces.get(card.id) ?? null}
-              daysLeft={daysLeft}
-              spentTodayCentavos={spentToday.get(card.id) ?? 0}
-              onCover={() =>
-                addSheet.open({
-                  mode: 'transfer',
-                  toEnvelopeId: card.id,
-                  amountCentavos: -card.balanceCentavos,
-                })
-              }
-            />
-          ))}
-        </section>
+        <>
+          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {cards.map((card) => (
+              <EnvelopeCard
+                key={card.id}
+                card={card}
+                pace={paces.get(card.id) ?? null}
+                daysLeft={daysLeft}
+                spentTodayCentavos={spentToday.get(card.id) ?? 0}
+                onCover={() =>
+                  addSheet.open({
+                    mode: 'transfer',
+                    toEnvelopeId: card.id,
+                    amountCentavos: -card.balanceCentavos,
+                  })
+                }
+              />
+            ))}
+          </section>
+
+          <section className="card border-line/60 px-4 py-3.5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-display text-[0.625rem] leading-relaxed text-ink-mute">
+                  CURRENT MONEY
+                </p>
+                <p className="mt-1 text-sm text-ink-soft">
+                  Online and cash balances, kept close to your envelope split.
+                </p>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {moneyTypeSummary.map((item) => {
+                const isOnline = item.key === 'online'
+                const isPositive = item.valueCentavos >= 0
+                return (
+                  <div
+                    key={item.key}
+                    className={`flex items-center justify-between gap-3 border-b border-line/60 px-3 py-2.5 ${
+                      isOnline
+                        ? 'bg-[color:rgba(255,255,255,0.45)] dark:bg-[color:rgba(255,255,255,0.08)]'
+                        : 'bg-[color:rgba(248,247,245,0.75)] dark:bg-[color:rgba(255,255,255,0.05)]'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span
+                          aria-hidden
+                          className={`size-2 rounded-full ${isOnline ? 'bg-accent' : 'bg-ink-soft'}`}
+                        />
+                        <p className="text-[0.65rem] font-semibold uppercase tracking-[0.24em] text-ink-mute">
+                          {getMoneyTypeLabel(item.key)}
+                        </p>
+                      </div>
+                      <p
+                        className={`mt-1 text-sm font-semibold tabular-nums ${isPositive ? 'text-ink' : 'text-neg'}`}
+                      >
+                        {formatPHP(item.valueCentavos)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[0.64rem] uppercase tracking-[0.24em] text-ink-soft">
+                        {isPositive ? 'available' : 'used'}
+                      </p>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        </>
       )}
 
       {/* mounted only while open, so each visit starts with empty inputs
@@ -691,6 +861,7 @@ function EnvelopeCard({
     perDay,
     showRate,
     spentTodayCentavos,
+    balanceCentavos: card.balanceCentavos,
   })
 
   return (
