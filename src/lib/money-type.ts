@@ -114,11 +114,12 @@ export function summarizeMoneyTypeTotals(rows: readonly EntryRow[]): MoneyTypeTo
 export function summarizeMoneyTypeSummaryItems(
   rows: readonly EntryRow[],
   snapshot: MoneyTypeSnapshot | null = null,
+  useSnapshot = true,
 ): MoneyTypeSummaryItem[] {
   const totals = summarizeMoneyTypeTotals(rows)
   const resolved = {
-    online: snapshot?.online ?? totals.online,
-    reallife: snapshot?.reallife ?? totals.reallife,
+    online: useSnapshot ? (snapshot?.online ?? totals.online) : totals.online,
+    reallife: useSnapshot ? (snapshot?.reallife ?? totals.reallife) : totals.reallife,
   }
 
   return [

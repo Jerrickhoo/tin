@@ -118,7 +118,7 @@ export function Home() {
   const [paces, setPaces] = useState<Map<string, EnvelopePace>>(new Map())
   const [streak, setStreak] = useState<StreakState | null>(null)
   const [moneyTypeSummary, setMoneyTypeSummary] = useState<MoneyTypeSummaryItem[]>(() =>
-    summarizeMoneyTypeSummaryItems([], readMoneyTypeSnapshot()),
+    summarizeMoneyTypeSummaryItems([], readMoneyTypeSnapshot(), false),
   )
   const [repairing, setRepairing] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
@@ -134,7 +134,7 @@ export function Home() {
 
   useEffect(() => {
     const refreshMoneySummary = () => {
-      setMoneyTypeSummary(summarizeMoneyTypeSummaryItems([], readMoneyTypeSnapshot()))
+      setMoneyTypeSummary(summarizeMoneyTypeSummaryItems([], readMoneyTypeSnapshot(), false))
     }
 
     const handleMoneyTypeUpdated = () => refreshMoneySummary()
@@ -194,7 +194,9 @@ export function Home() {
           ),
         )
         setStreak(computeStreak(recent, saves, checkIns))
-        setMoneyTypeSummary(summarizeMoneyTypeSummaryItems(allEntries, readMoneyTypeSnapshot()))
+        setMoneyTypeSummary(
+          summarizeMoneyTypeSummaryItems(allEntries, readMoneyTypeSnapshot(), false),
+        )
       } catch (err) {
         // No toast: the hero carries this now, and a four-second toast beside a
         // permanent error card would say the same thing twice and then take

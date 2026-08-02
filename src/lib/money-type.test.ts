@@ -133,6 +133,17 @@ describe('summarizeMoneyTypeTotals', () => {
     ])
   })
 
+  it('uses live ledger totals for the home summary even when a snapshot exists', () => {
+    const rows: EntryRow[] = [
+      row({ id: 'entry-1', amount_centavos: 20000, money_type: 'reallife' as MoneyType }),
+    ]
+
+    expect(summarizeMoneyTypeSummaryItems(rows, { online: 2500, reallife: 4000 }, false)).toEqual([
+      { key: 'online', label: 'Online', valueCentavos: 0 },
+      { key: 'reallife', label: 'Real life', valueCentavos: 20000 },
+    ])
+  })
+
   it('returns zeroed summary items for an empty ledger', () => {
     expect(summarizeMoneyTypeSummaryItems([])).toEqual([
       { key: 'online', label: 'Online', valueCentavos: 0 },
