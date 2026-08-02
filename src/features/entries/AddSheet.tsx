@@ -52,7 +52,7 @@ export function AddSheet({
 }) {
   // Prefill lands via useState initializers — AppShell remounts this component
   // (key bump) on every open, so state starts fresh without effect setState.
-  const { bump } = useLedger()
+  const { bump, version } = useLedger()
   const toast = useToast()
   const [mode, setMode] = useState<Mode>(prefill?.mode ?? 'expense')
   const [amount, setAmount] = useState(() =>
@@ -84,8 +84,9 @@ export function AddSheet({
     let active = true
     // The 90-day window feeds the category ranking below. It reads the
     // `occurred_at` index rather than the whole table, and it is deliberately
-    // fetched once per sheet-open: ranking that recomputed while you type
-    // would shuffle the grid under your thumb mid-entry.
+    // fetched once per sheet-open and once whenever the shared ledger version
+    // changes while the sheet is still open. That keeps the split preview and
+    // the envelope picker aligned with the latest share settings.
     const since = new Date(Date.now() - 90 * 86_400_000).toISOString()
     const until = new Date(Date.now() + 86_400_000).toISOString()
     Promise.all([fetchEnvelopes(), fetchCategories(), fetchEntriesBetween(since, until)])
@@ -105,7 +106,7 @@ export function AddSheet({
     return () => {
       active = false
     }
-  }, [open, toast])
+  }, [open, toast, version])
 
   const centavos = useMemo(() => parseAmountToCentavos(amount), [amount])
   const amountOk = centavos !== null && centavos > 0

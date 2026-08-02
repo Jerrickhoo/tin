@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { useAddSheet, useLedger, useToast } from '../../app-context'
 import {
   fetchBalances,
@@ -653,6 +653,57 @@ function TinJar() {
  * exactly the kind of encoding the §6 colour-vision audit made this codebase
  * careful about leaving as the only channel.
  */
+export interface EnvelopeCardFact {
+  key: string
+  text: string
+  className: string
+}
+
+export function buildEnvelopeCardFacts(params: {
+  red: boolean
+  hasRun: boolean
+  pace: EnvelopePace | null
+  perDay: number
+  showRate: boolean
+  spentTodayCentavos: number
+}): EnvelopeCardFact[] {
+  const facts: EnvelopeCardFact[] = []
+
+  if (params.red) {
+    facts.push({ key: 'over', text: 'overdrawn', className: 'text-neg' })
+  } else if (params.hasRun && params.pace) {
+    // Never `?? 0`: a card whose pace has not arrived — or whose envelope was
+    // never funded — would state "₱0.00 set aside" beside a real balance, which
+    // is a lie rather than a placeholder. It says nothing until it can say
+    // something true. An envelope drawn to exactly zero DOES have a run and a
+    // true figure to report, which is why `hasRun` tests setAside and not the
+    // balance.
+    facts.push({
+      key: 'aside',
+      text: `${formatPHP(params.pace.setAsideCentavos)} set aside`,
+      className: 'whitespace-nowrap text-ink-mute',
+    })
+  }
+
+  if (params.showRate) {
+    facts.push({
+      key: 'rate',
+      text: `${formatPHP(params.perDay)}/day`,
+      className: 'whitespace-nowrap font-semibold text-ink',
+    })
+  }
+
+  if (params.spentTodayCentavos > 0) {
+    facts.push({
+      key: 'today',
+      text: `${formatPHP(params.spentTodayCentavos)} today`,
+      className: 'whitespace-nowrap text-ink-soft',
+    })
+  }
+
+  return facts
+}
+
 function EnvelopeCard({
   card,
   pace,
@@ -683,44 +734,14 @@ function EnvelopeCard({
         pace.setAsideCentavos,
       )} set aside — ${ahead ? 'ahead of' : 'behind'} an even pace for the rest of the month`
 
-  // Built as a list so the separators sit BETWEEN segments rather than being
-  // glued to the front of each one. With "set aside" now conditional on a real
-  // run, a card could otherwise open its line with a dangling "·".
-  const facts: ReactNode[] = []
-  if (red) {
-    facts.push(
-      <span key="over" className="text-neg">
-        overdrawn
-      </span>,
-    )
-  } else if (hasRun) {
-    // Never `?? 0`: a card whose pace has not arrived — or whose envelope was
-    // never funded — would state "₱0.00 set aside" beside a real balance, which
-    // is a lie rather than a placeholder. It says nothing until it can say
-    // something true. An envelope drawn to exactly zero DOES have a run and a
-    // true figure to report, which is why `hasRun` tests setAside and not the
-    // balance.
-    facts.push(
-      <span key="aside" className="whitespace-nowrap text-ink-mute">
-        {formatPHP(pace.setAsideCentavos)} set aside
-      </span>,
-    )
-  }
-  if (showRate) {
-    facts.push(
-      <span key="rate" className="whitespace-nowrap">
-        <span className="font-semibold text-ink">{formatPHP(perDay)}</span>
-        <span className="text-ink-mute">/day</span>
-      </span>,
-    )
-  }
-  if (spentTodayCentavos > 0) {
-    facts.push(
-      <span key="today" className="whitespace-nowrap text-ink-soft">
-        {formatPHP(spentTodayCentavos)} today
-      </span>,
-    )
-  }
+  const facts = buildEnvelopeCardFacts({
+    red,
+    hasRun,
+    pace,
+    perDay,
+    showRate,
+    spentTodayCentavos,
+  })
 
   return (
     <article className="card px-4 pt-3.5 pb-4">
@@ -769,14 +790,14 @@ function EnvelopeCard({
           Dropped entirely when there is nothing true to put in it, rather than
           left as an empty paragraph holding its own margin open. */}
       {facts.length > 0 && (
-        <p className="mt-2 text-xs tabular-nums">
+        <div className="mt-2 flex flex-wrap items-center gap-1 text-[11px] leading-4 tabular-nums text-ink-soft">
           {facts.map((fact, i) => (
-            <span key={i}>
-              {i > 0 && <span className="mx-1.5 text-ink-mute opacity-50">·</span>}
-              {fact}
+            <span key={fact.key} className="inline-flex min-w-0 items-center gap-1">
+              {i > 0 && <span className="shrink-0 text-ink-mute opacity-50">·</span>}
+              <span className={`min-w-0 truncate ${fact.className}`}>{fact.text}</span>
             </span>
           ))}
-        </p>
+        </div>
       )}
 
       {red && (
