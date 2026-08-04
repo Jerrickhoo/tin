@@ -1032,3 +1032,101 @@ The sync loop came through **clean**: the offline short-circuit, cursor advancem
 - **Still no render tests.** 14.1 removed the trap in the way; it did not write them. Home, Insights and History remain the screens where a wrong number is worst.
 - **The `dirty` teardown window has no test.** The race is two adjacent microtasks deep inside `syncNow` and is not reachable deterministically without a hook in production code. The fix is defensive and provably inert otherwise, which is the trade taken.
 - **`AppShell.tsx` is still untested** — 7 effects, the boot sequence, and the check-in wake path that §12.1 already caught once.
+
+---
+
+## 15. Money type — the feature that never completed a round trip (2026-08-04)
+
+Reported as three separate complaints: cash spending shows up as **Online**, changing the split in Settings **does nothing**, and the two figures together come to **more than the balance**. They are one broken data path and three independent bugs sitting on top of it, so the symptoms compounded and none of them pointed at the cause.
+
+Nothing here was caught by the suite. 475 tests passed, `tsc` was clean, `eslint` was clean — and two of the tests asserted the broken behaviour as correct.
+
+### 15.1 The tag was erased by the next sync pass
+
+`money_type` was collected by the add sheet, written to the row, stored in Dexie, and queued to the outbox. Every one of those worked. Then:
+
+- `ENTRY_COLUMNS` in `db/remote.ts` did not list `money_type`, so the pull never asked for it, and `pullEntriesPage` rebuilt each row field by field without it.
+- `mirrorApplyPulledEntries` applies pulled rows with `bulkPut`, which **replaces the whole record**.
+- `lib/sync-rules.ts` re-pulls a 60-second overlap window on purpose.
+
+So a row tagged Cash was overwritten by an untagged copy of itself roughly one sync pass after it was saved. **The tag survived about a minute**, and the failure was silent in both directions — no error, no warning, and History's badge simply stopped rendering.
+
+The push half was already broken and already known: `pushInsertEntries` catches Postgres 42703 and retries with `money_type` stripped. That fallback was added in `0eb8ae1` to stop the outbox jamming, and it worked — at the cost of discarding the field on every write, permanently, with a passing test pinning the behaviour.
+
+**The column does not exist.** `money_type` appears in `001_core.sql`, but `git log -S` shows it was edited into that file in `0eb8ae1` — long after 001 had been applied. A migration already run is a historical record, not a spec: editing it changes what a fresh database gets and nothing about an existing one. `005_money_type.sql` adds it for real, idempotently, on both `entries` and `recurring_templates`.
+
+Both the entry pull and the template fetch now tolerate the column being missing, the same way the habit-table pulls do and for the same reason: `git push` ships the client via Netlify while migrations are applied by hand, and a hard failure in that window would take the **outbox drain** down with it. Breaking money sync to protect a label would be the wrong trade.
+
+The mirror now distinguishes `money_type: null` (the server holds the row and says untagged — overwrite) from the field being **absent** (the column was not selected — keep what is here). That distinction is what makes the deploy window safe rather than merely survivable.
+
+### 15.2 Untagged money was being filed under Online
+
+`summarizeMoneyTypeTotals` had two branches and both invented an answer:
+
+- **Nothing tagged** → the entire ledger was reported as `online`, `reallife: 0`. Combined with §15.1 this is the whole of the "my cash is showing as online" report: after the first sync everything was untagged, so everything was Online.
+- **Anything tagged** → untagged rows were dropped from both buckets silently. The two figures then could not add up to the balance, and nothing said so.
+
+There is no honest two-bucket answer, because *untagged* is a real and permanent third state — every entry written before the feature existed is untagged and there is no backfill that isn't a guess. So it is now a **bucket you can see**: `online + reallife + untagged` is exactly the live balance, as an invariant with a test on it. Home draws the third line only when it is non-zero, so a fully-tagged ledger reads as the two lines it should.
+
+### 15.3 The totals counted money that had been taken back
+
+`summarizeMoneyTypeTotals` never filtered `voided_at`, and `fetchAllEntriesNewestFirst` returns voided rows. So **every entry the user had ever undone was still propping up the figures** — the single biggest reason they exceeded the balance.
+
+This file was the *only* aggregator in `src/lib/` missing that filter. `balances.ts`, `allowance.ts`, `envelope-month.ts`, `logging-streak.ts`, `category-rank.ts` and both `frequent-*.ts` all had it. The rule was established, written down, and applied everywhere except here.
+
+### 15.4 A transfer credited a bucket with nothing debiting it
+
+`addTransfer` writes two legs. Only the **positive** one carried `money_type`. A transfer tagged Online therefore added `+₱500` to Online with no matching `−₱500` anywhere, because the untagged negative leg was being discarded by §15.2. Every transfer pushed the totals further past the balance.
+
+Both legs now carry the same type and cancel. A transfer moves money between *envelopes*, not between GCash and your pocket — its net effect on either bucket is zero, and the two legs are what express that. The picker says so in the sheet, so the field stops reading as "which way is this money going?".
+
+### 15.5 Settings wrote to a key nothing read
+
+`Home.tsx` called `summarizeMoneyTypeSummaryItems(..., useSnapshot: false)` at all three call sites. The saved targets were written, read back into the Settings inputs, and **ignored by the only screen that displays them**.
+
+Worse, the `tin-money-type-updated` listener recomputed the summary from an **empty row array**, so tapping Save reset the Home card to ₱0.00 / ₱0.00 until an unrelated refetch. The one action whose entire purpose was to update Home was the action that blanked it.
+
+The two inputs were collapsed into one derived state slot, and that collapse is what broke both halves. They move on completely different triggers — ledger totals when entries change, targets when Settings is saved — so they are separate state now, combined in a `useMemo`. The listener re-reads only the targets.
+
+A saved target is labelled **"target"** rather than "available", because a number the user asserted and a number the ledger computed should not be printed in the same weight and position. When targets pull the sum away from the balance, the card says so and links to Settings instead of quietly showing a total that contradicts the hero above it.
+
+`untagged` is deliberately **not** snapshot-able: it is a residual, not a goal, and letting it be edited would let the one number that proves the other two add up be adjusted into agreement.
+
+### 15.6 The Settings input showed one number and saved another
+
+`updateValue` clamped the parsed value to the available balance but wrote the **unclamped** text to the field. Typing ₱50,000 against a ₱3,000 balance left the input reading `50,000` and stored `3,000`.
+
+The panel also took its per-bucket figures from the entry rows and its total from `fetchBalances()` — two ledgers that disagreed by construction, since one counted voided rows and the other did not. "You are ₱X over your split target" was arithmetic across both. Every figure in the panel now comes from one call.
+
+### 15.7 Three write paths could not record a money type at all
+
+Opening balances hardcoded `money_type: null`; recurring catch-up and statement import never set it. Every entry they produced was untagged, permanently.
+
+Opening balances matter most here — they are *by definition* everything you already had, so on a young ledger they **are** the balance. Leaving them unclassified meant the card could never account for most of the tin.
+
+- **Opening balances** and **import** take an optional per-batch type. A statement is one account's history, so the importer asks once, at review, where the user can see what they pasted.
+- **Recurring templates** store it on the template, because a catch-up runs with nobody there to ask. Migration 005 adds the column; the template list shows "no money type" on a row that lacks one, so an untagged template stops silently feeding the untagged line every month.
+
+All three are **optional**, and that is the point: forcing a guess writes a wrong tag rather than an absent one. Money genuinely split across GCash and a wallet should land untagged and be visible as such.
+
+### 15.8 Smaller things in the same pass
+
+- **Three save controls looked live and did nothing.** The expense category chips, the income button and the transfer button all omitted `moneyTypeReady` from `disabled` while their handlers guarded on it. The second tap of the two-tap path gave the pressed animation and saved nothing.
+- **"Fix" silently re-filed an entry.** It carried the amount, note and date but dropped the money type, and the sheet requires an answer — so correcting a typo in a cash expense became an opportunity to file it as online. `AddPrefill` now carries it, via a `groupMoneyType` helper that refuses to guess when a group's legs disagree.
+- **History mixed filtered and unfiltered figures in one sentence.** The entry count and spend total described the filter; the money-type chips were computed over the whole ledger. Filter to Food and it read "3 entries · Online ₱42,000".
+- **The card said "Real life" where every control said "Cash".** `getMoneyTypeLabel` and the summary item's `label` field had drifted apart. One function names all three buckets now.
+- **Logout left the user's balances on the device.** `wipeLocalCaches` cleared Dexie and Cache Storage but never touched localStorage, so `tin.money-type-snapshot` — peso figures the user typed about their own accounts — greeted the next person on a shared laptop. Exactly the failure §6.6 exists to prevent, one storage API over. `lib/local-keys.ts` now holds every key with an explicit user-scoped list; `tin.texture` stays out of it on purpose, per `lib/texture.ts`.
+- **`src/lib/analytics.ts` held two raw NUL bytes.** Deliberate sentinels (`'\0uncategorized'`), but written as literal bytes rather than escapes — which made ripgrep classify the file as binary and **skip it in every content search**. Now `\0` escapes: same string, greppable file.
+- **A 0-byte file with a shell fragment for a name was sitting in the repo root**, from a botched command. Deleted.
+
+### 15.9 Two tests were pinning the bugs in place
+
+`money-type.test.ts` asserted that untagged rows are dropped from the totals, and that the snapshot is ignored by the Home summary. Both were the defect, written down as expected output — which is why the suite stayed green through all of it.
+
+Rewritten, and the round trip is now covered where it was not: a pull that omits `money_type` leaves the local tag alone, an explicit `null` clears it, the pull falls back to the pre-005 column list instead of failing the sync, both transfer legs carry the type, voided rows are excluded, and the three buckets sum to the live balance. 475 → 496.
+
+### 15.10 Still open
+
+- **No render test for the money card.** The three-bucket arithmetic and the snapshot precedence are unit-tested; that Home *draws* them, and that the drift line appears when targets disagree with the balance, are not. Same gap §14.5 names for Home generally.
+- **No backfill for untagged history.** By design — the app cannot know how a coffee in March was paid — but it means the untagged line will be large for existing users and there is no bulk-tagging tool. A "tag these N entries" flow in History is the obvious next step and is not built.
+- **Migration 005 has to be applied by hand.** The client tolerates its absence on both the entry pull and the template fetch, so nothing breaks in the window; but until it is run, money types still do not persist to the server. **This is the deploy-order bite §9.6 warned about, and it is the one step that cannot be skipped.**
