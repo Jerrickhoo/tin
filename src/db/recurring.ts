@@ -11,6 +11,7 @@ import { assertSplittable } from '../lib/shares'
 import { splitByLargestRemainder } from '../lib/split'
 import { dueDateOccurredAt, dueDatesUpTo, firstRunOnOrAfter, nextRunAfter } from '../lib/recurring'
 import { TIN_RECURRING_NAMESPACE, uuidv5 } from '../lib/uuidv5'
+import type { MoneyType } from '../lib/money-type'
 
 export interface RecurringTemplate {
   id: string
@@ -21,17 +22,55 @@ export interface RecurringTemplate {
   day_of_month: number
   next_run_on: string
   paused_at: string | null
+  /**
+   * Which pot every posting from this template lands in.
+   *
+   * Stored on the TEMPLATE rather than asked at post time, because a catch-up
+   * runs unattended on app open — there is nobody there to ask. Rent leaves the
+   * same account every month; that regularity is what makes it a template.
+   *
+   * Null is allowed and means untagged, which is what every template written
+   * before this column keeps doing until its owner edits it. The alternative was
+   * defaulting to a bucket on their behalf and being quietly wrong every month.
+   */
+  money_type: MoneyType | null
 }
 
-const COLUMNS = 'id, kind, category_id, amount_centavos, note, day_of_month, next_run_on, paused_at'
+const COLUMNS =
+  'id, kind, category_id, amount_centavos, note, day_of_month, next_run_on, paused_at, money_type'
+
+/** The same list without money_type, for a database predating migration 005. */
+const COLUMNS_WITHOUT_MONEY_TYPE =
+  'id, kind, category_id, amount_centavos, note, day_of_month, next_run_on, paused_at'
+
+function isMissingMoneyTypeColumn(error: { code?: string; message?: string }): boolean {
+  const message = error.message ?? ''
+  return error.code === '42703' || error.code === 'PGRST204' || /money_type/i.test(message)
+}
 
 export async function fetchTemplates(): Promise<RecurringTemplate[]> {
   const { data, error } = await supabase
     .from('recurring_templates')
     .select(COLUMNS)
     .order('day_of_month')
-  if (error) throw error
-  return (data ?? []) as RecurringTemplate[]
+  if (!error) return (data ?? []) as RecurringTemplate[]
+
+  // Same deploy-window tolerance the entry pull has: the client ships via
+  // Netlify the moment it is pushed, migrations are applied by hand, and this
+  // screen going down in between would be a worse outcome than it showing
+  // templates with no money type on them for a few minutes.
+  if (isMissingMoneyTypeColumn(error)) {
+    const { data: fallback, error: fallbackError } = await supabase
+      .from('recurring_templates')
+      .select(COLUMNS_WITHOUT_MONEY_TYPE)
+      .order('day_of_month')
+    if (fallbackError) throw fallbackError
+    return ((fallback ?? []) as Omit<RecurringTemplate, 'money_type'>[]).map((t) => ({
+      ...t,
+      money_type: null,
+    }))
+  }
+  throw error
 }
 
 export async function createTemplate(params: {
@@ -40,6 +79,7 @@ export async function createTemplate(params: {
   categoryId: string | null
   note: string
   dayOfMonth: number
+  moneyType: MoneyType | null
 }): Promise<void> {
   if (!Number.isSafeInteger(params.amountCentavos) || params.amountCentavos <= 0) {
     throw new RangeError('template amount must be positive centavos')
@@ -54,6 +94,7 @@ export async function createTemplate(params: {
     note: params.note.trim() || null,
     day_of_month: params.dayOfMonth,
     next_run_on: firstRunOnOrAfter(manilaDayKey(new Date()), params.dayOfMonth),
+    money_type: params.moneyType,
   })
   if (error) throw error
 }
@@ -73,6 +114,7 @@ export async function updateTemplate(
     note: string
     dayOfMonth: number
     previousDayOfMonth: number
+    moneyType: MoneyType | null
   },
 ): Promise<void> {
   // same guards createTemplate applies — the DB checks these too, but a raw
@@ -96,6 +138,11 @@ export async function updateTemplate(
     category_id: params.categoryId,
     note: params.note.trim() || null,
     day_of_month: params.dayOfMonth,
+    // Editable, unlike the money type on an ENTRY — a template is a standing
+    // instruction about future postings, not a record of one that happened, so
+    // changing it is a correction rather than a rewrite of history. Postings
+    // already made keep the type they were made with.
+    money_type: params.moneyType,
   }
   if (params.dayOfMonth !== params.previousDayOfMonth) {
     patch.next_run_on = firstRunOnOrAfter(manilaDayKey(new Date()), params.dayOfMonth)
@@ -136,6 +183,7 @@ interface PostingRow {
   amount_centavos: number
   note: string | null
   occurred_at: string
+  money_type: MoneyType | null
 }
 
 export interface CatchUpResult {
@@ -211,6 +259,7 @@ export async function runCatchUp(): Promise<CatchUpResult> {
             amount_centavos: -template.amount_centavos,
             note: template.note,
             occurred_at: occurredAt,
+            money_type: template.money_type,
           },
         ]
       } else {
@@ -239,6 +288,9 @@ export async function runCatchUp(): Promise<CatchUpResult> {
               amount_centavos: parts[i],
               note: template.note,
               occurred_at: occurredAt,
+              // Every leg of the split carries the same type — an income lands
+              // in one pot and is divided between envelopes, not between pots.
+              money_type: template.money_type,
             })),
           )
         ).filter((r) => r.amount_centavos > 0)

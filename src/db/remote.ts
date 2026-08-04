@@ -9,6 +9,20 @@ import type { NewEntryRow } from './outbox'
 import type { CategoryRow, EnvelopeRow, PulledCheckIn, StreakSaveRow } from './dexie'
 
 const ENTRY_COLUMNS =
+  'id, group_id, kind, envelope_id, category_id, amount_centavos, note, occurred_at, voided_at, void_reason, money_type'
+
+/**
+ * The same column list without `money_type`, for a database that predates
+ * migration 005.
+ *
+ * The push has always had a fallback for that case; the pull never did, because
+ * the pull never asked for the column at all. Now that it does, a missing column
+ * would turn every sync pass into a hard failure — including the outbox drain
+ * that pushes money — for the length of the deploy window. Same trade the
+ * habit-table pulls make and for the same reason (see isMissingTable below):
+ * `git push` ships the client while migrations are applied by hand.
+ */
+const ENTRY_COLUMNS_WITHOUT_MONEY_TYPE =
   'id, group_id, kind, envelope_id, category_id, amount_centavos, note, occurred_at, voided_at, void_reason'
 
 /**
@@ -33,6 +47,9 @@ function isMissingEntriesMoneyTypeColumn(
   const message = error.message ?? ''
   return (
     error.code === '42703' ||
+    // PostgREST's schema cache reports an unknown column in a select as PGRST204
+    // rather than passing Postgres's 42703 through
+    error.code === 'PGRST204' ||
     /could not find the ['"]money_type['"] column/i.test(message) ||
     /column .*money_type.*does not exist/i.test(message)
   )
@@ -90,20 +107,33 @@ export async function pullEntriesPage(
   after: { updatedAt: string; id: string } | null,
   limit: number,
 ): Promise<PulledEntriesPage> {
-  let query = supabase
-    .from('entries')
-    .select(`${ENTRY_COLUMNS}, updated_at`)
-    .order('updated_at', { ascending: true })
-    .order('id', { ascending: true })
-    .limit(limit)
-  if (after) {
-    query = query.or(
-      `updated_at.gt.${after.updatedAt},and(updated_at.eq.${after.updatedAt},id.gt.${after.id})`,
-    )
+  const run = (columns: string) => {
+    let query = supabase
+      .from('entries')
+      .select(`${columns}, updated_at`)
+      .order('updated_at', { ascending: true })
+      .order('id', { ascending: true })
+      .limit(limit)
+    if (after) {
+      query = query.or(
+        `updated_at.gt.${after.updatedAt},and(updated_at.eq.${after.updatedAt},id.gt.${after.id})`,
+      )
+    }
+    return query
   }
-  const { data, error } = await query
+
+  let { data, error } = await run(ENTRY_COLUMNS)
+  // A database without migration 005 applied. Retrying without the column keeps
+  // the ledger syncing; `hasMoneyType` then tells the mirror not to read the
+  // absent field as "the server says untagged".
+  let hasMoneyType = true
+  if (error && isMissingEntriesMoneyTypeColumn(error)) {
+    hasMoneyType = false
+    ;({ data, error } = await run(ENTRY_COLUMNS_WITHOUT_MONEY_TYPE))
+  }
   if (error) throw new Error(error.message)
-  const raw = (data ?? []) as (EntryRow & { updated_at: string })[]
+
+  const raw = (data ?? []) as unknown as (EntryRow & { updated_at: string })[]
   const rows: EntryRow[] = raw.map((r) => ({
     id: r.id,
     group_id: r.group_id,
@@ -115,6 +145,10 @@ export async function pullEntriesPage(
     occurred_at: r.occurred_at,
     voided_at: r.voided_at,
     void_reason: r.void_reason,
+    // Present (possibly null) when the server has the column, ABSENT when it
+    // does not. The mirror distinguishes the two: null overwrites a local tag
+    // because the server genuinely says untagged, undefined leaves it alone.
+    ...(hasMoneyType ? { money_type: r.money_type ?? null } : {}),
   }))
   const updatedAts = raw.map((r) => r.updated_at)
   const lastRaw = raw[raw.length - 1]

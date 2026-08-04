@@ -14,7 +14,9 @@
 // neither private nor theirs alone, and having the app change appearance when
 // you sign out would read as a bug.
 
-const STORAGE_KEY = 'tin.texture'
+import { TEXTURE_KEY } from './local-keys'
+
+const STORAGE_KEY = TEXTURE_KEY
 const REDUCED = 'reduced'
 const FULL = 'full'
 

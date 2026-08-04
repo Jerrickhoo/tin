@@ -25,6 +25,7 @@ import {
 } from './dexie'
 import { drainOutbox, type OutboxOp } from './outbox'
 import * as entriesDb from './entries'
+import { summarizeMoneyTypeTotals } from '../lib/money-type'
 
 const ENVELOPES = [
   {
@@ -153,11 +154,23 @@ describe('local-first mirror + outbox', () => {
       fromEnvelopeId: 'env-savings',
       toEnvelopeId: 'env-needs',
       occurredAt: '2026-07-12T04:00:00.000Z',
+      moneyType: 'online',
     })
     const rows = await entriesDb.fetchEntries()
     const legs = rows.filter((r) => r.group_id === transferGroup)
     expect(legs.reduce((s, l) => s + l.amount_centavos, 0)).toBe(0)
     expect(await outboxCount()).toBe(4)
+  })
+
+  it('addTransfer tags BOTH legs, so the money type nets out too', async () => {
+    // Only the positive leg used to be tagged, which credited the bucket with
+    // money nothing debited — every transfer pushed the money-type totals
+    // further past the balance they were supposed to explain.
+    const rows = await entriesDb.fetchEntries()
+    const legs = rows.filter((r) => r.group_id === transferGroup)
+    expect(legs).toHaveLength(2)
+    expect(legs.every((l) => l.money_type === 'online')).toBe(true)
+    expect(summarizeMoneyTypeTotals(legs)).toEqual({ online: 0, reallife: 0, untagged: 0 })
   })
 
   it('newest-first timeline order from the compound index', async () => {
@@ -273,6 +286,62 @@ describe('local-first mirror + outbox', () => {
     expect(incomeOp.op === 'insert_entries' && incomeOp.rows).toHaveLength(2)
     const directIncomeOp = executed[2]
     expect(directIncomeOp.op === 'insert_entries' && directIncomeOp.rows).toHaveLength(1)
+  })
+
+  // Placed after the FIFO assertion above deliberately: these write entries, and
+  // that test pins the exact op sequence the outbox accumulated before it.
+  it('a pull that omits money_type leaves the local tag alone', async () => {
+    // THE bug. The pull did not select money_type and bulkPut replaces the whole
+    // record, so a locally-tagged row came back untagged. With the ~60 s overlap
+    // window a tag survived roughly one sync pass before being erased, and an
+    // all-untagged ledger then rendered as "everything is Online".
+    const group = await entriesDb.addExpense({
+      amountCentavos: 4200,
+      category: {
+        id: 'cat-food',
+        envelope_id: 'env-needs',
+        name: 'Food',
+        emoji: null,
+        archived_at: null,
+      },
+      occurredAt: '2026-07-14T04:00:00.000Z',
+      moneyType: 'reallife',
+    })
+    const before = (await entriesDb.fetchAllEntriesForExport()).find((r) => r.group_id === group)!
+    expect(before.money_type).toBe('reallife')
+
+    // A database without migration 005: the column is absent from the payload.
+    const withoutMoneyType = { ...before }
+    delete withoutMoneyType.money_type
+    await mirrorApplyPulledEntries([withoutMoneyType])
+
+    const after = (await entriesDb.fetchAllEntriesForExport()).find((r) => r.group_id === group)
+    expect(after?.money_type).toBe('reallife')
+  })
+
+  it('but an explicit null from the server DOES clear the local tag', async () => {
+    // The other half, and why this is not simply "never overwrite": once the
+    // column exists, `money_type: null` is the server genuinely saying untagged —
+    // another device clearing it, say — and a mirror that ignored that would keep
+    // a stale tag alive forever.
+    const group = await entriesDb.addExpense({
+      amountCentavos: 999,
+      category: {
+        id: 'cat-food',
+        envelope_id: 'env-needs',
+        name: 'Food',
+        emoji: null,
+        archived_at: null,
+      },
+      occurredAt: '2026-07-15T04:00:00.000Z',
+      moneyType: 'online',
+    })
+    const row = (await entriesDb.fetchAllEntriesForExport()).find((r) => r.group_id === group)!
+
+    await mirrorApplyPulledEntries([{ ...row, money_type: null }])
+
+    const after = (await entriesDb.fetchAllEntriesForExport()).find((r) => r.group_id === group)
+    expect(after?.money_type).toBeNull()
   })
 
   it('cursor round-trips through meta', async () => {

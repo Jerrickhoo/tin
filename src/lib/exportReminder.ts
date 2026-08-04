@@ -7,7 +7,9 @@
 // The decision (is a nudge due?) is a pure function so it's unit-tested; the
 // localStorage read/write is a thin, environment-guarded wrapper around it.
 
-const STORAGE_KEY = 'tin.lastExportAt'
+import { LAST_EXPORT_KEY } from './local-keys'
+
+const STORAGE_KEY = LAST_EXPORT_KEY
 const DEFAULT_THRESHOLD_DAYS = 30
 const MS_PER_DAY = 86_400_000
 

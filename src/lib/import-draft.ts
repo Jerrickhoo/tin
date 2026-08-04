@@ -20,6 +20,7 @@ import { manilaDayKey } from './dates'
 import { assertSplittable } from './shares'
 import { splitByLargestRemainder } from './split'
 import type { EntryKind, LedgerGroup } from './groups'
+import type { MoneyType } from './money-type'
 import { TIN_IMPORT_NAMESPACE, uuidv5 } from './uuidv5'
 
 /** One row as read off a statement. The parser's entire output contract. */
@@ -235,6 +236,7 @@ export interface ImportLedgerRow {
   amount_centavos: number
   note: string | null
   occurred_at: string
+  money_type: MoneyType | null
 }
 
 const noteFrom = (description: string): string | null =>
@@ -253,11 +255,22 @@ export async function draftToLedgerRows(
   context: {
     envelopes: readonly { id: string; share_bp: number }[]
     categoryEnvelopeId: (categoryId: string) => string | undefined
+    /**
+     * Which pot the imported statement is FROM. One value for the whole batch,
+     * because a statement is one account's history — a GCash export is online
+     * money from its first row to its last, and asking per row would be asking
+     * the same question a hundred times.
+     *
+     * Optional and defaulting to untagged, so a caller that has no idea writes
+     * nothing rather than guessing on the user's behalf.
+     */
+    moneyType?: MoneyType | null
   },
 ): Promise<ImportLedgerRow[]> {
   const { row, sourceKey } = draft
   const groupId = await groupIdFor(sourceKey)
   const note = noteFrom(row.description)
+  const moneyType = context.moneyType ?? null
 
   if (row.direction === 'debit') {
     if (!draft.categoryId) throw new RangeError('an imported expense needs a category')
@@ -273,6 +286,7 @@ export async function draftToLedgerRows(
         amount_centavos: -row.amountCentavos,
         note,
         occurred_at: row.postedAt,
+        money_type: moneyType,
       },
     ]
   }
@@ -292,6 +306,7 @@ export async function draftToLedgerRows(
       amount_centavos: parts[i],
       note,
       occurred_at: row.postedAt,
+      money_type: moneyType,
     })),
   )
   // a 0% envelope gets no leg — amount_centavos <> 0 is a DB check

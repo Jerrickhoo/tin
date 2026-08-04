@@ -11,7 +11,6 @@ import {
   fetchAllEntriesForExport,
   fetchAllEntriesNewestFirst,
   fetchAllEnvelopesForExport,
-  fetchBalances,
 } from '../../db/entries'
 import { applyRestore, planRestoreFromBundle } from '../../db/restore'
 import { entriesToCsv, entriesToJson } from '../../lib/export'
@@ -22,14 +21,17 @@ import { exportReminderStatus, getLastExport, recordExport } from '../../lib/exp
 import { getTexture, setTexture, type Texture } from '../../lib/texture'
 import {
   clampMoneyAmountToMax,
+  emptyMoneyTypeTotals,
   formatMoneyInput,
-  getMoneyTypeLabel,
+  getMoneyBucketLabel,
+  MONEY_TYPE_UPDATED_EVENT,
   parseMoneyInputToCentavos,
   readMoneyTypeSnapshot,
   sanitizeMoneyInput,
   summarizeMoneyTypeTotals,
   writeMoneyTypeSnapshot,
   type MoneyTypeSnapshot,
+  type MoneyTypeTotals,
 } from '../../lib/money-type'
 import { applyKeypadKey, KEYPAD_PLACEHOLDER, type KeypadKey } from '../../lib/keypad'
 import { Keypad } from '../../components/Keypad'
@@ -184,41 +186,47 @@ function AppearanceSection() {
   )
 }
 
+/** centavos → the comma-grouped text the money inputs display. */
+const centavosToInput = (centavos: number | null): string =>
+  centavos === null ? '' : formatMoneyInput((centavos / 100).toFixed(2))
+
+/**
+ * Saved targets for the two money buckets, next to what the ledger actually says.
+ *
+ * A "target" here is explicitly NOT a measurement — it is the user asserting how
+ * their money is split when the ledger cannot know, and Home now labels it as
+ * such. Which it did not before: Home passed `useSnapshot: false` everywhere, so
+ * this whole panel wrote to a key nothing read.
+ */
 function MoneySummarySection() {
   const toast = useToast()
   const { version } = useLedger()
-  const initialSnapshot = readMoneyTypeSnapshot()
-  const [snapshot, setSnapshot] = useState<MoneyTypeSnapshot>(initialSnapshot)
-  const [liveBalances, setLiveBalances] = useState({ online: 0, reallife: 0 })
-  const [liveTotal, setLiveTotal] = useState(0)
+  const [snapshot, setSnapshot] = useState<MoneyTypeSnapshot>(readMoneyTypeSnapshot)
+  const [live, setLive] = useState<MoneyTypeTotals>(emptyMoneyTypeTotals)
   const coarse = useCoarsePointer()
   const [activeKeypad, setActiveKeypad] = useState<'online' | 'reallife'>('online')
-  const [inputValues, setInputValues] = useState<Record<'online' | 'reallife', string>>({
-    online:
-      initialSnapshot.online === null
-        ? ''
-        : formatMoneyInput((initialSnapshot.online / 100).toFixed(2)),
-    reallife:
-      initialSnapshot.reallife === null
-        ? ''
-        : formatMoneyInput((initialSnapshot.reallife / 100).toFixed(2)),
+  const [inputValues, setInputValues] = useState<Record<'online' | 'reallife', string>>(() => {
+    const initial = readMoneyTypeSnapshot()
+    return {
+      online: centavosToInput(initial.online),
+      reallife: centavosToInput(initial.reallife),
+    }
   })
 
   useEffect(() => {
     let active = true
     ;(async () => {
       try {
-        const [rows, balances] = await Promise.all([fetchAllEntriesNewestFirst(), fetchBalances()])
+        const rows = await fetchAllEntriesNewestFirst()
         if (!active) return
-        const totals = summarizeMoneyTypeTotals(rows)
-        const total = Array.from(balances.values()).reduce((sum, value) => sum + value, 0)
-        setLiveBalances({ online: totals.online, reallife: totals.reallife })
-        setLiveTotal(total)
+        // ONE source for every figure in this panel. It used to take the per-
+        // bucket numbers from the entry rows and the total from `fetchBalances`,
+        // and those two disagreed by construction — the summariser counted voided
+        // rows and the balances view did not — so "you are ₱X over your target"
+        // could be arithmetic on two different ledgers.
+        setLive(summarizeMoneyTypeTotals(rows))
       } catch {
-        if (active) {
-          setLiveBalances({ online: 0, reallife: 0 })
-          setLiveTotal(0)
-        }
+        if (active) setLive(emptyMoneyTypeTotals())
       }
     })()
 
@@ -227,21 +235,31 @@ function MoneySummarySection() {
     }
   }, [version])
 
+  const liveTotal = live.online + live.reallife + live.untagged
+
   function updateValue(key: 'online' | 'reallife', value: string) {
     const cleaned = sanitizeMoneyInput(value)
     const parsed = parseMoneyInputToCentavos(cleaned)
     const otherKey = key === 'online' ? 'reallife' : 'online'
     const max = Math.max(0, liveTotal - (snapshot[otherKey] ?? 0))
     const nextValue = parsed === null ? null : clampMoneyAmountToMax(parsed, max)
-    setInputValues((current) => ({ ...current, [key]: formatMoneyInput(cleaned) }))
+    // The FIELD gets the clamped value too. It used to keep the raw text while
+    // only the saved snapshot was capped, so typing ₱50,000 against a ₱3,000
+    // balance left the input reading 50,000 and silently stored 3,000 — the
+    // screen and the storage disagreeing about the number you were looking at.
+    // A half-typed value ("12.") has no parse yet and is left alone, or the
+    // caret would fight every keystroke.
+    setInputValues((current) => ({
+      ...current,
+      [key]: nextValue === null ? formatMoneyInput(cleaned) : centavosToInput(nextValue),
+    }))
     setSnapshot((current) => ({ ...current, [key]: nextValue }))
   }
 
   function handleKeypadKey(key: KeypadKey) {
     const keyName = activeKeypad
     const raw = inputValues[keyName].replace(/,/g, '')
-    const next = applyKeypadKey(raw, key)
-    updateValue(keyName, next)
+    updateValue(keyName, applyKeypadKey(raw, key))
   }
 
   function clearValue(key: 'online' | 'reallife') {
@@ -251,54 +269,54 @@ function MoneySummarySection() {
 
   function save() {
     writeMoneyTypeSnapshot(snapshot)
-    window.dispatchEvent(new Event('tin-money-type-updated'))
-    toast.show('Updated your current money view')
+    window.dispatchEvent(new Event(MONEY_TYPE_UPDATED_EVENT))
+    toast.show('Saved — Home is showing these targets now')
   }
 
-  function compareDelta(value: number | null, key: 'online' | 'reallife') {
-    const live = liveBalances[key]
-    if (value === null) return null
-    return live - value
-  }
-
-  const totalLiveBalance = liveTotal
-  const totalSavedBalance = (snapshot.online ?? 0) + (snapshot.reallife ?? 0)
-  const totalDelta = totalLiveBalance - totalSavedBalance
+  // Untagged is live-only and has no input: it is the residual the ledger
+  // reports, not a bucket to aim at. Overriding it would let the one number that
+  // proves the other two add up be edited into agreeing with them.
+  const targetTotal = (snapshot.online ?? live.online) + (snapshot.reallife ?? live.reallife)
+  const totalDelta = liveTotal - (targetTotal + live.untagged)
 
   return (
     <section className="card p-4">
       <h2 className="font-display text-[0.6875rem] leading-relaxed">Current money</h2>
       <p className="mt-1 mb-3 text-sm text-ink-soft">
-        Keep a simple target in mind for Home and compare it with your live balance.
+        Tell Home how your balance is split between online and cash. Leave a bucket blank to let it
+        follow the ledger instead.
       </p>
       <div className="mb-3 rounded-2xl border border-line/70 bg-base/50 p-3">
         <p className="text-[0.65rem] font-semibold uppercase tracking-[0.24em] text-ink-mute">
           Available balance
         </p>
-        <p className="mt-1 text-lg font-semibold text-ink tabular-nums">
-          {formatPHP(totalLiveBalance)}
-        </p>
+        <p className="mt-1 text-lg font-semibold text-ink tabular-nums">{formatPHP(liveTotal)}</p>
         <p className="mt-2 text-xs text-ink-soft">
           {totalDelta === 0
-            ? 'Your saved targets match your current balance.'
+            ? 'Your saved targets add up to your current balance.'
             : totalDelta > 0
-              ? `You still have ${formatPHP(totalDelta)} left to split.`
-              : `You are ${formatPHP(Math.abs(totalDelta))} over your current split target.`}
+              ? `${formatPHP(totalDelta)} of your balance is not covered by these targets.`
+              : `Your targets are ${formatPHP(Math.abs(totalDelta))} more than you actually have.`}
         </p>
+        {live.untagged !== 0 && (
+          <p className="mt-1.5 text-xs text-ink-mute tabular-nums">
+            {formatPHP(live.untagged)} is untagged — entries saved without a money type. That figure
+            is the ledger's, not a target, so it is not editable here.
+          </p>
+        )}
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         {(['online', 'reallife'] as const).map((key) => {
           const value = snapshot[key]
-          const delta = compareDelta(value, key)
-          const isAbove = (delta ?? 0) > 0
+          const delta = value === null ? null : live[key] - value
           return (
             <label key={key} className="rounded-2xl border border-line bg-base/50 p-3">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[0.65rem] font-semibold uppercase tracking-[0.24em] text-ink-mute">
-                  {getMoneyTypeLabel(key)}
+                  {getMoneyBucketLabel(key)}
                 </span>
                 <span className="text-[0.65rem] uppercase tracking-[0.24em] text-ink-soft">
-                  live {formatPHP(liveBalances[key])}
+                  live {formatPHP(live[key])}
                 </span>
               </div>
               <div className="mt-2 flex items-center gap-2 rounded-xl border border-line/70 bg-base/40 px-2.5 py-2">
@@ -323,12 +341,12 @@ function MoneySummarySection() {
               </div>
               <p className="mt-2 text-xs text-ink-soft">
                 {value === null
-                  ? 'Leave it blank if you do not want a saved target for this bucket.'
-                  : delta === null || delta === 0
-                    ? 'This value is already aligned with your current balance.'
-                    : isAbove
-                      ? `This is ${formatPHP(delta)} above the current balance.`
-                      : `This is ${formatPHP(Math.abs(delta))} below the current balance.`}
+                  ? 'Blank — Home shows the live ledger figure for this bucket.'
+                  : delta === 0
+                    ? 'Matches what the ledger says for this bucket.'
+                    : (delta ?? 0) > 0
+                      ? `${formatPHP(delta ?? 0)} below what the ledger says.`
+                      : `${formatPHP(Math.abs(delta ?? 0))} above what the ledger says.`}
               </p>
             </label>
           )

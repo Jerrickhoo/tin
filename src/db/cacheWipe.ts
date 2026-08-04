@@ -1,11 +1,12 @@
 // Logout hygiene (ROADMAP 6.6): without this, logout on a shared laptop is
 // theatre — the Dexie mirror would keep serving the previous user's money to
 // whoever opens the app next. Deletes the local database (mirror + outbox +
-// cursor) and every Cache Storage bucket; the service worker re-precaches a
-// clean app shell on the next online load.
+// cursor), the per-user localStorage keys, and every Cache Storage bucket; the
+// service worker re-precaches a clean app shell on the next online load.
 
 import { wipeLocalDb } from './dexie'
 import { settleSync, stopSync } from './sync'
+import { USER_SCOPED_LOCAL_KEYS } from '../lib/local-keys'
 
 /**
  * Caches holding only the precached app shell — JS, CSS, fonts, index.html.
@@ -15,6 +16,19 @@ import { settleSync, stopSync } from './sync'
  */
 const isAppShellCache = (key: string): boolean => /workbox-precache/.test(key)
 
+/**
+ * Forget every localStorage key that describes the PERSON rather than the
+ * device — the saved money targets, when they last backed up, which streak gap
+ * they let go. lib/local-keys.ts holds the list and argues what stays.
+ */
+function clearUserLocalKeys(): void {
+  try {
+    for (const key of USER_SCOPED_LOCAL_KEYS) localStorage.removeItem(key)
+  } catch {
+    /* private mode — nothing was persisted, so nothing needs clearing */
+  }
+}
+
 export async function wipeLocalCaches(): Promise<void> {
   // stop first so nothing re-opens the database behind the wipe, then wait for
   // the pass already in flight — deleting Dexie out from under a running
@@ -22,6 +36,17 @@ export async function wipeLocalCaches(): Promise<void> {
   stopSync()
   await settleSync()
   await wipeLocalDb()
+  // The wipe used to stop at Dexie, and localStorage was quietly outside it.
+  // `tin.money-type-snapshot` holds peso figures the user typed about their own
+  // GCash and cash on hand, so on a shared laptop the next person's Settings
+  // screen opened pre-filled with the last person's balances — exactly the
+  // failure 6.6 exists to prevent, one storage API over.
+  //
+  // Only the keys that are ABOUT a user are cleared. `tin.texture` is a display
+  // preference belonging to the device (see lib/texture.ts, which argues that
+  // case) and survives logout on purpose; wiping it would reset the screen for
+  // whoever set it, to protect nothing.
+  clearUserLocalKeys()
   if ('caches' in globalThis) {
     const keys = await caches.keys()
     await Promise.all(keys.filter((key) => !isAppShellCache(key)).map((key) => caches.delete(key)))

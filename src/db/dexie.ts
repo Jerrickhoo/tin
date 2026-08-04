@@ -287,14 +287,42 @@ function normalizeIso(value: string): string {
   return new Date(value).toISOString()
 }
 
+/**
+ * Fold a page of pulled entries into the mirror.
+ *
+ * `bulkPut` REPLACES the whole record, which is correct — the server is the
+ * truth — but only for fields the pull actually carried. That distinction used
+ * to cost the money-type feature everything it recorded: the pull did not select
+ * `money_type`, so every pass overwrote a locally-tagged row with an untagged
+ * one, and with a ~60 s overlap window (lib/sync-rules.ts) a tag survived about
+ * one sync pass before being erased.
+ *
+ * So a field the pull did not carry is preserved rather than nulled. The two
+ * cases are genuinely different and the pull is careful to distinguish them:
+ * `money_type: null` means the server holds the row and says it is untagged, and
+ * that must overwrite a stale local tag; `money_type` absent means the column
+ * was not selected (a database without migration 005), and the local value is
+ * then the only copy there is.
+ */
 export async function mirrorApplyPulledEntries(rows: readonly EntryRow[]): Promise<void> {
   const db = await localDb()
+  const ids = rows.map((r) => r.id)
+  const existing = new Map(
+    (await db.entries.where('id').anyOf(ids).toArray()).map((r) => [r.id, r]),
+  )
   await db.entries.bulkPut(
-    rows.map((r) => ({
-      ...r,
-      occurred_at: normalizeIso(r.occurred_at),
-      voided_at: r.voided_at === null ? null : normalizeIso(r.voided_at),
-    })),
+    rows.map((r) => {
+      const next: EntryRow = {
+        ...r,
+        occurred_at: normalizeIso(r.occurred_at),
+        voided_at: r.voided_at === null ? null : normalizeIso(r.voided_at),
+      }
+      if (!('money_type' in r)) {
+        const local = existing.get(r.id)?.money_type
+        if (local !== undefined) next.money_type = local
+      }
+      return next
+    }),
   )
 }
 

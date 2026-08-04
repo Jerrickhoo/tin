@@ -16,7 +16,7 @@ import { manilaDayKey } from '../../lib/dates'
 import { groupEntries, type EntryKind, type EntryRow, type LedgerGroup } from '../../lib/groups'
 import { filterGroups, isQueryActive, totalsFor, type LedgerQuery } from '../../lib/ledger-filter'
 import { formatPHP } from '../../lib/money'
-import { getMoneyTypeLabel, summarizeMoneyTypeTotals } from '../../lib/money-type'
+import { getMoneyTypeLabel, groupMoneyType, summarizeMoneyTypeTotals } from '../../lib/money-type'
 
 const manilaTime = new Intl.DateTimeFormat('en-PH', {
   timeZone: 'Asia/Manila',
@@ -151,7 +151,16 @@ export function History() {
     [rows, query, names],
   )
   const totals = useMemo(() => totalsFor(matched), [matched])
-  const moneyTotals = useMemo(() => summarizeMoneyTypeTotals(rows ?? []), [rows])
+  // Over the MATCHED groups, not the whole ledger. These render inside the same
+  // sentence as the entry count and the spend total, both of which describe the
+  // filter — so reading the money types off `rows` made one line state three
+  // numbers about two different sets, with nothing marking the seam. Filter to
+  // Food and it said "3 entries · Online ₱42,000", where the ₱42,000 was every
+  // online peso on the ledger.
+  const moneyTotals = useMemo(
+    () => summarizeMoneyTypeTotals(matched.flatMap((group) => group.legs)),
+    [matched],
+  )
 
   const days = useMemo(() => {
     const byDay = new Map<string, LedgerGroup[]>()
@@ -216,12 +225,19 @@ export function History() {
       return
     }
     const note = group.note ?? undefined
+    // Carried through, like the amount and the date: a Fix is a re-entry of the
+    // SAME transaction, and anything it drops is a field the user has to notice
+    // is missing and retype. Money type was being dropped, so fixing a ₱200 cash
+    // expense to ₱250 reopened with the picker blank — and the sheet requires an
+    // answer, so the correction quietly became an opportunity to file it wrong.
+    const moneyType = groupMoneyType(group.legs)
     if (group.kind === 'expense') {
       addSheet.open({
         mode: 'expense',
         amountCentavos: -group.totalCentavos,
         note,
         occurredAt: group.occurredAt,
+        moneyType,
       })
     } else if (group.kind === 'income') {
       addSheet.open({
@@ -229,6 +245,7 @@ export function History() {
         amountCentavos: group.totalCentavos,
         note,
         occurredAt: group.occurredAt,
+        moneyType,
       })
     } else if (group.kind === 'transfer') {
       const from = group.legs.find((l) => l.amount_centavos < 0)
@@ -240,6 +257,7 @@ export function History() {
         toEnvelopeId: to?.envelope_id,
         note,
         occurredAt: group.occurredAt,
+        moneyType,
       })
     }
   }
@@ -350,6 +368,15 @@ export function History() {
                   <span className="text-ink-soft">
                     {getMoneyTypeLabel('reallife')} {formatPHP(moneyTotals.reallife)}
                   </span>
+                </>
+              )}
+              {/* Stated rather than left out, and for the same reason Home shows
+                  it: two chips that silently exclude untagged rows are two chips
+                  that do not add up to the entries counted beside them. */}
+              {moneyTotals.untagged !== 0 && (
+                <>
+                  <span className="mx-1.5 text-ink-mute opacity-50">·</span>
+                  <span className="text-ink-mute">Untagged {formatPHP(moneyTotals.untagged)}</span>
                 </>
               )}
               {totals.spentCentavos > 0 && (

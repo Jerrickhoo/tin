@@ -20,6 +20,7 @@ import {
   type ImportLedgerRow,
   type StatementRow,
 } from '../lib/import-draft'
+import type { MoneyType } from '../lib/money-type'
 
 /** Outbox payloads stay a sane size on a year-long backfill. */
 const COMMIT_CHUNK_ROWS = 200
@@ -78,7 +79,10 @@ export interface CommitResult {
  * upsert ignore ids they already hold. That's the roadmap's "source-row hash"
  * requirement, satisfied by the primary key instead of an extra column.
  */
-export async function commitDrafts(drafts: readonly DraftEntry[]): Promise<CommitResult> {
+export async function commitDrafts(
+  drafts: readonly DraftEntry[],
+  options: { moneyType?: MoneyType | null } = {},
+): Promise<CommitResult> {
   const selected = drafts.filter(isCommittable)
   if (selected.length === 0) {
     return { imported: 0, legs: 0, skipped: drafts.length }
@@ -93,6 +97,10 @@ export async function commitDrafts(drafts: readonly DraftEntry[]): Promise<Commi
       draftToLedgerRows(draft, {
         envelopes,
         categoryEnvelopeId: (id) => envelopeByCategory.get(id),
+        // One type for the batch: a statement is one account's history. Without
+        // this, every backfilled row landed untagged, which on a year-long
+        // import is a large permanent hole in the money-type figures.
+        moneyType: options.moneyType ?? null,
       }),
     ),
   )

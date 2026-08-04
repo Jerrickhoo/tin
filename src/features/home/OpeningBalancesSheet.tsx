@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { useLedger, useToast } from '../../app-context'
 import { BottomSheet } from '../../components/BottomSheet'
+import { MoneyTypePicker } from '../../components/MoneyTypePicker'
 import { addOpeningBalances, type Envelope } from '../../db/entries'
 import { parseAmountToCentavos } from '../../lib/money'
+import type { MoneyType } from '../../lib/money-type'
 
 // Onboarding (ROADMAP 3.4): "what's currently in GCash, per envelope?" —
 // writes adjustment entries so day one starts from the truth, not from zero.
@@ -19,6 +21,12 @@ export function OpeningBalancesSheet({
   const toast = useToast()
   const [values, setValues] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
+  // Optional, not required, and that is the honest shape of the question. This
+  // sheet asks what was ALREADY in the tin, which for most people is split
+  // across GCash and a wallet — one answer would be wrong either way. Leaving it
+  // blank files the opening balance as untagged, which Home now shows as its own
+  // line instead of silently counting it as online money.
+  const [moneyType, setMoneyType] = useState<MoneyType | null>(null)
 
   const parsed = envelopes.map((env) => {
     const raw = (values[env.id] ?? '').trim()
@@ -32,6 +40,7 @@ export function OpeningBalancesSheet({
     try {
       const groupId = await addOpeningBalances(
         parsed.map((p) => ({ envelopeId: p.env.id, amountCentavos: p.centavos ?? 0 })),
+        moneyType,
       )
       bump()
       toast.show(groupId ? 'Opening balances recorded' : 'Nothing to record — all zero')
@@ -67,6 +76,15 @@ export function OpeningBalancesSheet({
         ))}
       </div>
       {invalid && <p className="mt-2 text-sm text-neg">Amounts take up to two decimals.</p>}
+      <div className="mt-4 border-t border-line/70 pt-3">
+        <MoneyTypePicker
+          value={moneyType}
+          onChange={setMoneyType}
+          label="Where is it?"
+          allowNone
+          hint="Optional — tap again to clear. If it's split between GCash and cash, leave this blank and Home will list it as untagged."
+        />
+      </div>
       <button
         type="button"
         disabled={invalid || busy}

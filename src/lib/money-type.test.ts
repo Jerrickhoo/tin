@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   clampMoneyAmountToMax,
   formatMoneyInput,
+  getMoneyBucketLabel,
   getMoneyTypeLabel,
+  groupMoneyType,
   isRequiredMoneyTypeSelected,
   parseMoneyInputToCentavos,
   sanitizeMoneyInput,
@@ -34,6 +36,17 @@ describe('getMoneyTypeLabel', () => {
   it('uses clearer display names for the two money types', () => {
     expect(getMoneyTypeLabel('online')).toBe('Online')
     expect(getMoneyTypeLabel('reallife')).toBe('Cash')
+  })
+})
+
+describe('getMoneyBucketLabel', () => {
+  it('names the third bucket without implying a choice was made', () => {
+    expect(getMoneyBucketLabel('untagged')).toBe('Not tagged')
+  })
+
+  it('agrees with the picker on the two real types', () => {
+    expect(getMoneyBucketLabel('online')).toBe(getMoneyTypeLabel('online'))
+    expect(getMoneyBucketLabel('reallife')).toBe(getMoneyTypeLabel('reallife'))
   })
 })
 
@@ -90,13 +103,22 @@ describe('sanitizeMoneyInput', () => {
 })
 
 describe('summarizeMoneyTypeLiveBalance', () => {
-  it('uses the full ledger total when rows are not tagged yet', () => {
+  it('totals every bucket, tagged or not', () => {
     const rows: EntryRow[] = [
       row({ amount_centavos: 12500, money_type: null }),
       row({ id: 'entry-2', amount_centavos: -3200, money_type: null }),
     ]
 
     expect(summarizeMoneyTypeLiveBalance(rows)).toBe(9300)
+  })
+
+  it('leaves voided rows out', () => {
+    const rows: EntryRow[] = [
+      row({ amount_centavos: 12500 }),
+      row({ id: 'entry-2', amount_centavos: -3200, voided_at: '2026-08-03T00:00:00.000Z' }),
+    ]
+
+    expect(summarizeMoneyTypeLiveBalance(rows)).toBe(12500)
   })
 })
 
@@ -108,10 +130,85 @@ describe('summarizeMoneyTypeTotals', () => {
       row({ id: 'entry-3', amount_centavos: 3000, money_type: null }),
     ]
 
-    expect(summarizeMoneyTypeTotals(rows)).toEqual({ online: -5000, reallife: 12000 })
+    // The untagged ₱30 is REPORTED, not discarded. Dropping it is what let the
+    // two visible figures disagree with the balance they were explaining.
+    expect(summarizeMoneyTypeTotals(rows)).toEqual({
+      online: -5000,
+      reallife: 12000,
+      untagged: 3000,
+    })
   })
 
-  it('formats the summary items for the home screen', () => {
+  it('never files untagged money under online', () => {
+    // The old fallback: with nothing tagged, the WHOLE ledger was reported as
+    // online. This is the bug that made cash spending show up as GCash money.
+    const rows: EntryRow[] = [
+      row({ amount_centavos: 50000, money_type: null }),
+      row({ id: 'entry-2', amount_centavos: -1200, money_type: null }),
+    ]
+
+    expect(summarizeMoneyTypeTotals(rows)).toEqual({
+      online: 0,
+      reallife: 0,
+      untagged: 48800,
+    })
+  })
+
+  it('excludes voided rows from every bucket', () => {
+    const rows: EntryRow[] = [
+      row({ amount_centavos: 20000, money_type: 'online' as MoneyType }),
+      row({
+        id: 'entry-2',
+        amount_centavos: -8000,
+        money_type: 'online' as MoneyType,
+        voided_at: '2026-08-03T00:00:00.000Z',
+      }),
+      row({
+        id: 'entry-3',
+        amount_centavos: 5000,
+        money_type: 'reallife' as MoneyType,
+        voided_at: '2026-08-03T00:00:00.000Z',
+      }),
+    ]
+
+    expect(summarizeMoneyTypeTotals(rows)).toEqual({
+      online: 20000,
+      reallife: 0,
+      untagged: 0,
+    })
+  })
+
+  it('keeps the buckets summing to the live balance', () => {
+    // The invariant the whole card rests on: three lines that add up to the one
+    // number in the hero. Neither branch of the old implementation could hold it.
+    const rows: EntryRow[] = [
+      row({ amount_centavos: 30000, money_type: 'online' as MoneyType }),
+      row({ id: 'entry-2', amount_centavos: -4500, money_type: 'reallife' as MoneyType }),
+      row({ id: 'entry-3', amount_centavos: 7000, money_type: null }),
+      row({ id: 'entry-4', amount_centavos: -9999, voided_at: '2026-08-03T00:00:00.000Z' }),
+    ]
+
+    const totals = summarizeMoneyTypeTotals(rows)
+    expect(totals.online + totals.reallife + totals.untagged).toBe(
+      summarizeMoneyTypeLiveBalance(rows),
+    )
+  })
+
+  it('nets a two-legged transfer back to zero', () => {
+    // Both legs carry the same type, so moving money between envelopes leaves
+    // the online/cash split untouched. Tagging only the positive leg — which is
+    // what addTransfer used to do — credited ₱500 that nothing debited.
+    const rows: EntryRow[] = [
+      row({ id: 'leg-out', kind: 'transfer', amount_centavos: -50000, money_type: 'online' }),
+      row({ id: 'leg-in', kind: 'transfer', amount_centavos: 50000, money_type: 'online' }),
+    ]
+
+    expect(summarizeMoneyTypeTotals(rows)).toEqual({ online: 0, reallife: 0, untagged: 0 })
+  })
+})
+
+describe('summarizeMoneyTypeSummaryItems', () => {
+  it('formats three lines for the home screen', () => {
     const rows: EntryRow[] = [
       row({ id: 'entry-1', amount_centavos: 12500, money_type: 'online' as MoneyType }),
       row({ id: 'entry-2', amount_centavos: -3200, money_type: 'reallife' as MoneyType }),
@@ -119,35 +216,90 @@ describe('summarizeMoneyTypeTotals', () => {
     ]
 
     expect(summarizeMoneyTypeSummaryItems(rows)).toEqual([
-      { key: 'online', label: 'Online', valueCentavos: 12500 },
-      { key: 'reallife', label: 'Real life', valueCentavos: -3200 },
+      { key: 'online', label: 'Online', valueCentavos: 12500, fromSnapshot: false },
+      { key: 'reallife', label: 'Cash', valueCentavos: -3200, fromSnapshot: false },
+      { key: 'untagged', label: 'Not tagged', valueCentavos: 4500, fromSnapshot: false },
     ])
   })
 
-  it('uses an explicit snapshot when present', () => {
+  it('labels a bucket the same way the picker does', () => {
+    // The card used to print "Real life" while every control in the app called
+    // the same thing "Cash".
+    const [, cash] = summarizeMoneyTypeSummaryItems([])
+    expect(cash.label).toBe(getMoneyTypeLabel('reallife'))
+  })
+
+  it('shows a saved target in place of the live figure, and flags it', () => {
     const rows: EntryRow[] = [row({ amount_centavos: 1000, money_type: 'online' as MoneyType })]
 
     expect(summarizeMoneyTypeSummaryItems(rows, { online: 2500, reallife: 4000 })).toEqual([
-      { key: 'online', label: 'Online', valueCentavos: 2500 },
-      { key: 'reallife', label: 'Real life', valueCentavos: 4000 },
+      { key: 'online', label: 'Online', valueCentavos: 2500, fromSnapshot: true },
+      { key: 'reallife', label: 'Cash', valueCentavos: 4000, fromSnapshot: true },
+      { key: 'untagged', label: 'Not tagged', valueCentavos: 0, fromSnapshot: false },
     ])
   })
 
-  it('uses live ledger totals for the home summary even when a snapshot exists', () => {
+  it('falls back to the live figure for a bucket left blank', () => {
+    const rows: EntryRow[] = [
+      row({ id: 'entry-1', amount_centavos: 20000, money_type: 'reallife' as MoneyType }),
+    ]
+
+    expect(summarizeMoneyTypeSummaryItems(rows, { online: 2500, reallife: null })).toEqual([
+      { key: 'online', label: 'Online', valueCentavos: 2500, fromSnapshot: true },
+      { key: 'reallife', label: 'Cash', valueCentavos: 20000, fromSnapshot: false },
+      { key: 'untagged', label: 'Not tagged', valueCentavos: 0, fromSnapshot: false },
+    ])
+  })
+
+  it('never lets a snapshot override the untagged residual', () => {
+    const rows: EntryRow[] = [row({ amount_centavos: 7000, money_type: null })]
+
+    const [, , untagged] = summarizeMoneyTypeSummaryItems(rows, { online: 1, reallife: 2 })
+    expect(untagged).toEqual({
+      key: 'untagged',
+      label: 'Not tagged',
+      valueCentavos: 7000,
+      fromSnapshot: false,
+    })
+  })
+
+  it('can be told to ignore the snapshot entirely', () => {
     const rows: EntryRow[] = [
       row({ id: 'entry-1', amount_centavos: 20000, money_type: 'reallife' as MoneyType }),
     ]
 
     expect(summarizeMoneyTypeSummaryItems(rows, { online: 2500, reallife: 4000 }, false)).toEqual([
-      { key: 'online', label: 'Online', valueCentavos: 0 },
-      { key: 'reallife', label: 'Real life', valueCentavos: 20000 },
+      { key: 'online', label: 'Online', valueCentavos: 0, fromSnapshot: false },
+      { key: 'reallife', label: 'Cash', valueCentavos: 20000, fromSnapshot: false },
+      { key: 'untagged', label: 'Not tagged', valueCentavos: 0, fromSnapshot: false },
     ])
   })
 
   it('returns zeroed summary items for an empty ledger', () => {
     expect(summarizeMoneyTypeSummaryItems([])).toEqual([
-      { key: 'online', label: 'Online', valueCentavos: 0 },
-      { key: 'reallife', label: 'Real life', valueCentavos: 0 },
+      { key: 'online', label: 'Online', valueCentavos: 0, fromSnapshot: false },
+      { key: 'reallife', label: 'Cash', valueCentavos: 0, fromSnapshot: false },
+      { key: 'untagged', label: 'Not tagged', valueCentavos: 0, fromSnapshot: false },
     ])
+  })
+})
+
+describe('groupMoneyType', () => {
+  it('reads the type off a group whose legs agree', () => {
+    expect(groupMoneyType([{ money_type: 'reallife' }, { money_type: 'reallife' }])).toBe(
+      'reallife',
+    )
+  })
+
+  it('treats an untagged group as untagged', () => {
+    expect(groupMoneyType([{ money_type: null }, {}])).toBeNull()
+  })
+
+  it('refuses to guess when the legs disagree', () => {
+    expect(groupMoneyType([{ money_type: 'online' }, { money_type: 'reallife' }])).toBeNull()
+  })
+
+  it('ignores untagged legs alongside agreeing tagged ones', () => {
+    expect(groupMoneyType([{ money_type: 'online' }, { money_type: null }])).toBe('online')
   })
 })

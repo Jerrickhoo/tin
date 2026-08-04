@@ -20,11 +20,8 @@ import { frequentNotes } from '../../lib/frequent-notes'
 import { applyKeypadKey, KEYPAD_PLACEHOLDER } from '../../lib/keypad'
 import { formatPHP, parseAmountToCentavos } from '../../lib/money'
 import { splitByLargestRemainder } from '../../lib/split'
-import {
-  getMoneyTypeLabel,
-  isRequiredMoneyTypeSelected,
-  type MoneyType,
-} from '../../lib/money-type'
+import { isRequiredMoneyTypeSelected, type MoneyType } from '../../lib/money-type'
+import { MoneyTypePicker } from '../../components/MoneyTypePicker'
 
 type Mode = 'expense' | 'income' | 'transfer'
 
@@ -79,7 +76,7 @@ export function AddSheet({
     prefill?.mode === 'transfer' ? (prefill.toEnvelopeId ?? '') : '',
   )
   const [busy, setBusy] = useState(false)
-  const [moneyType, setMoneyType] = useState<MoneyType | null>(null)
+  const [moneyType, setMoneyType] = useState<MoneyType | null>(() => prefill?.moneyType ?? null)
   const moneyTypeReady = isRequiredMoneyTypeSelected(moneyType)
   const [incomeStrategy, setIncomeStrategy] = useState<'split' | 'single'>('split')
   const [incomeEnvelopeId, setIncomeEnvelopeId] = useState('')
@@ -305,29 +302,20 @@ export function AddSheet({
       )}
 
       <div className="mt-4 border-t border-line/70 pt-3">
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.24em] text-ink-mute">
-            Money type
-          </p>
-          <p className="text-[0.65rem] text-ink-soft">Required</p>
-        </div>
-        <div className="flex gap-2 overflow-hidden rounded-xl border border-line/70 bg-base/50 p-1">
-          {(['online', 'reallife'] as const).map((value) => {
-            const selected = moneyType === value
-            return (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setMoneyType(value)}
-                className={`flex-1 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors ${
-                  selected ? 'bg-accent text-on-accent shadow-sm' : 'text-ink-soft'
-                }`}
-              >
-                {getMoneyTypeLabel(value)}
-              </button>
-            )
-          })}
-        </div>
+        <MoneyTypePicker
+          value={moneyType}
+          onChange={setMoneyType}
+          required
+          // A transfer moves money between ENVELOPES, not between GCash and your
+          // pocket, so both of its legs are written with this same type and they
+          // cancel. Saying so here stops the field reading as "which way is this
+          // money moving?", which it is not.
+          hint={
+            mode === 'transfer'
+              ? 'Which pot this money sits in. A transfer moves it between envelopes, so it stays in the same pot.'
+              : undefined
+          }
+        />
         {!moneyTypeReady && amountOk && (
           <p className="mt-2 text-center text-sm text-neg">Pick Online or Cash before saving.</p>
         )}
@@ -417,8 +405,13 @@ export function AddSheet({
               return (
                 <button
                   key={cat.id}
+                  // `moneyTypeReady` belongs in EVERY save control's disabled
+                  // condition, not just in the handler's guard. The handlers have
+                  // always returned early without it, so the 2-tap path's second
+                  // tap landed on a button that looked live, gave the pressed
+                  // animation, and did nothing at all.
+                  disabled={!amountOk || !whenOk || busy || !moneyTypeReady}
                   type="button"
-                  disabled={!amountOk || !whenOk || busy}
                   onClick={() => onCategoryTap(cat)}
                   className="press flex min-h-11 items-center gap-1.5 rounded-xl border px-3 py-2 text-sm transition-opacity disabled:opacity-35"
                   style={{
@@ -498,6 +491,7 @@ export function AddSheet({
               !amountOk ||
               !whenOk ||
               busy ||
+              !moneyTypeReady ||
               (incomeStrategy === 'single' && !selectedIncomeEnvelopeId)
             }
             onClick={onSaveIncome}
@@ -523,7 +517,7 @@ export function AddSheet({
             onChange={setToId}
           />
           <PrimaryButton
-            disabled={!amountOk || !whenOk || busy || !fromId || !toId}
+            disabled={!amountOk || !whenOk || busy || !fromId || !toId || !moneyTypeReady}
             onClick={onSaveTransfer}
             label={busy ? 'Moving…' : 'Move money'}
           />

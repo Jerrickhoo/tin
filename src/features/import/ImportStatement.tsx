@@ -21,6 +21,8 @@ import {
 } from '../../lib/import-parse'
 import { formatPHP } from '../../lib/money'
 import { manilaDayKey } from '../../lib/dates'
+import { MoneyTypePicker } from '../../components/MoneyTypePicker'
+import type { MoneyType } from '../../lib/money-type'
 import { useEffect } from 'react'
 
 type Step = 'paste' | 'map' | 'review'
@@ -53,6 +55,10 @@ export function ImportStatement() {
   const [categories, setCategories] = useState<Category[]>([])
   const [envelopes, setEnvelopes] = useState<Envelope[]>([])
   const [busy, setBusy] = useState(false)
+  // One answer for the whole statement — see draftToLedgerRows. A GCash export
+  // is online money end to end, a passbook is cash end to end; per-row would be
+  // the same question asked a hundred times with one true answer.
+  const [moneyType, setMoneyType] = useState<MoneyType | null>(null)
 
   useEffect(() => {
     let active = true
@@ -121,7 +127,7 @@ export function ImportStatement() {
     if (!drafts || busy) return
     setBusy(true)
     try {
-      const result = await commitDrafts(drafts)
+      const result = await commitDrafts(drafts, { moneyType })
       if (result.imported === 0) {
         toast.show('Nothing selected — no entries were written', 'error')
         return
@@ -186,6 +192,8 @@ export function ImportStatement() {
           envById={envById}
           catById={catById}
           busy={busy}
+          moneyType={moneyType}
+          onMoneyTypeChange={setMoneyType}
           onPatch={patchDraft}
           onSetAll={(include) =>
             setDrafts((cur) =>
@@ -451,6 +459,8 @@ function ReviewStep({
   envById,
   catById,
   busy,
+  moneyType,
+  onMoneyTypeChange,
   onPatch,
   onSetAll,
   onCategoriseRest,
@@ -464,6 +474,8 @@ function ReviewStep({
   envById: Map<string, Envelope>
   catById: Map<string, Category>
   busy: boolean
+  moneyType: MoneyType | null
+  onMoneyTypeChange: (next: MoneyType | null) => void
   onPatch: (index: number, patch: Partial<DraftEntry>) => void
   onSetAll: (include: boolean) => void
   onCategoriseRest: (categoryId: string) => void
@@ -522,6 +534,20 @@ function ReviewStep({
               ))}
             </select>
           )}
+        </div>
+        {/* Asked once, for the whole batch, and asked HERE rather than on the
+            paste step — by review the user can see what they pasted, which is
+            what makes "is this the GCash one or the cash one?" answerable at a
+            glance. Optional: an import from a source that mixes both should land
+            untagged rather than be filed wholesale under a guess. */}
+        <div className="mt-4 border-t border-line/70 pt-3">
+          <MoneyTypePicker
+            value={moneyType}
+            onChange={onMoneyTypeChange}
+            label="Where is this statement from?"
+            allowNone
+            hint="Optional — tap again to clear. Applies to every row in this import."
+          />
         </div>
       </section>
 

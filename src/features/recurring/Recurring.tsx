@@ -13,6 +13,8 @@ import {
   type RecurringTemplate,
 } from '../../db/recurring'
 import { formatPHP, parseAmountToCentavos } from '../../lib/money'
+import { MoneyTypePicker } from '../../components/MoneyTypePicker'
+import { getMoneyTypeLabel, type MoneyType } from '../../lib/money-type'
 import { formatEnvelopeShareSummary } from './recurring-share-summary'
 
 const ordinal = (n: number) =>
@@ -125,6 +127,10 @@ export function Recurring() {
                     ? ` · ${category.emoji ?? ''} ${category.name}`
                     : ` · ${formatEnvelopeShareSummary(envelopes.filter((env) => env.share_bp > 0))}`}
                   {template.paused_at ? '' : ` · next ${template.next_run_on}`}
+                  {/* Stated on the row, because a template posts unattended and
+                      an untagged one keeps adding to Home's untagged line every
+                      month with nothing on this screen explaining why. */}
+                  {` · ${template.money_type ? getMoneyTypeLabel(template.money_type) : 'no money type'}`}
                 </p>
               </div>
               <span
@@ -225,6 +231,7 @@ function TemplateSheet({
   const [categoryId, setCategoryId] = useState(template?.category_id ?? '')
   const [day, setDay] = useState(String(template?.day_of_month ?? 1))
   const [note, setNote] = useState(template?.note ?? '')
+  const [moneyType, setMoneyType] = useState<MoneyType | null>(template?.money_type ?? null)
   const [busy, setBusy] = useState(false)
 
   const centavos = parseAmountToCentavos(amount)
@@ -248,6 +255,7 @@ function TemplateSheet({
           note,
           dayOfMonth: dayNum,
           previousDayOfMonth: template.day_of_month,
+          moneyType,
         })
         onSaved('Template updated')
       } else {
@@ -257,6 +265,7 @@ function TemplateSheet({
           categoryId: kind === 'expense' ? categoryId : null,
           note,
           dayOfMonth: dayNum,
+          moneyType,
         })
         onSaved(`Template saved — first post on its next ${ordinal(dayNum)}`)
       }
@@ -345,6 +354,18 @@ function TemplateSheet({
           maxLength={120}
           onChange={(e) => setNote(e.target.value)}
           className="w-full rounded-xl border border-line bg-base px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-mute focus:border-accent"
+        />
+
+        {/* Optional, unlike the add sheet's. A catch-up posts with nobody
+            watching, so this is the only chance to record which pot the money
+            moves through — but a template whose owner genuinely does not know
+            should post untagged rather than post a guess every month. */}
+        <MoneyTypePicker
+          value={moneyType}
+          onChange={setMoneyType}
+          label="Money type for its postings"
+          allowNone
+          hint="Optional — tap again to clear. Postings already made keep the type they were made with."
         />
 
         <p className="rounded-xl border border-line/70 bg-base/50 px-3 py-2 text-sm text-ink-soft">

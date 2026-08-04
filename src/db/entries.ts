@@ -390,6 +390,13 @@ export async function addTransfer(params: {
   const groupId = crypto.randomUUID()
   const occurredAt = params.occurredAt ?? nowIso()
   const note = params.note?.trim() || null
+  // BOTH legs carry the money type, and they must carry the SAME one. A transfer
+  // moves money between envelopes; it does not move it between GCash and your
+  // pocket, so its net effect on either bucket is zero and the two legs are what
+  // cancel. Tagging only the positive leg — which is what this did — credited a
+  // bucket with money that had no matching debit anywhere, so every transfer
+  // inflated the money-type totals past the balance they were meant to explain.
+  const moneyType = params.moneyType ?? null
   await insertRows([
     {
       id: crypto.randomUUID(),
@@ -400,6 +407,7 @@ export async function addTransfer(params: {
       amount_centavos: -params.amountCentavos,
       note,
       occurred_at: occurredAt,
+      money_type: moneyType,
     },
     {
       id: crypto.randomUUID(),
@@ -410,14 +418,24 @@ export async function addTransfer(params: {
       amount_centavos: params.amountCentavos,
       note,
       occurred_at: occurredAt,
-      money_type: params.moneyType ?? null,
+      money_type: moneyType,
     },
   ])
   return groupId
 }
 
+/**
+ * The opening balance, per envelope.
+ *
+ * `moneyType` is optional and used to be hardcoded to null, which quietly made
+ * this the single largest source of untagged money in the app: opening balances
+ * are by definition everything the user already had, so on a young ledger they
+ * ARE the balance. Leaving them unclassified meant the money-type card could
+ * never account for most of the tin.
+ */
 export async function addOpeningBalances(
   amounts: { envelopeId: string; amountCentavos: number }[],
+  moneyType: MoneyType | null = null,
 ): Promise<string | null> {
   const groupId = crypto.randomUUID()
   const occurredAt = nowIso()
@@ -432,7 +450,7 @@ export async function addOpeningBalances(
       amount_centavos: a.amountCentavos,
       note: OPENING_BALANCE_NOTE,
       occurred_at: occurredAt,
-      money_type: null,
+      money_type: moneyType,
     }))
   if (rows.length === 0) return null
   await insertRows(rows)

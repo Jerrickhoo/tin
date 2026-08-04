@@ -1,4 +1,5 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { Link } from 'react-router'
 import { useAddSheet, useLedger, useToast } from '../../app-context'
 import { buildEnvelopeCardFacts } from './envelope-card-facts'
 import { entriesToJson } from '../../lib/export'
@@ -31,11 +32,15 @@ import {
   type StreakState,
 } from '../../lib/logging-streak'
 import { formatPHP } from '../../lib/money'
+import { DISMISSED_GAP_KEY } from '../../lib/local-keys'
 import {
-  getMoneyTypeLabel,
+  emptyMoneyTypeTotals,
+  MONEY_TYPE_UPDATED_EVENT,
+  moneyTypeSummaryFromTotals,
   readMoneyTypeSnapshot,
-  summarizeMoneyTypeSummaryItems,
-  type MoneyTypeSummaryItem,
+  summarizeMoneyTypeTotals,
+  type MoneyTypeSnapshot,
+  type MoneyTypeTotals,
 } from '../../lib/money-type'
 import { OpeningBalancesSheet } from './OpeningBalancesSheet'
 
@@ -69,8 +74,6 @@ const gapDay = new Intl.DateTimeFormat('en-PH', {
  * way lib/texture.ts swallows them: the dismissal then holds for the session
  * only, which is exactly the old behaviour.
  */
-const DISMISSED_GAP_KEY = 'tin.repair-dismissed'
-
 function readDismissedGap(): string | null {
   try {
     return localStorage.getItem(DISMISSED_GAP_KEY)
@@ -117,9 +120,14 @@ export function Home() {
   const [spentToday, setSpentToday] = useState<Map<string, number>>(new Map())
   const [paces, setPaces] = useState<Map<string, EnvelopePace>>(new Map())
   const [streak, setStreak] = useState<StreakState | null>(null)
-  const [moneyTypeSummary, setMoneyTypeSummary] = useState<MoneyTypeSummaryItem[]>(() =>
-    summarizeMoneyTypeSummaryItems([], readMoneyTypeSnapshot(), false),
-  )
+  // The money-type card is two independent inputs and they change on completely
+  // different triggers: the ledger totals move when entries do, the saved targets
+  // move when Settings is saved. They used to be collapsed into one derived state
+  // slot, and the collapse is what broke both halves — the "targets changed"
+  // listener recomputed the whole summary from an EMPTY row array, so saving in
+  // Settings reset the Home card to ₱0.00 until something else forced a refetch.
+  const [moneyTotals, setMoneyTotals] = useState<MoneyTypeTotals>(emptyMoneyTypeTotals)
+  const [moneySnapshot, setMoneySnapshot] = useState<MoneyTypeSnapshot>(readMoneyTypeSnapshot)
   const [repairing, setRepairing] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
   // A failed read used to leave `cards` at null forever, which renders as the
@@ -133,15 +141,17 @@ export function Home() {
   const [reload, setReload] = useState(0)
 
   useEffect(() => {
-    const refreshMoneySummary = () => {
-      setMoneyTypeSummary(summarizeMoneyTypeSummaryItems([], readMoneyTypeSnapshot(), false))
-    }
-
-    const handleMoneyTypeUpdated = () => refreshMoneySummary()
-    window.addEventListener('tin-money-type-updated', handleMoneyTypeUpdated)
-
+    // Re-reads ONLY the saved targets. The ledger has not changed — Settings
+    // wrote a device-local preference — so refetching it here would be wasted
+    // work, and recomputing the totals from nothing (which is what this did) is
+    // worse than wasted.
+    const handleMoneyTypeUpdated = () => setMoneySnapshot(readMoneyTypeSnapshot())
+    // Same-document events only; `storage` would be needed to follow another
+    // tab, and a second tab editing your targets mid-glance is not a case worth
+    // the extra listener.
+    window.addEventListener(MONEY_TYPE_UPDATED_EVENT, handleMoneyTypeUpdated)
     return () => {
-      window.removeEventListener('tin-money-type-updated', handleMoneyTypeUpdated)
+      window.removeEventListener(MONEY_TYPE_UPDATED_EVENT, handleMoneyTypeUpdated)
     }
   }, [])
 
@@ -194,9 +204,9 @@ export function Home() {
           ),
         )
         setStreak(computeStreak(recent, saves, checkIns))
-        setMoneyTypeSummary(
-          summarizeMoneyTypeSummaryItems(allEntries, readMoneyTypeSnapshot(), false),
-        )
+        // Voided rows are excluded inside the summariser, so these three buckets
+        // sum to exactly the balance the hero above is showing.
+        setMoneyTotals(summarizeMoneyTypeTotals(allEntries))
       } catch (err) {
         // No toast: the hero carries this now, and a four-second toast beside a
         // permanent error card would say the same thing twice and then take
@@ -289,6 +299,19 @@ export function Home() {
   const daysLeft = daysRemainingInMonth(manilaDayKey(now))
   const daysLeftLabel = daysLeft === 1 ? 'last day of the month' : `${daysLeft} days left`
   const backupReminder = exportReminderStatus(getLastExport(), now)
+
+  const moneyTypeSummary = useMemo(
+    () => moneyTypeSummaryFromTotals(moneyTotals, moneySnapshot),
+    [moneyTotals, moneySnapshot],
+  )
+  // What the three lines add up to, versus what is actually in the tin. These
+  // agree by construction while every line is live; a saved target is a number
+  // the user asserted rather than one the ledger produced, so it can pull the sum
+  // away from the balance — and when it does, the card has to say so instead of
+  // quietly presenting a total that contradicts the hero.
+  const moneySummedCentavos = moneyTypeSummary.reduce((sum, item) => sum + item.valueCentavos, 0)
+  const moneyHasTargets = moneyTypeSummary.some((item) => item.fromSnapshot)
+  const moneyDriftCentavos = moneySummedCentavos - total
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-5 py-7 md:max-w-4xl md:gap-5 md:px-8 md:py-10">
@@ -513,44 +536,76 @@ export function Home() {
                 </p>
               </div>
             </div>
+            {/* Three buckets, not two. Money nobody has tagged is money the app
+                cannot honestly file under either heading, and the old card had
+                two ways of pretending otherwise — it put the WHOLE ledger under
+                Online when nothing was tagged, and dropped untagged rows from
+                both columns the moment anything was. Showing the residual is
+                what makes the three numbers add up to the balance above.
+                The untagged line is hidden at zero, so a fully-tagged ledger is
+                back to the two lines it should be. */}
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              {moneyTypeSummary.map((item) => {
-                const isOnline = item.key === 'online'
-                const isPositive = item.valueCentavos >= 0
-                return (
-                  <div
-                    key={item.key}
-                    className={`flex items-center justify-between gap-3 border-b border-line/60 px-3 py-2.5 ${
-                      isOnline
-                        ? 'bg-[color:rgba(255,255,255,0.45)] dark:bg-[color:rgba(255,255,255,0.08)]'
-                        : 'bg-[color:rgba(248,247,245,0.75)] dark:bg-[color:rgba(255,255,255,0.05)]'
-                    }`}
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span
-                          aria-hidden
-                          className={`size-2 rounded-full ${isOnline ? 'bg-accent' : 'bg-ink-soft'}`}
-                        />
-                        <p className="text-[0.65rem] font-semibold uppercase tracking-[0.24em] text-ink-mute">
-                          {getMoneyTypeLabel(item.key)}
+              {moneyTypeSummary
+                .filter((item) => item.key !== 'untagged' || item.valueCentavos !== 0)
+                .map((item) => {
+                  const isPositive = item.valueCentavos >= 0
+                  const dot =
+                    item.key === 'online'
+                      ? 'bg-accent'
+                      : item.key === 'reallife'
+                        ? 'bg-ink-soft'
+                        : 'bg-ink-mute'
+                  return (
+                    <div
+                      key={item.key}
+                      className={`flex items-center justify-between gap-3 border-b border-line/60 px-3 py-2.5 ${
+                        item.key === 'online'
+                          ? 'bg-[color:rgba(255,255,255,0.45)] dark:bg-[color:rgba(255,255,255,0.08)]'
+                          : 'bg-[color:rgba(248,247,245,0.75)] dark:bg-[color:rgba(255,255,255,0.05)]'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span aria-hidden className={`size-2 rounded-full ${dot}`} />
+                          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.24em] text-ink-mute">
+                            {item.label}
+                          </p>
+                        </div>
+                        <p
+                          className={`mt-1 text-sm font-semibold tabular-nums ${isPositive ? 'text-ink' : 'text-neg'}`}
+                        >
+                          {formatPHP(item.valueCentavos)}
                         </p>
                       </div>
-                      <p
-                        className={`mt-1 text-sm font-semibold tabular-nums ${isPositive ? 'text-ink' : 'text-neg'}`}
-                      >
-                        {formatPHP(item.valueCentavos)}
-                      </p>
+                      <div className="text-right">
+                        {/* A saved target says so. Without this the card shows a
+                            number the user typed in the same weight and position
+                            as one the ledger computed, which is the difference
+                            between a plan and a fact. */}
+                        <p className="text-[0.64rem] uppercase tracking-[0.24em] text-ink-soft">
+                          {item.fromSnapshot ? 'target' : isPositive ? 'available' : 'used'}
+                        </p>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-[0.64rem] uppercase tracking-[0.24em] text-ink-soft">
-                        {isPositive ? 'available' : 'used'}
-                      </p>
-                    </div>
-                  </div>
-                )
-              })}
+                  )
+                })}
             </div>
+            {moneyHasTargets && moneyDriftCentavos !== 0 && (
+              <p className="mt-2 text-xs text-ink-mute">
+                Your saved targets are {formatPHP(Math.abs(moneyDriftCentavos))}{' '}
+                {moneyDriftCentavos > 0 ? 'above' : 'below'} what's actually in the tin —{' '}
+                <Link to="/settings" className="text-accent">
+                  update them
+                </Link>
+                .
+              </p>
+            )}
+            {!moneyHasTargets && moneyTotals.untagged !== 0 && (
+              <p className="mt-2 text-xs text-ink-mute">
+                Untagged money is from entries made before money types, or from recurring and
+                imported entries with no type set.
+              </p>
+            )}
           </section>
         </>
       )}
