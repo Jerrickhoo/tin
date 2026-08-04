@@ -8,7 +8,7 @@
 
 ## Status — all phases closed (2026-07-22), Phases 9 and 10 added 2026-07-24, Phases 11-12 2026-07-28
 
-**Live at <https://tin-jar.netlify.app>.** Phases 0–12 are done, plus a Phase 3.5 retrofit. 425 tests; lint, build and the AA-contrast script all clean. `git push` to `main` deploys.
+**Live at <https://tin-jar.netlify.app>.** Phases 0–12 are done, plus a Phase 3.5 retrofit. 512 tests; lint, build and the AA-contrast script all clean. `git push` to `main` deploys.
 
 | Phase | State |
 | ----- | ----- |
@@ -1130,3 +1130,60 @@ Rewritten, and the round trip is now covered where it was not: a pull that omits
 - **No render test for the money card.** The three-bucket arithmetic and the snapshot precedence are unit-tested; that Home *draws* them, and that the drift line appears when targets disagree with the balance, are not. Same gap §14.5 names for Home generally.
 - **No backfill for untagged history.** By design — the app cannot know how a coffee in March was paid — but it means the untagged line will be large for existing users and there is no bulk-tagging tool. A "tag these N entries" flow in History is the obvious next step and is not built.
 - **Migration 005 has to be applied by hand.** The client tolerates its absence on both the entry pull and the template fetch, so nothing breaks in the window; but until it is run, money types still do not persist to the server. **This is the deploy-order bite §9.6 warned about, and it is the one step that cannot be skipped.**
+
+---
+
+## 16. Settings, reorganised — and the one door that deletes (2026-08-04)
+
+Two things asked for together, and they turned out to belong together: the screen needed a shape before it could safely hold something irreversible.
+
+### 16.1 Nine cards in a flat column is not a layout
+
+Settings had accreted one card per feature since Phase 3 — account, stuck writes, export, restore, MFA, money targets, appearance, and four navigation cards — all rendered at identical visual weight in a single column. Nothing was *wrong*; it was just unnavigable. "Change the split", "download a backup" and "turn off the texture" arrived as the same box, so finding anything meant reading every heading on the way past.
+
+Now five labelled bands, ordered by how often you come here for them, with the irreversible one last: **Setup** (the four destinations, tiled) → **Money on hand** → **Your data** (export + restore) → **Appearance** → **Account** (2FA + log out) → **Danger zone**.
+
+Smaller fixes in the same pass:
+
+- **The nav cards are now cards, not cards containing a link.** Each was a ~100 px box that looked pressable with a ~20 px "Manage envelopes →" text link inside it. On a phone that is a miss waiting to happen, and it is the most common reason to open this screen. The whole card is the target, with `card-interactive` for the hover it already had a style for.
+- **The Account card became a subtitle.** A whole bordered box held one line — the signed-in email. It answers "whose settings are these", which is worth a line under the `h1` and not a card in the middle.
+- **Log out stopped being an orphan.** It was a bare `mt-auto` button floating below everything with no explanation; it now sits in the Account group with a sentence about the local wipe it performs (6.6), which is the part a user would want to know.
+- **Heading levels were wrong and one was an outlier.** Every card used `h2`, so the new group headings had nowhere to sit — cards are `h3` now, giving `h1 → group h2 → card h3`. `MfaSection` had been styled `h2.font-medium` since Phase 7 while every other card used the display face; it matches now.
+- The **split playground** was buried in an "Extras" card as a sentence. It is a destination, so it is a nav card like the others.
+
+### 16.2 A reset needs a door, not a delete policy
+
+"Clear everything and start over like a new account" cannot be done from the client as the schema stands, and that is deliberate: **§1 rule 3** means `entries`, `envelopes`, `categories` and `profiles` have no DELETE policy at all. The obvious move — add them — would have been a real mistake. It hands out *per-row* deletion in order to support one *all-or-nothing* operation, and every ledger guarantee in the app would then rest on the client choosing not to use it. An XSS, a bad refactor or a stray `.delete().eq('id', …)` would be enough.
+
+`006_account_reset.sql` adds a `security definer` function instead, and the tables stay exactly as undeletable as they were:
+
+- **It takes no arguments.** No id, no table, no filter — it scopes everything to `auth.uid()` itself. The only thing a caller can express is "delete all of *my* data", so the only privilege escalation available is against yourself.
+- **`set search_path = ''`**, mandatory for a definer function: without it a caller could prepend a schema of their own and have `entries` resolve to a table they control.
+- **One plpgsql call is one transaction.** A half-reset account — entries gone, envelopes left — would be worse than either outcome.
+- **It returns row counts.** A reset that silently deleted nothing must not read as a success, so the UI reports what the server said it did rather than asserting that something happened. An all-zero result says so in plain words.
+- **`auth.users` is untouched.** Login, password and any enrolled MFA factor survive. This is "empty the tin", not "close the account" — the latter needs the `service_role` key, which by §3 never reaches the client.
+
+The RLS probe now covers it, and this is the block that matters most in that file: everywhere else the *database* enforces isolation, here the *function* does. B resets B; A's entry, envelope and check-ins must still be there afterwards; anon cannot call it; and `entries` must still refuse an ordinary DELETE.
+
+### 16.3 Three stores, or it is not a reset
+
+Server rows are only a third of it. Miss either of the others and the app repopulates itself from the survivor: a stale Dexie mirror re-renders the old balances, an uncleared delta cursor tells the next pull it is already up to date, and a leftover `tin.money-type-snapshot` puts the previous figures back on Home.
+
+- **`clearLocalDataForReset` is not `wipeLocalDb`**, and the difference is the whole reason it exists. The logout wipe *deletes the database and re-arms the gate*, which leaves `localDb()` an unresolved promise — correct when the next thing on screen is the login form, fatal here, where the user stays signed in and every read in the app would simply hang. So the tables are cleared in place, in one transaction, and the owner row is written back.
+- **The outbox goes too**, and that is the point rather than a casualty: every queued op is an insert or a void against a ledger the server no longer has. Pushing them afterwards would put back exactly the money the reset removed. The panel says so first if the queue is non-empty.
+- **The sync loop is suspended across the whole operation.** `stopSync` was the wrong tool — it drops the listeners and forgets `onApplied`, and only `startSync` restores them, which lives in AppShell's once-per-session boot effect and will not run again for a session that never ended. A reset that called it would leave the app signed in with a permanently dead sync loop. `suspendSync`/`resumeSync` hold the loop still without tearing its wiring down.
+- **Server first, local second.** If the local clear went first and the RPC then failed, the user would be looking at an empty app and an error and could reasonably conclude it had worked — while every peso was still on the server. Server-first inverts that: a failed RPC leaves the screen exactly as it was, which is the truth.
+- **Re-seed, then pull, then return.** `ensureSeeded` puts the starter envelopes back (a clean slate with no envelopes is a broken app, not a fresh one), and the sync is *awaited* — returning early would hand the caller a "done" to navigate on while Home still had nothing to draw.
+
+### 16.4 The ceremony is the feature
+
+This is the only control in Tin that destroys money history, and there is no undo anywhere in the stack. The panel is collapsed behind a button, itemises the real counts (read from the mirror, so no network round trip in front of the one screen that must be clear), states explicitly what survives, and is gated on typing `RESET` — exact case, because matching case-insensitively would let autocorrect's "Reset" through and the entire value of the gate is that it cannot be satisfied accidentally.
+
+The part that matters most is the **backup button inside the flow**. "Export first" as a sentence is advice; a button that downloads the JSON without leaving the panel is the difference between a recoverable mistake and a permanent one. It is weighted by how bad the situation is — never having exported reads differently from having exported last week, and a warning shown at the same weight for both teaches people to ignore it.
+
+### 16.5 Still open
+
+- **No render test for the danger panel.** `isResetConfirmed` and `describeResetSummary` are unit-tested and the local clear is covered against a fake IndexedDB, but that the button is *disabled* until the phrase is typed is one JSX expression with nothing asserting it. Same gap §14.5 and §15.10 name — the project still has no component-render harness.
+- **The server half is only covered by the RLS probe**, which needs live credentials and is run by hand. There is no test that `reset_account` deletes in an FK-safe order; a future table with a `RESTRICT` reference to `entries` would break it at runtime, not at CI.
+- **Migration 006 has to be applied by hand**, like 005. The client turns the missing-function error into a plain sentence ("this app is newer than its database") and deletes nothing, so the window is safe — but the danger zone does not work until it is run.
+- **A reset does not propagate to other devices, and cannot with this sync design.** The delta pull carries changes forward by `updated_at`; a deleted row has no `updated_at` to carry, so a second device keeps rendering the old ledger indefinitely and will push any queued write back into the freshly-reset account. Tombstones would fix it properly and are wildly disproportionate here — the whole point of §6's "dumb queue instead of a CRDT research project". The panel tells the user to log out and back in on other devices, which wipes those mirrors wholesale (6.6). **This is an instruction, not a guarantee**, and it is the sharpest edge left on the feature.
