@@ -232,3 +232,32 @@ export function stopSync(): void {
   teardown = null
   onApplied = null
 }
+
+/**
+ * Hold the loop still and wait for the pass already in flight, WITHOUT tearing
+ * its wiring down. Resolves once nothing is touching the network or the mirror.
+ *
+ * `stopSync` is the wrong tool for a caller that intends to carry on: it drops
+ * the event listeners and forgets `onApplied`, and only `startSync` restores
+ * them — which lives in AppShell's once-per-session boot effect and will not run
+ * again for a session that never ended. A reset that called it would leave the
+ * app signed in with a permanently dead sync loop.
+ *
+ * Account reset needs the pause for two concrete races: an outbox drain landing
+ * mid-delete would re-insert money the server has just removed, and a pull
+ * landing after the local clear would refill the mirror with rows on their way
+ * out.
+ */
+export async function suspendSync(): Promise<void> {
+  stopped = true
+  await settleSync()
+}
+
+/** Undo `suspendSync`. A no-op if the loop was properly stopped rather than
+ *  paused — there is nothing wired up to resume, and flipping the flag would
+ *  only let a stray kick run without listeners or an onApplied. */
+export function resumeSync(): void {
+  if (!teardown) return
+  stopped = false
+  kickSync()
+}

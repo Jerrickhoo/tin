@@ -35,3 +35,19 @@ export const USER_SCOPED_LOCAL_KEYS = [
   LAST_EXPORT_KEY,
   DISMISSED_GAP_KEY,
 ] as const
+
+/**
+ * Forget every key that describes the PERSON rather than the device.
+ *
+ * Lives here rather than at a call site because there are now two callers with
+ * the same obligation — logout (db/cacheWipe.ts) and account reset (db/reset.ts)
+ * — and a second copy of this loop is how one of them ends up a key behind the
+ * other after the next feature adds one.
+ */
+export function clearUserScopedLocalKeys(): void {
+  try {
+    for (const key of USER_SCOPED_LOCAL_KEYS) localStorage.removeItem(key)
+  } catch {
+    /* private mode — nothing was persisted, so nothing needs clearing */
+  }
+}

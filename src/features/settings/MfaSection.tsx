@@ -82,7 +82,11 @@ export function MfaSection() {
 
   return (
     <section className="card p-4">
-      <h2 className="font-medium">Two-factor authentication</h2>
+      {/* h3, and styled like every other card heading on the Settings screen:
+          this one was an `h2.font-medium` outlier, which both broke the
+          document outline under the new group headings and made the section
+          look like it belonged to a different app. */}
+      <h3 className="font-display text-[0.6875rem] leading-relaxed">Two-factor authentication</h3>
 
       {view === 'loading' && <p className="mt-1 text-sm text-ink-mute">Checking…</p>}
 

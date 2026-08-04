@@ -1,9 +1,16 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { Link } from 'react-router'
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { Link, useNavigate } from 'react-router'
 import { useLedger, useToast } from '../../app-context'
 import { supabase } from '../../db/supabase'
 import { wipeLocalCaches } from '../../db/cacheWipe'
-import { discardOutboxRow, outboxCount, stuckOutboxRow, type OutboxRow } from '../../db/dexie'
+import {
+  discardOutboxRow,
+  localRowCounts,
+  outboxCount,
+  stuckOutboxRow,
+  type LocalRowCounts,
+  type OutboxRow,
+} from '../../db/dexie'
 import type { OutboxOp } from '../../db/outbox'
 import { getSyncSnapshot, kickSync, subscribeSync } from '../../db/sync'
 import {
@@ -13,6 +20,12 @@ import {
   fetchAllEnvelopesForExport,
 } from '../../db/entries'
 import { applyRestore, planRestoreFromBundle } from '../../db/restore'
+import { resetAccount } from '../../db/reset'
+import {
+  describeResetSummary,
+  isResetConfirmed,
+  RESET_CONFIRM_PHRASE,
+} from '../../lib/account-reset'
 import { entriesToCsv, entriesToJson } from '../../lib/export'
 import { isBlocked, parseBundle, type RestorePlan } from '../../lib/restore'
 import { manilaDayKey } from '../../lib/dates'
@@ -61,6 +74,66 @@ const describeOp = (op: OutboxOp): string => {
   if (op.op === 'void_group') return 'a void'
   const n = op.rows.length
   return `${n} ledger row${n === 1 ? '' : 's'}`
+}
+
+/**
+ * A titled band of related cards.
+ *
+ * Settings had grown to nine cards in one flat column, which on a phone is a
+ * scroll with no landmarks: "change the split", "download a backup" and "turn
+ * off the texture" all arrived as identically-weighted boxes, so finding
+ * anything meant reading every heading on the way past. Grouping gives the
+ * scroll a shape — and, more usefully, gives the danger zone somewhere to be
+ * that is visibly not with the everyday controls.
+ */
+function SettingsGroup({
+  title,
+  hint,
+  children,
+}: {
+  title: string
+  hint?: string
+  children: ReactNode
+}) {
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex items-center gap-3">
+        <h2 className="text-[0.65rem] font-semibold tracking-[0.24em] text-ink-mute uppercase">
+          {title}
+        </h2>
+        {/* the rule carries the eye across the width so the label reads as a
+            band heading rather than another card's title */}
+        <span aria-hidden className="h-px flex-1 bg-line" />
+      </div>
+      {hint && <p className="-mt-1 text-xs text-ink-mute">{hint}</p>}
+      {children}
+    </section>
+  )
+}
+
+/**
+ * A card that goes somewhere, with the WHOLE card as the target.
+ *
+ * These used to be a plain card containing a short "Manage envelopes →" text
+ * link, which put a ~20 px tap target inside a ~100 px box that looked
+ * pressable. On a phone that is a miss waiting to happen, and it is the most
+ * common reason to open this screen at all.
+ */
+function NavCard({ to, title, children }: { to: string; title: string; children: ReactNode }) {
+  return (
+    <Link
+      to={to}
+      className="card card-interactive press flex flex-col p-4 no-underline focus-visible:outline-2"
+    >
+      <span className="flex items-center justify-between gap-2">
+        <h3 className="font-display text-[0.6875rem] leading-relaxed text-ink">{title}</h3>
+        <span aria-hidden className="text-accent">
+          →
+        </span>
+      </span>
+      <span className="mt-1 text-sm text-ink-soft">{children}</span>
+    </Link>
+  )
 }
 
 /**
@@ -171,7 +244,7 @@ function AppearanceSection() {
 
   return (
     <section className="card p-4">
-      <h2 className="font-display text-[0.6875rem] leading-relaxed">Appearance</h2>
+      <h3 className="font-display text-[0.6875rem] leading-relaxed">Appearance</h3>
       <p className="mt-1 mb-3 text-sm text-ink-soft">Turn the texture off for a flatter look.</p>
       <label className="flex cursor-pointer items-center justify-between gap-3">
         <span className="text-sm">Reduce texture</span>
@@ -281,7 +354,7 @@ function MoneySummarySection() {
 
   return (
     <section className="card p-4">
-      <h2 className="font-display text-[0.6875rem] leading-relaxed">Current money</h2>
+      <h3 className="font-display text-[0.6875rem] leading-relaxed">Current money</h3>
       <p className="mt-1 mb-3 text-sm text-ink-soft">
         Tell Home how your balance is split between online and cash. Leave a bucket blank to let it
         follow the ledger instead.
@@ -425,7 +498,7 @@ function RestoreSection() {
 
   return (
     <section className="card p-4">
-      <h2 className="font-display text-[0.6875rem] leading-relaxed">Restore from a backup</h2>
+      <h3 className="font-display text-[0.6875rem] leading-relaxed">Restore from a backup</h3>
       <p className="mt-1 mb-3 text-sm text-ink-soft">
         Read a <code className="text-ink">tin-export-….json</code> back in. Entries only —
         envelopes, categories and your 70/20/10 split are matched by name, never overwritten.
@@ -522,6 +595,218 @@ function RestoreSection() {
   )
 }
 
+/**
+ * Erase every trace of this account's data and hand back a first-run app.
+ *
+ * The ceremony here is not decoration. This is the only control in Tin that
+ * destroys money history, the ledger is otherwise append-only by law (§1 rule
+ * 3), and there is no undo anywhere in the stack — so the panel is built to be
+ * hard to trigger by accident and impossible to trigger without understanding:
+ * collapsed behind a button, itemised with the real counts, explicit about what
+ * survives, offering the backup on the spot, and gated on typing a word.
+ *
+ * The backup button is the part that matters most. "Export first" as a sentence
+ * is advice; a button that downloads the JSON without leaving the flow is the
+ * difference between a recoverable mistake and a permanent one.
+ */
+function DangerZone({
+  onBackup,
+  backupBusy,
+  lastExport,
+}: {
+  onBackup: () => void | Promise<void>
+  backupBusy: boolean
+  lastExport: string | null
+}) {
+  const { session } = useSession()
+  const { version, bump } = useLedger()
+  const toast = useToast()
+  const navigate = useNavigate()
+  const [open, setOpen] = useState(false)
+  const [typed, setTyped] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [counts, setCounts] = useState<LocalRowCounts | null>(null)
+  const [pending, setPending] = useState(0)
+
+  // Only once the panel is open: neither number is worth a read on a screen the
+  // user came to for something else, and both must be fresh when it opens
+  // rather than fresh from whenever Settings mounted.
+  useEffect(() => {
+    if (!open) return
+    let active = true
+    void Promise.all([localRowCounts(), outboxCount()])
+      .then(([rows, queued]) => {
+        if (!active) return
+        setCounts(rows)
+        setPending(queued)
+      })
+      .catch(() => {
+        if (active) setCounts(null)
+      })
+    return () => {
+      active = false
+    }
+  }, [open, version])
+
+  function close() {
+    setOpen(false)
+    setTyped('')
+  }
+
+  async function run() {
+    if (!session) return
+    setBusy(true)
+    try {
+      const summary = await resetAccount(session.user.id)
+      bump()
+      close()
+      toast.show(`${describeResetSummary(summary)} You're back to the starter envelopes.`)
+      // Home, not this screen. What follows a reset is an empty tin asking for
+      // opening balances, and leaving the user parked next to the form that
+      // just erased everything invites a second look at a button there is now
+      // nothing left for.
+      void navigate('/')
+    } catch (err) {
+      toast.show(err instanceof Error ? err.message : String(err), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const armed = isResetConfirmed(typed)
+
+  return (
+    <section className="card border-neg/40 p-4">
+      <h3 className="font-display text-[0.6875rem] leading-relaxed text-neg">Erase everything</h3>
+      <p className="mt-1 text-sm text-ink-soft">
+        Delete every entry, envelope, category and recurring template on this account and start over
+        as if it were new. This cannot be undone — not by Tin, and not by anyone else.
+      </p>
+
+      {!open ? (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="press mt-3 rounded-xl border border-neg/50 px-3 py-2.5 text-sm font-semibold text-neg"
+        >
+          Reset this account…
+        </button>
+      ) : (
+        <div className="mt-3 flex flex-col gap-3">
+          <div className="rounded-xl border border-neg/40 bg-neg/10 px-3 py-2.5 text-sm">
+            <p className="font-semibold text-neg">What gets deleted</p>
+            <ul className="mt-1 list-inside list-disc text-ink-soft tabular-nums">
+              <li>
+                {counts ? `${counts.entries} ledger rows` : 'every ledger row'} — income, expenses,
+                transfers, opening balances, voided entries and all
+              </li>
+              <li>
+                {counts ? `${counts.envelopes} envelopes` : 'your envelopes'} and{' '}
+                {counts ? `${counts.categories} categories` : 'categories'}, back to the starter set
+              </li>
+              <li>every recurring template</li>
+              <li>
+                your streak, {counts ? `${counts.checkIns} check-in days` : 'check-in days'} and any
+                repair saves
+              </li>
+              <li>the saved online/cash targets and your last-backup date</li>
+            </ul>
+          </div>
+
+          <div className="rounded-xl border border-line bg-base/60 px-3 py-2.5 text-sm">
+            <p className="font-medium text-ink">What stays</p>
+            <p className="mt-1 text-ink-soft">
+              Your login, password and two-factor setup are untouched — you stay signed in on every
+              device. This resets the data, it does not close the account.
+            </p>
+            {/* The one thing a user cannot work out for themselves, said at the
+                moment it becomes true. The delta pull carries CHANGES forward
+                by updated_at and a deleted row has no updated_at to carry — so
+                another device keeps rendering the old ledger indefinitely, and
+                worse, pushes any queued write back into the fresh account.
+                Logging out there wipes its mirror wholesale (6.6), which is the
+                whole fix. */}
+            <p className="mt-2 text-ink-mute">
+              Log out and back in on your other devices afterwards. They keep their own copy until
+              you do — sync carries changes forward, not deletions.
+            </p>
+          </div>
+
+          {/* The nudge is sized to how bad the situation is. Never having
+              exported is a different problem from having exported last week,
+              and one warning shown at the same weight for both teaches people
+              to ignore it. */}
+          <div
+            className={`rounded-xl border px-3 py-2.5 text-sm ${
+              lastExport === null
+                ? 'border-accent/50 bg-raised text-accent'
+                : 'border-line text-ink-soft'
+            }`}
+          >
+            <p>
+              {lastExport === null
+                ? 'You have never exported a backup. Everything above is about to exist nowhere.'
+                : `Last backup: ${new Date(lastExport).toLocaleDateString()}. Anything logged since then is not in it.`}
+            </p>
+            <button
+              type="button"
+              disabled={backupBusy || busy}
+              onClick={() => void onBackup()}
+              className="press mt-2 rounded-xl border border-line px-3 py-2 text-sm font-semibold text-ink disabled:opacity-50"
+            >
+              {backupBusy ? 'Exporting…' : 'Download a JSON backup first'}
+            </button>
+          </div>
+
+          {pending > 0 && (
+            <p className="rounded-xl border border-neg/40 px-3 py-2.5 text-sm text-ink-soft">
+              {pending} write{pending === 1 ? '' : 's'} on this device{' '}
+              {pending === 1 ? 'has' : 'have'} not reached the server yet. The reset discards
+              {pending === 1 ? ' it' : ' them'} too.
+            </p>
+          )}
+
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="text-ink-soft">
+              Type <span className="font-semibold text-ink">{RESET_CONFIRM_PHRASE}</span> to confirm
+            </span>
+            <input
+              type="text"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              aria-label={`Type ${RESET_CONFIRM_PHRASE} to confirm`}
+              className="w-full rounded-xl border border-line bg-base px-3 py-2.5 tracking-[0.3em] text-ink outline-none focus:border-neg"
+            />
+          </label>
+
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={!armed || busy}
+              onClick={() => void run()}
+              className="press flex-1 rounded-xl bg-neg/20 px-3 py-2.5 font-semibold text-neg disabled:opacity-40"
+            >
+              {busy ? 'Erasing…' : 'Erase everything'}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={close}
+              className="press rounded-xl border border-line px-3 py-2.5 text-ink-soft disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
 export function Settings() {
   const { session } = useSession()
   const toast = useToast()
@@ -585,114 +870,120 @@ export function Settings() {
   }
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-6 py-8 md:max-w-3xl md:px-8 md:py-10">
-      <h1 className="font-display text-[1rem] text-ink">Settings</h1>
+    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-7 px-6 py-8 md:max-w-3xl md:px-8 md:py-10">
+      {/* The account identity is a subtitle rather than the card it used to be.
+          It was a whole bordered box holding one line of text nobody came here
+          to read — but it does answer "whose settings are these", which is worth
+          a line at the top and not a card in the middle. */}
+      <header>
+        <h1 className="font-display text-[1rem] text-ink">Settings</h1>
+        <p className="mt-1.5 text-sm text-ink-mute">
+          Signed in as <span className="text-ink-soft">{session?.user.email}</span>
+        </p>
+      </header>
 
-      <section className="card p-4">
-        <h2 className="font-display text-[0.6875rem] leading-relaxed">Account</h2>
-        <p className="mt-1 text-sm text-ink-soft">{session?.user.email}</p>
-      </section>
-
+      {/* Above every group and outside all of them: it is an alert, not a
+          setting, and it is invisible unless something is actually wrong. */}
       <StuckWrites />
 
-      <section className="card p-4">
-        <h2 className="font-display text-[0.6875rem] leading-relaxed">
-          Export — you are never locked in
-        </h2>
-        <p className="mt-1 mb-3 text-sm text-ink-soft">
-          Full ledger, voided entries included. Make it a monthly habit; the free tier keeps no
-          backups for you.
-        </p>
-        {reminder.due ? (
-          <p className="mb-3 rounded-xl border border-accent/40 bg-raised px-3 py-2 text-sm text-accent">
-            {reminder.message}
-          </p>
-        ) : (
-          <p className="mb-3 text-xs text-ink-mute">{reminder.message}</p>
-        )}
-        <div className="flex gap-2">
-          <button
-            type="button"
-            disabled={busy !== null}
-            onClick={() => exportAs('json')}
-            className="flex-1 rounded-xl bg-accent px-3 py-2.5 font-semibold text-on-accent disabled:opacity-50"
-          >
-            {busy === 'json' ? 'Exporting…' : 'JSON (full)'}
-          </button>
-          <button
-            type="button"
-            disabled={busy !== null}
-            onClick={() => exportAs('csv')}
-            className="flex-1 rounded-xl border border-line px-3 py-2.5 font-semibold text-ink disabled:opacity-50"
-          >
-            {busy === 'csv' ? 'Exporting…' : 'CSV (sheets)'}
-          </button>
-        </div>
-      </section>
-
-      <RestoreSection />
-
-      <MfaSection />
-
-      <MoneySummarySection />
-
-      <AppearanceSection />
-
-      {/* Four independent destinations — a single column of them is a phone
-          compromise, not a layout. They tile once there's room. */}
-      <div className="grid gap-4 md:grid-cols-2">
-        <section className="card p-4">
-          <h2 className="font-display text-[0.6875rem] leading-relaxed">
-            Envelopes &amp; categories
-          </h2>
-          <p className="mt-1 text-sm text-ink-soft">
+      {/* Order is by how often you come here for it, with the irreversible
+          things last. Setup is the reason Settings gets opened; the danger zone
+          is the reason it gets opened once. */}
+      <SettingsGroup title="Setup" hint="The parts of Tin you shape to your money.">
+        <div className="grid gap-4 md:grid-cols-2">
+          <NavCard to="/envelopes" title="Envelopes & categories">
             Change the 70/20/10 split, rename envelopes, add or archive categories. Past entries are
             never re-allocated.
-          </p>
-          <Link to="/envelopes" className="mt-2 inline-block text-sm font-medium text-accent">
-            Manage envelopes →
-          </Link>
-        </section>
-
-        <section className="card p-4">
-          <h2 className="font-display text-[0.6875rem] leading-relaxed">Recurring</h2>
-          <p className="mt-1 text-sm text-ink-soft">
+          </NavCard>
+          <NavCard to="/recurring" title="Recurring">
             Rent, allowance, subscriptions — they log themselves on app open.
-          </p>
-          <Link to="/recurring" className="mt-2 inline-block text-sm font-medium text-accent">
-            Manage templates →
-          </Link>
-        </section>
-
-        <section className="card p-4">
-          <h2 className="font-display text-[0.6875rem] leading-relaxed">Import a statement</h2>
-          <p className="mt-1 text-sm text-ink-soft">
+          </NavCard>
+          <NavCard to="/import" title="Import a statement">
             Backfill old transactions from a pasted table or CSV. Read on this device, reviewed row
             by row, and never posted until you say so.
+          </NavCard>
+          <NavCard to="/split" title="Split playground">
+            The 70/20/10 math on its own, no login needed — handy for showing someone how it works.
+          </NavCard>
+        </div>
+      </SettingsGroup>
+
+      <SettingsGroup title="Money on hand">
+        <MoneySummarySection />
+      </SettingsGroup>
+
+      <SettingsGroup
+        title="Your data"
+        hint="Tin holds one copy of your ledger. These two are how you keep another."
+      >
+        <section className="card p-4">
+          <h3 className="font-display text-[0.6875rem] leading-relaxed">
+            Export — you are never locked in
+          </h3>
+          <p className="mt-1 mb-3 text-sm text-ink-soft">
+            Full ledger, voided entries included. Make it a monthly habit; the free tier keeps no
+            backups for you.
           </p>
-          <Link to="/import" className="mt-2 inline-block text-sm font-medium text-accent">
-            Import entries →
-          </Link>
+          {reminder.due ? (
+            <p className="mb-3 rounded-xl border border-accent/40 bg-raised px-3 py-2 text-sm text-accent">
+              {reminder.message}
+            </p>
+          ) : (
+            <p className="mb-3 text-xs text-ink-mute">{reminder.message}</p>
+          )}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() => exportAs('json')}
+              className="press flex-1 rounded-xl bg-accent px-3 py-2.5 font-semibold text-on-accent disabled:opacity-50"
+            >
+              {busy === 'json' ? 'Exporting…' : 'JSON (full)'}
+            </button>
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() => exportAs('csv')}
+              className="press flex-1 rounded-xl border border-line px-3 py-2.5 font-semibold text-ink disabled:opacity-50"
+            >
+              {busy === 'csv' ? 'Exporting…' : 'CSV (sheets)'}
+            </button>
+          </div>
         </section>
+
+        <RestoreSection />
+      </SettingsGroup>
+
+      <SettingsGroup title="Appearance">
+        <AppearanceSection />
+      </SettingsGroup>
+
+      <SettingsGroup title="Account">
+        <MfaSection />
 
         <section className="card p-4">
-          <h2 className="font-display text-[0.6875rem] leading-relaxed">Extras</h2>
-          <p className="mt-1 text-sm">
-            <Link to="/split" className="text-accent">
-              Split playground
-            </Link>{' '}
-            — the 70/20/10 math, no login needed.
+          <h3 className="font-display text-[0.6875rem] leading-relaxed">Log out</h3>
+          <p className="mt-1 mb-3 text-sm text-ink-soft">
+            Clears this device's copy of your ledger as it goes, so the next person to open Tin here
+            sees nothing of yours.
           </p>
+          <button
+            type="button"
+            onClick={logout}
+            className="press rounded-xl border border-line px-3 py-2.5 text-sm font-semibold text-ink-soft"
+          >
+            Log out
+          </button>
         </section>
-      </div>
+      </SettingsGroup>
 
-      <button
-        type="button"
-        onClick={logout}
-        className="mt-auto rounded-2xl border border-line px-4 py-3 text-ink-soft transition-colors hover:border-neg/40 hover:text-neg md:self-start md:px-8"
-      >
-        Log out
-      </button>
+      <SettingsGroup title="Danger zone">
+        <DangerZone
+          onBackup={() => exportAs('json')}
+          backupBusy={busy === 'json'}
+          lastExport={lastExport}
+        />
+      </SettingsGroup>
     </main>
   )
 }

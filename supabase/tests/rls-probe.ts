@@ -225,6 +225,47 @@ console.log('\nappend-only ledger:')
   check('deletes on entries are denied', r2.error !== null || (r2.data ?? []).length === 0)
 }
 
+// ---- account reset (006): the one function that deletes ledger rows ----
+//
+// `reset_account` is SECURITY DEFINER, so it runs with RLS switched off and
+// scopes itself to auth.uid() in its own body. That makes this block the single
+// most important set of checks in the probe: everywhere else the database is
+// enforcing isolation, and here the function is. It takes no arguments
+// precisely so there is nothing to point at someone else's data — this proves
+// the aim is right anyway.
+//
+// Safe to run destructively because B is a throwaway probe account, and B is
+// the one being reset. A is the account that must come through untouched.
+console.log('\naccount reset (migration 006):')
+{
+  const r = await anon.rpc('reset_account')
+  check('anon cannot call reset_account', r.error !== null, 'a session-less caller got through')
+
+  const r2 = await asB.rpc('reset_account')
+  check('B can reset their own account', !r2.error, r2.error?.message)
+
+  const r3 = await asB.from('envelopes').select('id')
+  check("B's own envelopes are gone", !r3.error && (r3.data ?? []).length === 0, r3.error?.message)
+  const r4 = await asB.from('entries').select('id')
+  check("B's own entries are gone", !r4.error && (r4.data ?? []).length === 0, r4.error?.message)
+
+  // The whole point. A never called anything.
+  const r5 = await asA.from('entries').select('id').eq('id', entryAId)
+  check("B's reset did NOT touch A's entry", !r5.error && (r5.data ?? []).length === 1)
+  const r6 = await asA.from('envelopes').select('id').eq('id', envelopeAId)
+  check("B's reset did NOT touch A's envelope", !r6.error && (r6.data ?? []).length === 1)
+  const r7 = await asA.from('checkin_days').select('day_key').eq('day_key', checkInDay)
+  check("B's reset did NOT touch A's check-ins", !r7.error && (r7.data ?? []).length === 1)
+
+  // The tables must remain exactly as undeletable as they were: the function is
+  // an all-or-nothing door, not a licence to remove one inconvenient row.
+  const r8 = await asB.from('entries').delete().neq('id', entryAId).select('id')
+  check(
+    'reset_account did not come with a DELETE policy on entries',
+    r8.error !== null || (r8.data ?? []).length === 0,
+  )
+}
+
 // ---- cleanup: void the probe entry so re-runs don't accumulate balance ----
 await asA
   .from('entries')

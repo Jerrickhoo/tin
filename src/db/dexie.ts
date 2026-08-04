@@ -143,6 +143,85 @@ export async function openForUser(userId: string): Promise<void> {
   resolveGate(current)
 }
 
+/** How much of this account is on this device, per table. */
+export interface LocalRowCounts {
+  entries: number
+  envelopes: number
+  categories: number
+  checkIns: number
+  streakSaves: number
+}
+
+/**
+ * Row counts for the reset confirmation, read from the mirror rather than the
+ * server.
+ *
+ * Local because the mirror is what the whole UI already reads and it is a
+ * complete copy of every table involved — asking Supabase would put a network
+ * round trip (and an offline failure mode) in front of a panel whose entire job
+ * is to be clear about what is at stake. `count()` on an IndexedDB store is a
+ * key-range count, not a scan, so this stays cheap on a large ledger.
+ */
+export async function localRowCounts(): Promise<LocalRowCounts> {
+  const db = await localDb()
+  const [entries, envelopes, categories, checkIns, streakSaves] = await Promise.all([
+    db.entries.count(),
+    db.envelopes.count(),
+    db.categories.count(),
+    db.checkIns.count(),
+    db.streakSaves.count(),
+  ])
+  return { entries, envelopes, categories, checkIns, streakSaves }
+}
+
+/**
+ * Empty every table but keep the database OPEN and owned by the same user.
+ *
+ * The account-reset counterpart to `wipeLocalDb`, and the difference between
+ * them is the whole reason this exists. `wipeLocalDb` deletes the database and
+ * re-arms the gate, which leaves `localDb()` an unresolved promise — every read
+ * in the app then hangs until the next login calls `openForUser`. That is
+ * correct for logout, where the next thing on screen is the login form, and
+ * catastrophic for a reset, where the user stays signed in and is looking at
+ * Settings: the app would simply stop answering.
+ *
+ * So the tables are cleared in place, inside one transaction, and the owner row
+ * is written back. The gate stays resolved, reads keep working, and they
+ * correctly return nothing until re-seeding and the next pull refill them.
+ *
+ * The cursor goes with everything else. Leaving it would tell the next delta
+ * pull that it has already seen every entry up to that timestamp — and since
+ * the rows are gone from the server too, nothing would ever re-arrive to
+ * contradict it. Clearing it makes the next pull start from the beginning of a
+ * now-empty ledger, which is exactly the truth.
+ */
+export async function clearLocalDataForReset(userId: string): Promise<void> {
+  const db = await localDb()
+  await db.transaction(
+    'rw',
+    [db.entries, db.envelopes, db.categories, db.streakSaves, db.checkIns, db.outbox, db.meta],
+    async () => {
+      await Promise.all([
+        db.entries.clear(),
+        db.envelopes.clear(),
+        db.categories.clear(),
+        db.streakSaves.clear(),
+        db.checkIns.clear(),
+        // Queued writes die here, and that is the point rather than a casualty:
+        // every one of them is an insert or a void against a ledger that no
+        // longer exists. Pushing them after the reset would resurrect exactly
+        // the money the user just asked to be rid of. The UI warns first.
+        db.outbox.clear(),
+        db.meta.clear(),
+      ])
+      await db.meta.put({ key: 'owner', value: userId })
+    },
+  )
+  // The badge is counting a queue that is now empty; nothing else listens for a
+  // drain it did not cause, so this is purely to stop the pill lying.
+  notifyOutboxChanged('drain')
+}
+
 /** Logout hygiene (ROADMAP 6.6): delete the whole database, re-arm the gate. */
 export async function wipeLocalDb(): Promise<void> {
   const db = current ?? new TinDb()

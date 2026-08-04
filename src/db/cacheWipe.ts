@@ -6,7 +6,7 @@
 
 import { wipeLocalDb } from './dexie'
 import { settleSync, stopSync } from './sync'
-import { USER_SCOPED_LOCAL_KEYS } from '../lib/local-keys'
+import { clearUserScopedLocalKeys } from '../lib/local-keys'
 
 /**
  * Caches holding only the precached app shell — JS, CSS, fonts, index.html.
@@ -15,19 +15,6 @@ import { USER_SCOPED_LOCAL_KEYS } from '../lib/local-keys'
  * costs the next person an app that won't open offline at all.
  */
 const isAppShellCache = (key: string): boolean => /workbox-precache/.test(key)
-
-/**
- * Forget every localStorage key that describes the PERSON rather than the
- * device — the saved money targets, when they last backed up, which streak gap
- * they let go. lib/local-keys.ts holds the list and argues what stays.
- */
-function clearUserLocalKeys(): void {
-  try {
-    for (const key of USER_SCOPED_LOCAL_KEYS) localStorage.removeItem(key)
-  } catch {
-    /* private mode — nothing was persisted, so nothing needs clearing */
-  }
-}
 
 export async function wipeLocalCaches(): Promise<void> {
   // stop first so nothing re-opens the database behind the wipe, then wait for
@@ -46,7 +33,7 @@ export async function wipeLocalCaches(): Promise<void> {
   // preference belonging to the device (see lib/texture.ts, which argues that
   // case) and survives logout on purpose; wiping it would reset the screen for
   // whoever set it, to protect nothing.
-  clearUserLocalKeys()
+  clearUserScopedLocalKeys()
   if ('caches' in globalThis) {
     const keys = await caches.keys()
     await Promise.all(keys.filter((key) => !isAppShellCache(key)).map((key) => caches.delete(key)))
