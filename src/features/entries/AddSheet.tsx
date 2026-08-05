@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { useLedger, useToast, type AddPrefill } from '../../app-context'
 import { BottomSheet } from '../../components/BottomSheet'
+import { useAmountField } from '../../components/useAmountField'
 import {
   addExpense,
   addIncome,
@@ -22,7 +23,6 @@ import {
   centavosToAmountText,
   formatPHP,
   parseAmountToCentavos,
-  sanitizeAmountInput,
 } from '../../lib/money'
 import { splitByLargestRemainder } from '../../lib/split'
 import { isRequiredMoneyTypeSelected, type MoneyType } from '../../lib/money-type'
@@ -115,40 +115,7 @@ export function AddSheet({
      A native keyboard makes both disappear: the browser inserts at the caret,
      gives real selection handles and a real backspace, and costs no code. The
      field is left to do its job and this only filters what lands in it. */
-  const amountRef = useRef<HTMLInputElement>(null)
-  const pendingCaret = useRef<number | null>(null)
-  /**
-   * Bumped on every edit that needs the caret put back — INCLUDING the ones that
-   * leave the text identical.
-   *
-   * Keying the effect on `amount` instead looks equivalent and is not. Typing a
-   * character the sanitiser rejects leaves the text unchanged, so the effect
-   * never fires and the caret it stored sits there stale — and the next
-   * character that IS accepted gets that old position applied to it. Typing
-   * `12ab.99xx` came out as `1299.`: the caret saved when `a` was refused was
-   * replayed onto the `.`, which then landed before the digits instead of after.
-   */
-  const [caretTick, setCaretTick] = useState(0)
-
-  useLayoutEffect(() => {
-    const caret = pendingCaret.current
-    if (caret === null) return
-    pendingCaret.current = null
-    amountRef.current?.setSelectionRange(caret, caret)
-  }, [caretTick])
-
-  function onAmountChange(el: HTMLInputElement) {
-    const edit = sanitizeAmountInput(el.value, el.selectionStart ?? el.value.length)
-    setAmount(edit.value)
-    if (edit.value === el.value) {
-      // Nothing was dropped, so the browser's own caret is already right — and
-      // leaving a stale one behind is the bug above.
-      pendingCaret.current = null
-      return
-    }
-    pendingCaret.current = edit.caret
-    setCaretTick((n) => n + 1)
-  }
+  const { ref: amountRef, handleChange: onAmountChange } = useAmountField({ onChange: setAmount })
 
   useEffect(() => {
     if (!open) return

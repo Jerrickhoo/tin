@@ -39,18 +39,16 @@ import { getTexture, setTexture, type Texture } from '../../lib/texture'
 import {
   clampMoneyAmountToMax,
   emptyMoneyTypeTotals,
-  formatMoneyInput,
   getMoneyBucketLabel,
   MONEY_TYPE_UPDATED_EVENT,
-  parseMoneyInputToCentavos,
   readMoneyTypeSnapshot,
-  sanitizeMoneyInput,
   summarizeMoneyTypeTotals,
   writeMoneyTypeSnapshot,
   type MoneyTypeSnapshot,
   type MoneyTypeTotals,
 } from '../../lib/money-type'
-import { AMOUNT_PLACEHOLDER } from '../../lib/money'
+import { AMOUNT_PLACEHOLDER, centavosToAmountText, parseAmountToCentavos } from '../../lib/money'
+import { useAmountField } from '../../components/useAmountField'
 import { useSession } from '../auth/useSession'
 import { MfaSection } from './MfaSection'
 
@@ -330,9 +328,102 @@ function AppearanceSection() {
   )
 }
 
-/** centavos → the comma-grouped text the money inputs display. */
+/** centavos → the text a money target input starts with. */
 const centavosToInput = (centavos: number | null): string =>
-  centavos === null ? '' : formatMoneyInput((centavos / 100).toFixed(2))
+  centavos === null ? '' : centavosToAmountText(centavos)
+
+/**
+ * One money-target field.
+ *
+ * Its own component because `useAmountField` is a hook and there are two of
+ * these, rendered from a `.map` — calling a hook inside that loop is exactly
+ * what the rules-of-hooks lint exists to stop.
+ *
+ * The field used to be rewritten through `toFixed(2)` on every keystroke, so
+ * typing `4` became `4.00` with the caret parked after the centavos. Since the
+ * centavos were then full, the next digit had nowhere to go and was dropped —
+ * the same dead end §17.9 removed from the add sheet, one screen over. The text
+ * is now left as typed and only rewritten when it has to be: when the value
+ * exceeds what is actually in the tin.
+ */
+function MoneyTargetInput({
+  bucket,
+  value,
+  liveCentavos,
+  maxCentavos,
+  onChange,
+  onClear,
+}: {
+  bucket: 'online' | 'reallife'
+  value: string
+  liveCentavos: number
+  maxCentavos: number
+  onChange: (text: string, centavos: number | null) => void
+  onClear: () => void
+}) {
+  const { ref, handleChange } = useAmountField({
+    onChange: (text) => onChange(text, parseAmountToCentavos(text)),
+    // The FIELD gets the clamped value too (§15.6). It used to keep the raw text
+    // while only the saved snapshot was capped, so typing ₱50,000 against a
+    // ₱3,000 balance left the input reading 50,000 and silently stored 3,000 —
+    // the screen and the storage disagreeing about the number you are looking
+    // at. A half-typed value ("12.") has no parse yet and is left alone.
+    normalize: (text) => {
+      const parsed = parseAmountToCentavos(text)
+      if (parsed === null || parsed <= maxCentavos) return text
+      return centavosToAmountText(clampMoneyAmountToMax(parsed, maxCentavos))
+    },
+  })
+
+  const centavos = parseAmountToCentavos(value)
+  const delta = centavos === null ? null : liveCentavos - centavos
+
+  return (
+    <label className="rounded-2xl border border-line bg-base/50 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[0.65rem] font-semibold tracking-[0.24em] text-ink-mute uppercase">
+          {getMoneyBucketLabel(bucket)}
+        </span>
+        <span className="text-[0.65rem] tracking-[0.24em] text-ink-soft uppercase">
+          live {formatPHP(liveCentavos)}
+        </span>
+      </div>
+      <div className="mt-2 flex items-center gap-2 rounded-xl border border-line/70 bg-base/40 px-2.5 py-2">
+        <span className="text-[0.65rem] tracking-[0.24em] text-ink-soft uppercase">₱</span>
+        {/* The phone's own keyboard, like the add sheet — this used to carry
+            `inputMode="none"` for a pad that has been removed (§17.9). */}
+        <input
+          ref={ref}
+          type="text"
+          inputMode="decimal"
+          enterKeyHint="done"
+          autoComplete="off"
+          aria-label={`${getMoneyBucketLabel(bucket)} target in pesos`}
+          value={value}
+          onChange={(e) => handleChange(e.target)}
+          className="w-full border-0 bg-transparent p-0 text-lg font-semibold tabular-nums text-ink outline-none"
+          placeholder={AMOUNT_PLACEHOLDER}
+        />
+        <button
+          type="button"
+          onClick={onClear}
+          className="text-[0.65rem] font-semibold tracking-[0.24em] text-ink-soft uppercase"
+        >
+          clear
+        </button>
+      </div>
+      <p className="mt-2 text-xs text-ink-soft">
+        {centavos === null
+          ? 'Blank — Home shows the live ledger figure for this bucket.'
+          : delta === 0
+            ? 'Matches what the ledger says for this bucket.'
+            : (delta ?? 0) > 0
+              ? `${formatPHP(delta ?? 0)} below what the ledger says.`
+              : `${formatPHP(Math.abs(delta ?? 0))} above what the ledger says.`}
+      </p>
+    </label>
+  )
+}
 
 /**
  * Saved targets for the two money buckets, next to what the ledger actually says.
@@ -379,23 +470,13 @@ function MoneySummarySection() {
 
   const liveTotal = live.online + live.reallife + live.untagged
 
-  function updateValue(key: 'online' | 'reallife', value: string) {
-    const cleaned = sanitizeMoneyInput(value)
-    const parsed = parseMoneyInputToCentavos(cleaned)
-    const otherKey = key === 'online' ? 'reallife' : 'online'
-    const max = Math.max(0, liveTotal - (snapshot[otherKey] ?? 0))
-    const nextValue = parsed === null ? null : clampMoneyAmountToMax(parsed, max)
-    // The FIELD gets the clamped value too. It used to keep the raw text while
-    // only the saved snapshot was capped, so typing ₱50,000 against a ₱3,000
-    // balance left the input reading 50,000 and silently stored 3,000 — the
-    // screen and the storage disagreeing about the number you were looking at.
-    // A half-typed value ("12.") has no parse yet and is left alone, or the
-    // caret would fight every keystroke.
-    setInputValues((current) => ({
-      ...current,
-      [key]: nextValue === null ? formatMoneyInput(cleaned) : centavosToInput(nextValue),
-    }))
-    setSnapshot((current) => ({ ...current, [key]: nextValue }))
+  /** What this bucket may hold: the tin, less whatever the other one claims. */
+  const maxFor = (key: 'online' | 'reallife') =>
+    Math.max(0, liveTotal - (snapshot[key === 'online' ? 'reallife' : 'online'] ?? 0))
+
+  function updateValue(key: 'online' | 'reallife', text: string, centavos: number | null) {
+    setInputValues((current) => ({ ...current, [key]: text }))
+    setSnapshot((current) => ({ ...current, [key]: centavos }))
   }
 
   function clearValue(key: 'online' | 'reallife') {
@@ -442,53 +523,17 @@ function MoneySummarySection() {
         )}
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        {(['online', 'reallife'] as const).map((key) => {
-          const value = snapshot[key]
-          const delta = value === null ? null : live[key] - value
-          return (
-            <label key={key} className="rounded-2xl border border-line bg-base/50 p-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[0.65rem] font-semibold uppercase tracking-[0.24em] text-ink-mute">
-                  {getMoneyBucketLabel(key)}
-                </span>
-                <span className="text-[0.65rem] uppercase tracking-[0.24em] text-ink-soft">
-                  live {formatPHP(live[key])}
-                </span>
-              </div>
-              <div className="mt-2 flex items-center gap-2 rounded-xl border border-line/70 bg-base/40 px-2.5 py-2">
-                <span className="text-[0.65rem] uppercase tracking-[0.24em] text-ink-soft">₱</span>
-                {/* The phone's own keyboard, like the add sheet — this used to
-                    carry `inputMode="none"` for a pad that has been removed. */}
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  enterKeyHint="done"
-                  autoComplete="off"
-                  value={inputValues[key]}
-                  onChange={(e) => updateValue(key, e.target.value)}
-                  className="w-full border-0 bg-transparent p-0 text-lg font-semibold text-ink outline-none tabular-nums"
-                  placeholder={AMOUNT_PLACEHOLDER}
-                />
-                <button
-                  type="button"
-                  onClick={() => clearValue(key)}
-                  className="text-[0.65rem] font-semibold uppercase tracking-[0.24em] text-ink-soft"
-                >
-                  clear
-                </button>
-              </div>
-              <p className="mt-2 text-xs text-ink-soft">
-                {value === null
-                  ? 'Blank — Home shows the live ledger figure for this bucket.'
-                  : delta === 0
-                    ? 'Matches what the ledger says for this bucket.'
-                    : (delta ?? 0) > 0
-                      ? `${formatPHP(delta ?? 0)} below what the ledger says.`
-                      : `${formatPHP(Math.abs(delta ?? 0))} above what the ledger says.`}
-              </p>
-            </label>
-          )
-        })}
+        {(['online', 'reallife'] as const).map((key) => (
+          <MoneyTargetInput
+            key={key}
+            bucket={key}
+            value={inputValues[key]}
+            liveCentavos={live[key]}
+            maxCentavos={maxFor(key)}
+            onChange={(text, centavos) => updateValue(key, text, centavos)}
+            onClear={() => clearValue(key)}
+          />
+        ))}
       </div>
       <button
         type="button"

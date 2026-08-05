@@ -1,4 +1,3 @@
-import { MAX_CENTAVOS } from './money'
 import { MONEY_TYPE_SNAPSHOT_KEY } from './local-keys'
 import type { EntryRow } from './groups'
 
@@ -91,60 +90,18 @@ export const emptyMoneyTypeTotals = (): MoneyTypeTotals => ({
  */
 export const MONEY_TYPE_UPDATED_EVENT = 'tin-money-type-updated'
 
-export function sanitizeMoneyInput(value: string): string {
-  const normalized = value.replace(/[^\d.,]/g, '')
-  if (!normalized) return ''
+/* `sanitizeMoneyInput`, `formatMoneyInput` and `parseMoneyInputToCentavos` used
+   to live here — a SECOND money-input parser, used only by Settings' targets
+   while the add sheet used the one in lib/money.ts. Two parsers for one job is
+   how the two screens came to be broken in different ways: the add sheet's
+   amount was unreachable behind a custom keypad, and this one rewrote itself
+   through `toFixed(2)` on every keystroke. Both now go through
+   `sanitizeAmountInput` (lib/money.ts) and the `useAmountField` hook.
 
-  const hasDot = normalized.includes('.')
-  const hasComma = normalized.includes(',')
-  let cleaned = normalized
-
-  if (hasDot && hasComma) {
-    cleaned = normalized.replace(/,/g, '')
-  } else if (!hasDot && hasComma) {
-    const isGrouped = /^\d{1,3}(,\d{3})+$/.test(normalized)
-    cleaned = isGrouped ? normalized.replace(/,/g, '') : normalized.replace(/,/g, '.')
-  }
-
-  const parts = cleaned.split('.')
-  const whole = parts[0] ?? ''
-  const fractionParts = parts.slice(1)
-  const fraction = fractionParts.join('').slice(0, 2)
-  const endsWithDot = cleaned.endsWith('.') && fractionParts.length === 1 && fractionParts[0] === ''
-
-  if (endsWithDot) return `${whole}.`
-  if (!fraction) return whole
-  return `${whole}.${fraction}`
-}
-
-export function formatMoneyInput(value: string): string {
-  const cleaned = sanitizeMoneyInput(value)
-  if (!cleaned) return ''
-
-  const trailingDot = cleaned.endsWith('.')
-  const [whole, fraction = ''] = cleaned.split('.')
-  const formattedWhole = (whole || '0').replace(/\B(?=(\d{3})+(?!\d))/g, ',')
-
-  if (trailingDot) return `${formattedWhole}.`
-  if (!fraction) return formattedWhole
-  return `${formattedWhole}.${fraction}`
-}
-
-export function parseMoneyInputToCentavos(value: string): number | null {
-  const cleaned = sanitizeMoneyInput(value)
-  if (!cleaned) return null
-  if (cleaned === '.' || cleaned === ',') return null
-
-  const [whole, fraction = ''] = cleaned.split('.')
-  if (whole && !/^\d+$/.test(whole)) return null
-  if (fraction && !/^\d{1,2}$/.test(fraction)) return null
-
-  const wholeCentavos = BigInt(whole === '' ? '0' : whole) * 100n
-  const fractionCentavos = BigInt((fraction + '00').slice(0, 2))
-  const centavos = wholeCentavos + fractionCentavos
-  if (centavos > BigInt(MAX_CENTAVOS)) return null
-  return Number(centavos)
-}
+   The comma handling is the one thing that went with them, deliberately. It
+   treated a lone comma as a DECIMAL separator ("12,34" → 12.34), which is a
+   European convention; in en-PH a comma is a thousands separator and nothing
+   else, and the phone's decimal keyboard emits a point. */
 
 export function clampMoneyAmountToMax(amountCentavos: number, maxCentavos: number): number {
   return Math.min(amountCentavos, maxCentavos)

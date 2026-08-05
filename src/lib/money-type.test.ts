@@ -1,13 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   clampMoneyAmountToMax,
-  formatMoneyInput,
   getMoneyBucketLabel,
   getMoneyTypeLabel,
   groupMoneyType,
   isRequiredMoneyTypeSelected,
-  parseMoneyInputToCentavos,
-  sanitizeMoneyInput,
   summarizeMoneyTypeLiveBalance,
   summarizeMoneyTypeSummaryItems,
   summarizeMoneyTypeTotals,
@@ -62,40 +59,10 @@ describe('isRequiredMoneyTypeSelected', () => {
   })
 })
 
-describe('sanitizeMoneyInput', () => {
-  it('removes letters and keeps decimal input usable', () => {
-    expect(sanitizeMoneyInput('ab12.34cd')).toBe('12.34')
-    expect(sanitizeMoneyInput('1.2.3')).toBe('1.23')
-    expect(sanitizeMoneyInput('')).toBe('')
-  })
-
-  it('accepts comma as a decimal separator on mobile keyboards', () => {
-    expect(sanitizeMoneyInput('12,34')).toBe('12.34')
-    expect(sanitizeMoneyInput('1,2,3')).toBe('1.23')
-    expect(parseMoneyInputToCentavos('12,34')).toBe(1234)
-  })
-
-  it('parses cleaned input into centavos', () => {
-    expect(parseMoneyInputToCentavos('12.34')).toBe(1234)
-    expect(parseMoneyInputToCentavos('abc')).toBeNull()
-    expect(parseMoneyInputToCentavos('')).toBeNull()
-  })
-
-  it('accepts leading decimal entry and mobile comma separators', () => {
-    expect(sanitizeMoneyInput('.5')).toBe('.5')
-    expect(parseMoneyInputToCentavos('.5')).toBe(50)
-    expect(sanitizeMoneyInput(',5')).toBe('.5')
-    expect(parseMoneyInputToCentavos(',5')).toBe(50)
-    expect(sanitizeMoneyInput('1,234')).toBe('1234')
-    expect(parseMoneyInputToCentavos('1,234')).toBe(123400)
-  })
-
-  it('formats input with commas automatically for display', () => {
-    expect(formatMoneyInput('1234')).toBe('1,234')
-    expect(formatMoneyInput('1234567.8')).toBe('1,234,567.8')
-    expect(formatMoneyInput('1234567.89')).toBe('1,234,567.89')
-  })
-
+// The sanitize/format/parse trio that used to be tested here went with the
+// second money-input parser it belonged to — see the note in money-type.ts.
+// Its replacement is covered by `sanitizeAmountInput` in money.test.ts.
+describe('clampMoneyAmountToMax', () => {
   it('caps values at the available balance', () => {
     expect(clampMoneyAmountToMax(2500, 1200)).toBe(1200)
     expect(clampMoneyAmountToMax(800, 1200)).toBe(800)

@@ -8,7 +8,7 @@
 
 ## Status — all phases closed (2026-07-22), Phases 9 and 10 added 2026-07-24, Phases 11-12 2026-07-28
 
-**Live at <https://tin-jar.netlify.app>.** Phases 0–12 are done, plus a Phase 3.5 retrofit. 531 tests — including the first component-render tests, added in §17; lint, build and the AA-contrast script all clean. `git push` to `main` deploys.
+**Live at <https://tin-jar.netlify.app>.** Phases 0–12 are done, plus a Phase 3.5 retrofit. 532 tests — including the first component-render tests, added in §17; lint, build and the AA-contrast script all clean. `git push` to `main` deploys.
 
 | Phase | State |
 | ----- | ----- |
@@ -1334,3 +1334,24 @@ This is the second time in two passes that a real engine found what jsdom could 
 **One thing lost, and it was worth losing.** The pad existed because the OS keyboard covers the category grid that the 2-tap path's second tap needs (ROADMAP 3.2). That trade-off is real and now runs the other way. It is smaller than it was, though: the sheet without a twelve-key pad in it is short enough that the whole category grid fits on one phone screen, and `enterKeyHint="done"` plus Enter-to-blur gives a one-tap way to put the keyboard down.
 
 **Still open:** whether the keyboard covering the grid is actually a problem in daily use. It is the reason the pad was built, and the pad is now gone on the strength of one report; if the second tap starts feeling slow, the fix is a scroll-into-view on blur rather than bringing twelve buttons back.
+
+### 17.10 The same bug, one screen over — and why it was two screens (2026-08-05)
+
+Reported straight after §17.9 shipped: in Settings → Current money, *"putting a number, like 4, automatically makes it 4.00, and the line where I type is at the decimal, so I have to move it into the middle to be able to edit."*
+
+Identical to the add sheet's dead end, arrived at by a different route. `updateValue` ran the field through `centavosToInput` — i.e. `toFixed(2)` — **on every keystroke**. Type `4`, get `4.00`, caret parked after the centavos; the centavos are now full, so the next digit is dropped by the sanitiser and the field appears frozen. Moving the caret by hand was the only way to keep typing, which is exactly what the report describes.
+
+**Why the two screens broke separately is the part worth keeping.** They had two different money-input parsers. `lib/money.ts` had `parseAmountToCentavos` for the add sheet; `lib/money-type.ts` had `sanitizeMoneyInput` / `formatMoneyInput` / `parseMoneyInputToCentavos` for this panel, with its own comma handling and its own idea of when to reformat. One job, two implementations, two screens that could — and did — fail in unrelated ways and get fixed one at a time.
+
+So the fix is a deletion and a merge, not a patch:
+
+- The `money-type.ts` trio is **gone**. Its comma-as-decimal-separator handling (`"12,34"` → 12.34) went with it deliberately: that is a European convention, and in en-PH a comma is a thousands separator and nothing else. `clampMoneyAmountToMax` stays — the clamp was never the problem.
+- `useAmountField` (`components/`) is now the single amount input in the app, used by both. Its rule is the one §17.9 arrived at: **it may only ever remove characters.** Insertion, caret placement, selection and backspace all belong to the browser.
+- `normalize` is the one escape hatch, and Settings is why it exists. A target above the available balance must not be *displayable*, or the screen and the stored value disagree — §15.6, which is a real bug that was fixed once and must not come back. A normalised rewrite is no longer what the user typed, so the caret goes to the end of it; a half-typed `"12."` has no parse yet and is left alone.
+- The two inputs became `MoneyTargetInput`, a component, because `useAmountField` is a hook and they are rendered from a `.map`.
+
+**The stale-caret bug from §17.9 was in here too**, unshipped but present, and would have been the third copy. It is fixed once now, in the hook, with the test that pins it (`12ab.99xx` → `12.99`).
+
+Verified in Edge at 390 px against a seeded ₱5,000 balance: typing `4` gives `4` with the caret after it, `450`, `450.25`, garbage filtered, clear works, no console errors. `useAmountField.test.tsx` covers the rules in jsdom — including the clamp, which had no test at all before.
+
+**One thing the browser run exposed that is not a bug:** on a ledger with a zero balance every keystroke clamps to `0`, because the maximum a target may claim is the balance. That is the §15.6 rule behaving correctly on an empty tin, and it is only reachable before any money has been logged — but if it ever reads as broken, the answer is to disable the inputs and say why, not to loosen the clamp.
