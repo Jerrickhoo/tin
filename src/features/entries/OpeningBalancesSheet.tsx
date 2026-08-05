@@ -8,13 +8,29 @@ import type { MoneyType } from '../../lib/money-type'
 
 // Onboarding (ROADMAP 3.4): "what's currently in GCash, per envelope?" —
 // writes adjustment entries so day one starts from the truth, not from zero.
+//
+// Lives beside AddSheet rather than under features/home because it is a ledger
+// write, and because Home is no longer its only door: Home's offer now expires
+// (lib/onboarding.ts) and Settings holds the permanent one, so a file owned by
+// one of two callers would have had the other importing across features.
 export function OpeningBalancesSheet({
   open,
   envelopes,
+  alreadyRecorded = false,
   onClose,
 }: {
   open: boolean
   envelopes: Envelope[]
+  /**
+   * The ledger already carries a live opening-balance group.
+   *
+   * Home never passes this — its offer is gone by the time it could be true.
+   * Settings' permanent door can, and must: a second save ADDS a second
+   * adjustment group rather than replacing the first, so the balances double.
+   * That footgun did not exist while the only way in was a card that closed
+   * itself the moment the group was written.
+   */
+  alreadyRecorded?: boolean
   onClose: () => void
 }) {
   const { bump } = useLedger()
@@ -58,6 +74,13 @@ export function OpeningBalancesSheet({
       <p className="mt-1 mb-4 text-sm text-ink-soft">
         Rough is fine — you can void and redo this later. Blank means zero.
       </p>
+      {alreadyRecorded && (
+        <p className="mb-4 rounded-xl border border-neg/40 bg-neg/10 px-3 py-2.5 text-sm text-ink-soft">
+          You've already recorded opening balances. Saving again <strong>adds</strong> to your
+          envelopes rather than replacing what's there — if you're correcting the old figures, void
+          that group in History first.
+        </p>
+      )}
       <div className="flex flex-col gap-3">
         {envelopes.map((env) => (
           <label key={env.id} className="flex items-center gap-3">

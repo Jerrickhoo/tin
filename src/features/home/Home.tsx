@@ -32,7 +32,8 @@ import {
   type StreakState,
 } from '../../lib/logging-streak'
 import { formatPHP } from '../../lib/money'
-import { DISMISSED_GAP_KEY } from '../../lib/local-keys'
+import { DISMISSED_GAP_KEY, OPENING_SKIPPED_KEY } from '../../lib/local-keys'
+import { loggedDayCount, shouldOfferOpeningBalances } from '../../lib/onboarding'
 import {
   emptyMoneyTypeTotals,
   MONEY_TYPE_UPDATED_EVENT,
@@ -42,7 +43,7 @@ import {
   type MoneyTypeSnapshot,
   type MoneyTypeTotals,
 } from '../../lib/money-type'
-import { OpeningBalancesSheet } from './OpeningBalancesSheet'
+import { OpeningBalancesSheet } from '../entries/OpeningBalancesSheet'
 
 interface Card extends Envelope {
   balanceCentavos: number
@@ -90,6 +91,30 @@ function writeDismissedGap(dayKey: string): void {
   }
 }
 
+/**
+ * Whether this device has been told to stop offering opening balances.
+ *
+ * Same storage argument as the gap dismissal above: it is a choice about a
+ * prompt, not a fact about the money, so it does not belong in the ledger. The
+ * offer expires on its own anyway (lib/onboarding.ts) — this is only the user
+ * saying so sooner, and Settings keeps the door open either way.
+ */
+function readOpeningSkipped(): boolean {
+  try {
+    return localStorage.getItem(OPENING_SKIPPED_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writeOpeningSkipped(): void {
+  try {
+    localStorage.setItem(OPENING_SKIPPED_KEY, '1')
+  } catch {
+    /* private mode — the skip holds for this session */
+  }
+}
+
 function greeting(hour: number): string {
   if (hour < 5) return 'Still up'
   if (hour < 12) return 'Good morning'
@@ -109,6 +134,11 @@ export function Home() {
   // too would silently retire the nudge for anyone who skips onboarding.
   const [empty, setEmpty] = useState(false)
   const [needsOpening, setNeedsOpening] = useState(false)
+  // Distinct days the ledger has entries on. The opening-balances offer is an
+  // offer with a shelf life rather than a permanent card — see lib/onboarding.ts
+  // for why it is days and not entries, and why it expires at all.
+  const [loggedDays, setLoggedDays] = useState(0)
+  const [openingSkipped, setOpeningSkipped] = useState(readOpeningSkipped)
   const [openingOpen, setOpeningOpen] = useState(false)
   // Balances cover every envelope; cards cover only the un-archived ones. The
   // difference is real money on the real ledger, so it belongs in the total
@@ -187,6 +217,8 @@ export function Home() {
         setOffCardCentavos(off)
         setEmpty(!anyEntries)
         setNeedsOpening(!openingDone)
+        // Fifth use of the same 13-month window, also free.
+        setLoggedDays(loggedDayCount(recent))
         const todayKey = manilaDayKey(new Date())
         setStrip(loggingStrip(recent, checkIns))
         setTodayCentavos(spentOnDay(recent, todayKey))
@@ -299,6 +331,11 @@ export function Home() {
   const daysLeft = daysRemainingInMonth(manilaDayKey(now))
   const daysLeftLabel = daysLeft === 1 ? 'last day of the month' : `${daysLeft} days left`
   const backupReminder = exportReminderStatus(getLastExport(), now)
+  const offerOpening = shouldOfferOpeningBalances({
+    hasOpeningBalances: !needsOpening,
+    loggedDays,
+    dismissed: openingSkipped,
+  })
 
   const moneyTypeSummary = useMemo(
     () => moneyTypeSummaryFromTotals(moneyTotals, moneySnapshot),
@@ -441,19 +478,39 @@ export function Home() {
         !empty && <NoEntryYetBanner onAdd={() => addSheet.open()} />
       )}
 
-      {needsOpening && cards && (
-        <button
-          type="button"
-          onClick={() => setOpeningOpen(true)}
-          className="press card card-interactive border-accent/50 px-4 py-3.5 text-left"
-        >
-          <p className="font-display text-[0.625rem] leading-relaxed text-accent">
-            START FROM THE TRUTH →
-          </p>
-          <p className="mt-0.5 text-sm text-ink-soft">
-            Tell Tin what's already in your GCash, split across envelopes.
-          </p>
-        </button>
+      {/* An OFFER, not a permanent fixture. It retires once the ledger has been
+          in real use for a few days — by then the envelopes already hold your
+          information, and a card headed "START FROM THE TRUTH" is telling you to
+          begin something you plainly have. Settings → Setup keeps the sheet
+          reachable forever, which is what lets this expire safely: the reason it
+          was made permanent in the first place was that closing it left the
+          sheet with no door at all. */}
+      {offerOpening && cards && (
+        <section className="card border-accent/50 px-4 py-3.5">
+          <button
+            type="button"
+            onClick={() => setOpeningOpen(true)}
+            className="w-full text-left"
+            aria-label="Record opening balances"
+          >
+            <p className="font-display text-[0.625rem] leading-relaxed text-accent">
+              START FROM THE TRUTH →
+            </p>
+            <p className="mt-0.5 text-sm text-ink-soft">
+              Tell Tin what's already in your GCash, split across envelopes.
+            </p>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              writeOpeningSkipped()
+              setOpeningSkipped(true)
+            }}
+            className="mt-2.5 text-xs text-ink-mute underline underline-offset-2"
+          >
+            Skip — my balances are already right
+          </button>
+        </section>
       )}
 
       {empty && (

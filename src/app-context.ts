@@ -39,6 +39,16 @@ export type AddPrefill =
   | {
       mode: 'expense'
       amountCentavos?: number
+      /**
+       * The category the voided entry was filed under.
+       *
+       * The last field "Fix" was still dropping. Tapping a category is what SAVES
+       * an expense, so a re-entry reopened with everything else carried across
+       * and the one control that commits it left to be hunted for in a grid
+       * ranked by use — where the category you want is not necessarily near the
+       * front. The sheet surfaces it as a single button instead.
+       */
+      categoryId?: string
       note?: string
       occurredAt?: string
       moneyType?: MoneyType | null

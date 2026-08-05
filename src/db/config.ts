@@ -18,6 +18,7 @@
 import { supabase } from './supabase'
 import { syncNow, isOffline } from './sync'
 import { summarizeShares } from '../lib/shares'
+import type { Category } from './entries'
 
 function assertOnline(): void {
   if (isOffline()) {
@@ -89,6 +90,73 @@ export async function createCategory(params: {
   })
   if (error) throw error
   await refresh()
+}
+
+/** The columns db/entries.ts' `Category` is made of. */
+const CATEGORY_COLUMNS = 'id, envelope_id, name, emoji, archived_at'
+
+/**
+ * The category with this name in this envelope, creating it if it is new.
+ *
+ * Exists for the add sheet's "Other" chip, which has to hand the freshly-named
+ * category straight to `addExpense` — `createCategory` returns nothing, and a
+ * second round trip to go looking for what we just inserted is both slower and
+ * racier than asking the insert to say what it wrote.
+ *
+ * Two collisions are handled rather than surfaced, because both have exactly one
+ * right answer and the user is mid-way through saving an entry when they happen:
+ *
+ *  - **The name is already taken here.** `(user_id, envelope_id, name)` is
+ *    unique, so there cannot be a second row; "file this under Haircut" means
+ *    the Haircut that exists. 23505 is Postgres' unique_violation.
+ *  - **…by an ARCHIVED category.** The constraint does not exclude archived
+ *    rows, so the name stays reserved after archiving. Naming it again is the
+ *    clearest possible statement that you want it back, and reviving it keeps
+ *    the old entries and the new one under one heading in Insights instead of
+ *    splitting a category's history across a row you cannot create.
+ */
+export async function ensureCategory(params: {
+  name: string
+  emoji: string | null
+  envelopeId: string
+}): Promise<Category> {
+  assertOnline()
+  const name = params.name.trim()
+  if (name.length < 1 || name.length > 40) {
+    throw new RangeError('a category name is 1–40 characters')
+  }
+
+  const { data: created, error } = await supabase
+    .from('categories')
+    .insert({ name, emoji: params.emoji?.trim() || null, envelope_id: params.envelopeId })
+    .select(CATEGORY_COLUMNS)
+    .single()
+
+  if (error === null) {
+    await refresh()
+    return created as Category
+  }
+  if (error.code !== '23505') throw error
+
+  const { data: existing, error: findError } = await supabase
+    .from('categories')
+    .select(CATEGORY_COLUMNS)
+    .eq('envelope_id', params.envelopeId)
+    .eq('name', name)
+    .single()
+  if (findError) throw findError
+
+  const found = existing as Category
+  if (found.archived_at !== null) {
+    const { error: reviveError } = await supabase
+      .from('categories')
+      .update({ archived_at: null })
+      .eq('id', found.id)
+    if (reviveError) throw reviveError
+    found.archived_at = null
+  }
+  await refresh()
+  return found
 }
 
 /** Rename / re-emoji only. Re-parenting is intentionally absent — see header. */

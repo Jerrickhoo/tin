@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useLedger, useToast, type AddPrefill } from '../../app-context'
 import { BottomSheet } from '../../components/BottomSheet'
 import { Keypad } from '../../components/Keypad'
@@ -14,10 +14,18 @@ import {
   type Category,
   type Envelope,
 } from '../../db/entries'
+import { ensureCategory } from '../../db/config'
+import { getSyncSnapshot, subscribeSync } from '../../db/sync'
 import { rankByUse } from '../../lib/category-rank'
 import { frequentAmounts } from '../../lib/frequent-amounts'
 import { frequentNotes } from '../../lib/frequent-notes'
-import { applyKeypadKey, KEYPAD_PLACEHOLDER } from '../../lib/keypad'
+import {
+  applyKeypadKeyAt,
+  KEYPAD_PLACEHOLDER,
+  sanitizeTypedAmount,
+  type KeypadEdit,
+  type KeypadKey,
+} from '../../lib/keypad'
 import { formatPHP, parseAmountToCentavos } from '../../lib/money'
 import { splitByLargestRemainder } from '../../lib/split'
 import { isRequiredMoneyTypeSelected, type MoneyType } from '../../lib/money-type'
@@ -42,6 +50,9 @@ const MODE_TONE: Record<Mode, { text: string; ring: string }> = {
   income: { text: 'text-pos', ring: 'border-pos/45' },
   transfer: { text: 'text-accent', ring: 'border-accent/45' },
 }
+
+/** What a category named from the "Other" panel wears if you give it no emoji. */
+const OTHER_CATEGORY_EMOJI = '🏷️'
 
 export function AddSheet({
   open,
@@ -84,6 +95,54 @@ export function AddSheet({
   const [categories, setCategories] = useState<Category[]>([])
   const [quickAmounts, setQuickAmounts] = useState<number[]>([])
   const [noteChips, setNoteChips] = useState<string[]>([])
+  // The "Other" panel: name a spend the starter categories don't cover, and keep
+  // it as a category rather than as a one-off.
+  const [otherOpen, setOtherOpen] = useState(false)
+  const [otherName, setOtherName] = useState('')
+  const [otherEmoji, setOtherEmoji] = useState('')
+  const [otherEnvelopeId, setOtherEnvelopeId] = useState('')
+
+  /* --- the amount field, and the caret in it ---------------------------------
+     On a coarse pointer the field carries `inputMode="none"`, so the pad is the
+     only way to type — but the field is still a real input whose caret the user
+     can move by tapping, and on a phone that tap is the ONLY way to reach a
+     digit in the middle of an amount. The pad used to append and backspace at
+     the end regardless, so the field accepted the tap, drew the caret, and then
+     ignored it. Every edit now goes through applyKeypadKeyAt/sanitizeTypedAmount
+     and reports where the caret belongs; the layout effect below puts it there
+     before the browser paints, so it never flickers to the end and back. */
+  const amountRef = useRef<HTMLInputElement>(null)
+  const pendingCaret = useRef<number | null>(null)
+  // Always increments, even when the text is unchanged (a rejected key still has
+  // a caret to place), so the effect can key off it instead of off the value.
+  const [caretTick, setCaretTick] = useState(0)
+
+  function commitAmount(edit: KeypadEdit) {
+    setAmount(edit.value)
+    pendingCaret.current = edit.caret
+    setCaretTick((n) => n + 1)
+  }
+
+  useLayoutEffect(() => {
+    const caret = pendingCaret.current
+    if (caret === null) return
+    pendingCaret.current = null
+    const el = amountRef.current
+    if (!el) return
+    // Re-focusing is what returns the caret after a pad key moved focus to a
+    // button. It cannot summon a keyboard on the devices the pad is shown on —
+    // that is what inputMode="none" is for. preventScroll stops the sheet
+    // jumping every time a key is pressed.
+    el.focus({ preventScroll: true })
+    el.setSelectionRange(caret, caret)
+  }, [caretTick])
+
+  function onKeypadKey(key: KeypadKey) {
+    const el = amountRef.current
+    const start = el?.selectionStart ?? amount.length
+    const end = el?.selectionEnd ?? start
+    commitAmount(applyKeypadKeyAt(amount, key, start, end))
+  }
 
   useEffect(() => {
     if (!open) return
@@ -143,6 +202,44 @@ export function AddSheet({
   const envById = useMemo(() => new Map(envelopes.map((e) => [e.id, e])), [envelopes])
   const tone = MODE_TONE[mode]
   const coarse = useCoarsePointer()
+  // Entries are outbox-backed and save offline; CATEGORIES are not — db/config.ts
+  // writes straight to Supabase. The "Other" panel says so up front rather than
+  // letting you name a category, tap save, and collect an error toast.
+  const online = useSyncExternalStore(subscribeSync, getSyncSnapshot, getSyncSnapshot).online
+  const otherEnvelope = otherEnvelopeId || envelopes[0]?.id || ''
+  const otherTrimmed = otherName.trim()
+  // Case-insensitively, because the unique constraint is case-SENSITIVE: without
+  // this, "food" under Needs would happily become a second chip beside "Food".
+  const otherExisting = useMemo(
+    () =>
+      categories.find(
+        (c) =>
+          c.envelope_id === otherEnvelope && c.name.toLowerCase() === otherTrimmed.toLowerCase(),
+      ) ?? null,
+    [categories, otherEnvelope, otherTrimmed],
+  )
+  /**
+   * The category a "Fix" handed back, if it is still pickable.
+   *
+   * Looked up in the LIVE list rather than trusted from the prefill, so an
+   * archived category simply yields nothing and the grid behaves as it always
+   * did. Offering to re-file into a category the user has retired would be the
+   * one place in the app that puts an archived category back in front of them.
+   */
+  const prefilledCategory = useMemo(() => {
+    const id = prefill?.mode === 'expense' ? prefill.categoryId : undefined
+    return id ? (categories.find((c) => c.id === id) ?? null) : null
+  }, [categories, prefill])
+
+  const otherSavable =
+    amountOk &&
+    whenOk &&
+    !busy &&
+    moneyTypeReady &&
+    otherTrimmed !== '' &&
+    otherEnvelope !== '' &&
+    // an existing category needs no write, so it works in a dead spot
+    (online || otherExisting !== null)
 
   /**
    * Undo a just-saved group by voiding it.
@@ -193,6 +290,39 @@ export function AddSheet({
     void run(
       () => addExpense({ amountCentavos: centavos, category, note, occurredAt, moneyType }),
       `−${formatPHP(centavos)} · ${category.name}${env ? ` (${env.name})` : ''}`,
+    )
+  }
+
+  /**
+   * "Other" — name the thing, and keep the name.
+   *
+   * The starter set is seven categories and real spending is not, so anything
+   * outside it had to go in the note field behind a disclosure the 2-tap path
+   * never opens, under whichever chip was closest. Insights then reported that
+   * chip. Naming it creates a REAL category instead, so it is a one-tap chip
+   * from the next entry onward and shows up under its own name in the
+   * breakdown — the same thing Settings' category manager does, reached from
+   * the moment you actually need it.
+   *
+   * A name that already exists is adopted, never duplicated: locally when the
+   * mirror already has it (which also makes that path work offline), and
+   * server-side by `ensureCategory` for the archived ones the mirror hides.
+   */
+  function onSaveOther() {
+    if (!otherSavable || occurredAt === null) return
+    const envelope = envById.get(otherEnvelope)
+    void run(
+      async () => {
+        const category =
+          otherExisting ??
+          (await ensureCategory({
+            name: otherTrimmed,
+            emoji: otherEmoji.trim() || OTHER_CATEGORY_EMOJI,
+            envelopeId: otherEnvelope,
+          }))
+        return addExpense({ amountCentavos: centavos, category, note, occurredAt, moneyType })
+      },
+      `−${formatPHP(centavos)} · ${otherTrimmed}${envelope ? ` (${envelope.name})` : ''} · kept as a category`,
     )
   }
 
@@ -276,6 +406,7 @@ export function AddSheet({
             ₱
           </span>
           <input
+            ref={amountRef}
             // `none` suppresses the OS keyboard without making the field
             // read-only, so the caret still shows and a hardware keyboard (or
             // a screen reader's text entry) still works. On a mouse device
@@ -287,7 +418,21 @@ export function AddSheet({
             aria-label="Amount in pesos"
             placeholder={KEYPAD_PLACEHOLDER}
             value={amount}
-            onChange={(e) => setAmount(e.target.value)}
+            // Typed, pasted or dictated text is filtered on the way in rather
+            // than reported in red afterwards: "₱1,250.00" pasted from a chat,
+            // or a stray letter from a hardware keyboard, used to sit in the
+            // field with the save button silently dead. The caret is only
+            // repositioned when something was actually dropped, so ordinary
+            // typing is untouched by this.
+            onChange={(e) => {
+              const el = e.target
+              const edit = sanitizeTypedAmount(el.value, el.selectionStart ?? el.value.length)
+              if (edit.value === el.value) {
+                setAmount(edit.value)
+                return
+              }
+              commitAmount(edit)
+            }}
             className={`w-full min-w-0 border-0 bg-transparent py-1 text-center text-[2.75rem] leading-tight font-bold tabular-nums outline-none placeholder:text-ink-mute/40 focus:outline-none ${
               amountOk ? tone.text : 'text-ink'
             }`}
@@ -332,7 +477,10 @@ export function AddSheet({
             <button
               key={centavos}
               type="button"
-              onClick={() => setAmount((centavos / 100).toFixed(2))}
+              onClick={() => {
+                const value = (centavos / 100).toFixed(2)
+                commitAmount({ value, caret: value.length })
+              }}
               className="press flex-1 border-2 border-line bg-raised px-2 py-2 text-sm font-semibold tabular-nums text-ink-soft shadow-[2px_2px_0_0_rgb(0_0_0/0.55)]"
             >
               {formatPHP(centavos)}
@@ -343,7 +491,19 @@ export function AddSheet({
 
       {/* Touch only. See useCoarsePointer — on a keyboard device the number row
           beats a tap-pad, and the field keeps its normal OS keyboard there. */}
-      {coarse && <Keypad onKey={(key) => setAmount((a) => applyKeypadKey(a, key))} />}
+      {coarse && (
+        <>
+          <Keypad onKey={onKeypadKey} onClear={() => commitAmount({ value: '', caret: 0 })} />
+          {/* The gesture is invisible otherwise, and clearing a mistyped amount
+              was up to twelve taps on the control the 2-tap path runs through.
+              "delete", not "⌫": neither pixel face covers U+232B, so it painted
+              as a tofu box — and the key is drawn as a wedge anyway, so naming a
+              character that appears nowhere on the pad pointed at nothing. */}
+          <p className="mt-2 text-center text-xs text-ink-mute">
+            Tap the number to fix a digit · hold delete to clear
+          </p>
+        </>
+      )}
       {/* The date lives behind "Note & date", so a blank one has to explain
           itself out here or the save button just looks broken. */}
       {!whenOk && (
@@ -395,16 +555,42 @@ export function AddSheet({
               </div>
             )
           )}
-          <p className="mb-2.5 text-sm text-ink-soft">
-            Tap a category to save — it picks the envelope for you.
-          </p>
+          {/* A Fix is a re-entry of the same transaction, so the category it had
+              is an answer the user has already given. Surfaced as one button
+              rather than by reordering the grid: the grid is ranked by use and
+              quietly moving a chip to the front would make the position of every
+              other one depend on how you happened to open the sheet. */}
+          {prefilledCategory ? (
+            <>
+              <PrimaryButton
+                disabled={!amountOk || !whenOk || busy || !moneyTypeReady}
+                onClick={() => onCategoryTap(prefilledCategory)}
+                label={
+                  busy
+                    ? 'Saving…'
+                    : amountOk
+                      ? `Save ${formatPHP(centavos)} to ${prefilledCategory.name}`
+                      : `Save to ${prefilledCategory.name}`
+                }
+              />
+              <p className="mt-4 mb-2.5 text-sm text-ink-soft">…or file it somewhere else:</p>
+            </>
+          ) : (
+            <p className="mb-2.5 text-sm text-ink-soft">
+              Tap a category to save — it picks the envelope for you.
+            </p>
+          )}
           <div className="flex flex-wrap gap-2">
             {categories.map((cat) => {
               const env = envById.get(cat.envelope_id)
               const color = env?.color ?? '#AFA7C2'
+              // Marked as well as promoted to a button above, so scrolling the
+              // grid still tells you which one this entry came from.
+              const wasPrefilled = prefilledCategory?.id === cat.id
               return (
                 <button
                   key={cat.id}
+                  aria-pressed={wasPrefilled || undefined}
                   // `moneyTypeReady` belongs in EVERY save control's disabled
                   // condition, not just in the handler's guard. The handlers have
                   // always returned early without it, so the 2-tap path's second
@@ -413,10 +599,12 @@ export function AddSheet({
                   disabled={!amountOk || !whenOk || busy || !moneyTypeReady}
                   type="button"
                   onClick={() => onCategoryTap(cat)}
-                  className="press flex min-h-11 items-center gap-1.5 rounded-xl border px-3 py-2 text-sm transition-opacity disabled:opacity-35"
+                  className={`press flex min-h-11 items-center gap-1.5 rounded-xl border px-3 py-2 text-sm transition-opacity disabled:opacity-35 ${
+                    wasPrefilled ? 'font-semibold' : ''
+                  }`}
                   style={{
-                    borderColor: `${color}55`,
-                    backgroundColor: `${color}14`,
+                    borderColor: wasPrefilled ? color : `${color}55`,
+                    backgroundColor: `${color}${wasPrefilled ? '2e' : '14'}`,
                   }}
                 >
                   <span aria-hidden>{cat.emoji}</span>
@@ -424,10 +612,88 @@ export function AddSheet({
                 </button>
               )
             })}
+            {/* Deliberately NOT disabled by the save guards the chips carry: it
+                opens a panel, it does not save, so it stays reachable while you
+                are still deciding on the amount. Its own button carries the
+                whole guard (see §15.8 — a save control that looks live and
+                isn't). */}
+            <button
+              type="button"
+              aria-expanded={otherOpen}
+              onClick={() => setOtherOpen((v) => !v)}
+              className={`press flex min-h-11 items-center gap-1.5 rounded-xl border border-dashed px-3 py-2 text-sm ${
+                otherOpen ? 'border-accent bg-accent/10 text-ink' : 'border-line text-ink-soft'
+              }`}
+            >
+              <span aria-hidden>{otherOpen ? '▾' : '+'}</span>
+              <span className="font-medium">Other</span>
+            </button>
             {categories.length === 0 && (
               <p className="text-sm text-ink-mute">No categories yet — they seed on first login.</p>
             )}
           </div>
+
+          {otherOpen && (
+            <div className="mt-3 rounded-2xl border border-accent/40 bg-base/40 p-3">
+              <p className="mb-2 text-sm text-ink-soft">
+                What was it? Tin keeps the name as a category, so next time it's a chip.
+              </p>
+              <div className="flex gap-2">
+                <input
+                  value={otherEmoji}
+                  maxLength={4}
+                  aria-label="Emoji for the new category"
+                  placeholder={OTHER_CATEGORY_EMOJI}
+                  onChange={(e) => setOtherEmoji(e.target.value)}
+                  className="w-14 rounded-xl border border-line bg-base px-2 py-2.5 text-center text-ink outline-none focus:border-accent"
+                />
+                <input
+                  value={otherName}
+                  maxLength={40}
+                  aria-label="What was it?"
+                  placeholder="Haircut"
+                  onChange={(e) => setOtherName(e.target.value)}
+                  className="min-w-0 flex-1 rounded-xl border border-line bg-base px-3 py-2.5 text-sm text-ink outline-none placeholder:text-ink-mute focus:border-accent"
+                />
+              </div>
+              <div className="mt-3">
+                <EnvelopePicker
+                  label="Comes out of"
+                  envelopes={envelopes}
+                  value={otherEnvelope}
+                  disabledId=""
+                  onChange={setOtherEnvelopeId}
+                />
+              </div>
+              <PrimaryButton
+                disabled={!otherSavable}
+                onClick={onSaveOther}
+                label={
+                  busy
+                    ? 'Saving…'
+                    : otherTrimmed === ''
+                      ? 'Name it first'
+                      : amountOk
+                        ? `Save ${formatPHP(centavos)} as “${otherTrimmed}”`
+                        : `Save as “${otherTrimmed}”`
+                }
+              />
+              {/* An existing name is adopted rather than duplicated, and saying
+                  so beforehand is the difference between that reading as
+                  correct and reading as a bug. */}
+              {otherExisting !== null && (
+                <p className="mt-2 text-xs text-ink-mute">
+                  “{otherExisting.name}” already exists here — this files under it.
+                </p>
+              )}
+              {otherExisting === null && !online && (
+                <p className="mt-2 text-xs text-neg">
+                  A new category needs a connection. Entries still save offline — pick an existing
+                  chip for now, or come back when you're online.
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
 

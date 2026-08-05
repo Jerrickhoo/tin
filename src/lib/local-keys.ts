@@ -19,6 +19,9 @@ export const LAST_EXPORT_KEY = 'tin.lastExportAt'
 /** The streak gap this user said "let it go" about (features/home/Home.tsx). */
 export const DISMISSED_GAP_KEY = 'tin.repair-dismissed'
 
+/** This user skipped the opening-balances offer on Home (lib/onboarding.ts). */
+export const OPENING_SKIPPED_KEY = 'tin.opening-skipped'
+
 /** Reduced-texture display preference (lib/texture.ts). */
 export const TEXTURE_KEY = 'tin.texture'
 
@@ -34,6 +37,7 @@ export const USER_SCOPED_LOCAL_KEYS = [
   MONEY_TYPE_SNAPSHOT_KEY,
   LAST_EXPORT_KEY,
   DISMISSED_GAP_KEY,
+  OPENING_SKIPPED_KEY,
 ] as const
 
 /**

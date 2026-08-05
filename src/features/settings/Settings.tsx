@@ -18,7 +18,11 @@ import {
   fetchAllEntriesForExport,
   fetchAllEntriesNewestFirst,
   fetchAllEnvelopesForExport,
+  fetchEnvelopes,
+  hasOpeningBalances,
+  type Envelope,
 } from '../../db/entries'
+import { OpeningBalancesSheet } from '../entries/OpeningBalancesSheet'
 import { applyRestore, planRestoreFromBundle } from '../../db/restore'
 import { resetAccount } from '../../db/reset'
 import {
@@ -133,6 +137,75 @@ function NavCard({ to, title, children }: { to: string; title: string; children:
       </span>
       <span className="mt-1 text-sm text-ink-soft">{children}</span>
     </Link>
+  )
+}
+
+/**
+ * The permanent door to opening balances.
+ *
+ * Home's card is an offer that expires (lib/onboarding.ts) — it has to, or a
+ * prompt to "start from the truth" sits forever on the screen you read ten times
+ * a day, telling you to begin something your envelopes plainly already hold. It
+ * can only expire safely because of this card: the last time that prompt was
+ * allowed to close itself, the sheet behind it became unreachable from anywhere
+ * in the app, and the number the whole ledger is built around went with it.
+ *
+ * A button rather than a NavCard because the sheet has no route of its own, and
+ * shaped like one because it belongs in the same tiled row.
+ */
+function OpeningBalancesCard() {
+  const { version } = useLedger()
+  const [envelopes, setEnvelopes] = useState<Envelope[]>([])
+  const [recorded, setRecorded] = useState(false)
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    void Promise.all([fetchEnvelopes(), hasOpeningBalances()])
+      .then(([envs, done]) => {
+        if (!active) return
+        setEnvelopes(envs)
+        setRecorded(done)
+      })
+      // Local Dexie reads; a failure here costs a card's subtitle, not money,
+      // and a toast for it would fire behind whatever the user came here to do.
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [version])
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="card card-interactive press flex flex-col p-4 text-left"
+      >
+        <span className="flex items-center justify-between gap-2">
+          <h3 className="font-display text-[0.6875rem] leading-relaxed text-ink">
+            Opening balances
+          </h3>
+          <span aria-hidden className="text-accent">
+            →
+          </span>
+        </span>
+        <span className="mt-1 text-sm text-ink-soft">
+          {recorded
+            ? 'Recorded. Opening it again adds a second set — void the old group in History if you are correcting it.'
+            : "Tell Tin what's already in your GCash, split across envelopes. Writes adjustment entries, so the ledger stays honest."}
+        </span>
+      </button>
+      {/* mounted only while open, so each visit starts with empty inputs */}
+      {open && (
+        <OpeningBalancesSheet
+          open
+          envelopes={envelopes}
+          alreadyRecorded={recorded}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
   )
 }
 
@@ -895,6 +968,7 @@ export function Settings() {
             Change the 70/20/10 split, rename envelopes, add or archive categories. Past entries are
             never re-allocated.
           </NavCard>
+          <OpeningBalancesCard />
           <NavCard to="/recurring" title="Recurring">
             Rent, allowance, subscriptions — they log themselves on app open.
           </NavCard>

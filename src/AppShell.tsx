@@ -184,9 +184,15 @@ export function AppShell() {
   }, [])
   const addSheet = useMemo(() => ({ open }), [open])
 
-  // tidy the shortcut param out of the address bar once we've consumed it
+  // tidy the shortcut param out of the address bar once we've consumed it.
+  // The existing state is carried over rather than replaced with null: it holds
+  // react-router's own bookkeeping, and — since child effects run before parent
+  // ones — the marker BottomSheet has just pushed to make the back button close
+  // the sheet the shortcut opened (components/useBackDismiss.ts).
   useEffect(() => {
-    if (launchShortcut) window.history.replaceState(null, '', window.location.pathname)
+    if (launchShortcut) {
+      window.history.replaceState(window.history.state, '', window.location.pathname)
+    }
   }, [])
 
   // Unmount-only: the boot effect above re-runs on every session object change

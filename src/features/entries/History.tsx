@@ -235,6 +235,9 @@ export function History() {
       addSheet.open({
         mode: 'expense',
         amountCentavos: -group.totalCentavos,
+        // An expense is one leg, so this is THE category. Income and transfer
+        // legs carry none by schema, which is why only this branch has it.
+        categoryId: group.legs[0]?.category_id ?? undefined,
         note,
         occurredAt: group.occurredAt,
         moneyType,
