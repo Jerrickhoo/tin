@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_CENTAVOS, formatPHP, parseAmountToCentavos } from './money'
+import {
+  MAX_CENTAVOS,
+  centavosToAmountText,
+  formatPHP,
+  parseAmountToCentavos,
+  sanitizeAmountInput,
+} from './money'
 
 describe('formatPHP', () => {
   it('formats centavos as en-PH currency', () => {
@@ -59,5 +65,76 @@ describe('parseAmountToCentavos', () => {
   it('round-trips with formatPHP', () => {
     const centavos = parseAmountToCentavos('1,234.56')!
     expect(formatPHP(centavos)).toBe('₱1,234.56')
+  })
+})
+
+describe('centavosToAmountText', () => {
+  // The bug it exists for: `(c / 100).toFixed(2)` gives "50.00", whose centavos
+  // are full — so a digit typed at the end of it has nowhere to go. Every route
+  // that pre-fills an amount went through toFixed(2), so tapping any of them
+  // handed you a number you could only clear and retype.
+  it('drops a trailing .00 so the amount stays extendable', () => {
+    expect(centavosToAmountText(5_000)).toBe('50')
+    expect(centavosToAmountText(20_000)).toBe('200')
+    expect(centavosToAmountText(0)).toBe('0')
+  })
+
+  it('keeps real centavos', () => {
+    expect(centavosToAmountText(5_025)).toBe('50.25')
+    expect(centavosToAmountText(5_010)).toBe('50.10')
+    expect(centavosToAmountText(1)).toBe('0.01')
+  })
+
+  it('always produces something the parser accepts', () => {
+    for (const c of [1, 99, 100, 5_000, 123_456, MAX_CENTAVOS]) {
+      expect(parseAmountToCentavos(centavosToAmountText(c)), String(c)).toBe(c)
+    }
+  })
+})
+
+describe('sanitizeAmountInput', () => {
+  it('drops what cannot be in an amount and keeps the caret on its character', () => {
+    expect(sanitizeAmountInput('1a2', 3)).toEqual({ value: '12', caret: 2 })
+    expect(sanitizeAmountInput('₱1,250.00', 9)).toEqual({ value: '1250.00', caret: 7 })
+  })
+
+  it('keeps only the first decimal point', () => {
+    expect(sanitizeAmountInput('12..3', 5)).toEqual({ value: '12.3', caret: 4 })
+  })
+
+  it('caps centavos and peso digits', () => {
+    expect(sanitizeAmountInput('1.2345', 6).value).toBe('1.23')
+    expect(sanitizeAmountInput('12345678901234', 14).value).toBe('123456789012')
+  })
+
+  it('collapses leading zeros and drags the caret back with them', () => {
+    expect(sanitizeAmountInput('05', 2)).toEqual({ value: '5', caret: 1 })
+    expect(sanitizeAmountInput('007', 3)).toEqual({ value: '7', caret: 1 })
+  })
+
+  it('leaves a valid amount and its caret untouched', () => {
+    expect(sanitizeAmountInput('1250.75', 4)).toEqual({ value: '1250.75', caret: 4 })
+    // the reported bug, at the unit level: inserting into a full-centavo amount
+    expect(sanitizeAmountInput('10.00', 2)).toEqual({ value: '10.00', caret: 2 })
+  })
+
+  it('only ever removes, so the browser owns insertion', () => {
+    for (const raw of ['', '1', '0.5', '.5', '1.23', '999', '123456789012.99']) {
+      expect(sanitizeAmountInput(raw, raw.length).value.length).toBeLessThanOrEqual(raw.length)
+    }
+  })
+
+  it('never produces something the parser would reject', () => {
+    const chars = '0123456789.,abc₱ '.split('')
+    let seed = 7
+    const next = () => (seed = (seed * 48271) % 2147483647)
+    for (let step = 0; step < 3000; step++) {
+      let raw = ''
+      for (let i = next() % 16; i > 0; i--) raw += chars[next() % chars.length]
+      const value = sanitizeAmountInput(raw, next() % (raw.length + 1)).value
+      // '' and a trailing '.' are the two documented mid-entry states
+      if (value === '' || value.endsWith('.')) continue
+      expect(parseAmountToCentavos(value), `${raw} -> ${value}`).not.toBeNull()
+    }
   })
 })

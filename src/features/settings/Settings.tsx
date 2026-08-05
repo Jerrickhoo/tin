@@ -50,9 +50,7 @@ import {
   type MoneyTypeSnapshot,
   type MoneyTypeTotals,
 } from '../../lib/money-type'
-import { applyKeypadKey, KEYPAD_PLACEHOLDER, type KeypadKey } from '../../lib/keypad'
-import { Keypad } from '../../components/Keypad'
-import { useCoarsePointer } from '../../components/useCoarsePointer'
+import { AMOUNT_PLACEHOLDER } from '../../lib/money'
 import { useSession } from '../auth/useSession'
 import { MfaSection } from './MfaSection'
 
@@ -349,8 +347,6 @@ function MoneySummarySection() {
   const { version } = useLedger()
   const [snapshot, setSnapshot] = useState<MoneyTypeSnapshot>(readMoneyTypeSnapshot)
   const [live, setLive] = useState<MoneyTypeTotals>(emptyMoneyTypeTotals)
-  const coarse = useCoarsePointer()
-  const [activeKeypad, setActiveKeypad] = useState<'online' | 'reallife'>('online')
   const [inputValues, setInputValues] = useState<Record<'online' | 'reallife', string>>(() => {
     const initial = readMoneyTypeSnapshot()
     return {
@@ -400,12 +396,6 @@ function MoneySummarySection() {
       [key]: nextValue === null ? formatMoneyInput(cleaned) : centavosToInput(nextValue),
     }))
     setSnapshot((current) => ({ ...current, [key]: nextValue }))
-  }
-
-  function handleKeypadKey(key: KeypadKey) {
-    const keyName = activeKeypad
-    const raw = inputValues[keyName].replace(/,/g, '')
-    updateValue(keyName, applyKeypadKey(raw, key))
   }
 
   function clearValue(key: 'online' | 'reallife') {
@@ -467,15 +457,17 @@ function MoneySummarySection() {
               </div>
               <div className="mt-2 flex items-center gap-2 rounded-xl border border-line/70 bg-base/40 px-2.5 py-2">
                 <span className="text-[0.65rem] uppercase tracking-[0.24em] text-ink-soft">₱</span>
+                {/* The phone's own keyboard, like the add sheet — this used to
+                    carry `inputMode="none"` for a pad that has been removed. */}
                 <input
                   type="text"
-                  inputMode={coarse ? 'none' : 'decimal'}
+                  inputMode="decimal"
+                  enterKeyHint="done"
                   autoComplete="off"
                   value={inputValues[key]}
                   onChange={(e) => updateValue(key, e.target.value)}
-                  onFocus={() => setActiveKeypad(key)}
                   className="w-full border-0 bg-transparent p-0 text-lg font-semibold text-ink outline-none tabular-nums"
-                  placeholder={KEYPAD_PLACEHOLDER}
+                  placeholder={AMOUNT_PLACEHOLDER}
                 />
                 <button
                   type="button"
@@ -498,11 +490,6 @@ function MoneySummarySection() {
           )
         })}
       </div>
-      {coarse && (
-        <div className="mt-4">
-          <Keypad onKey={handleKeypadKey} />
-        </div>
-      )}
       <button
         type="button"
         onClick={save}

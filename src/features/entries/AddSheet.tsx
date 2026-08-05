@@ -1,8 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useLedger, useToast, type AddPrefill } from '../../app-context'
 import { BottomSheet } from '../../components/BottomSheet'
-import { Keypad } from '../../components/Keypad'
-import { useCoarsePointer } from '../../components/useCoarsePointer'
 import {
   addExpense,
   addIncome,
@@ -20,13 +18,12 @@ import { rankByUse } from '../../lib/category-rank'
 import { frequentAmounts } from '../../lib/frequent-amounts'
 import { frequentNotes } from '../../lib/frequent-notes'
 import {
-  applyKeypadKeyAt,
-  KEYPAD_PLACEHOLDER,
-  sanitizeTypedAmount,
-  type KeypadEdit,
-  type KeypadKey,
-} from '../../lib/keypad'
-import { formatPHP, parseAmountToCentavos } from '../../lib/money'
+  AMOUNT_PLACEHOLDER,
+  centavosToAmountText,
+  formatPHP,
+  parseAmountToCentavos,
+  sanitizeAmountInput,
+} from '../../lib/money'
 import { splitByLargestRemainder } from '../../lib/split'
 import { isRequiredMoneyTypeSelected, type MoneyType } from '../../lib/money-type'
 import { MoneyTypePicker } from '../../components/MoneyTypePicker'
@@ -69,7 +66,7 @@ export function AddSheet({
   const toast = useToast()
   const [mode, setMode] = useState<Mode>(prefill?.mode ?? 'expense')
   const [amount, setAmount] = useState(() =>
-    prefill?.amountCentavos !== undefined ? (prefill.amountCentavos / 100).toFixed(2) : '',
+    prefill?.amountCentavos !== undefined ? centavosToAmountText(prefill.amountCentavos) : '',
   )
   const [note, setNote] = useState(() =>
     prefill && 'note' in prefill && prefill.note ? prefill.note : '',
@@ -102,46 +99,55 @@ export function AddSheet({
   const [otherEmoji, setOtherEmoji] = useState('')
   const [otherEnvelopeId, setOtherEnvelopeId] = useState('')
 
-  /* --- the amount field, and the caret in it ---------------------------------
-     On a coarse pointer the field carries `inputMode="none"`, so the pad is the
-     only way to type — but the field is still a real input whose caret the user
-     can move by tapping, and on a phone that tap is the ONLY way to reach a
-     digit in the middle of an amount. The pad used to append and backspace at
-     the end regardless, so the field accepted the tap, drew the caret, and then
-     ignored it. Every edit now goes through applyKeypadKeyAt/sanitizeTypedAmount
-     and reports where the caret belongs; the layout effect below puts it there
-     before the browser paints, so it never flickers to the end and back. */
+  /* --- the amount field ------------------------------------------------------
+     The phone's own keyboard, not a hand-built pad. The pad existed to stop the
+     OS keyboard covering the category grid, and it paid for that with
+     `inputMode="none"` — which suppresses the keyboard without making the field
+     read-only, so the field kept a caret the pad then refused to respect.
+
+     Two bugs came out of that pairing and the second was unescapable. The pad
+     typed at the end of the string regardless of where you tapped; and any
+     value ending in two decimals — which is what EVERY pre-filled amount looked
+     like, since they all went through `toFixed(2)` — had nowhere left to put a
+     digit, so the pad went silently dead and the suppressed keyboard meant
+     there was no other way in. Clear and retype was the only move.
+
+     A native keyboard makes both disappear: the browser inserts at the caret,
+     gives real selection handles and a real backspace, and costs no code. The
+     field is left to do its job and this only filters what lands in it. */
   const amountRef = useRef<HTMLInputElement>(null)
   const pendingCaret = useRef<number | null>(null)
-  // Always increments, even when the text is unchanged (a rejected key still has
-  // a caret to place), so the effect can key off it instead of off the value.
+  /**
+   * Bumped on every edit that needs the caret put back — INCLUDING the ones that
+   * leave the text identical.
+   *
+   * Keying the effect on `amount` instead looks equivalent and is not. Typing a
+   * character the sanitiser rejects leaves the text unchanged, so the effect
+   * never fires and the caret it stored sits there stale — and the next
+   * character that IS accepted gets that old position applied to it. Typing
+   * `12ab.99xx` came out as `1299.`: the caret saved when `a` was refused was
+   * replayed onto the `.`, which then landed before the digits instead of after.
+   */
   const [caretTick, setCaretTick] = useState(0)
-
-  function commitAmount(edit: KeypadEdit) {
-    setAmount(edit.value)
-    pendingCaret.current = edit.caret
-    setCaretTick((n) => n + 1)
-  }
 
   useLayoutEffect(() => {
     const caret = pendingCaret.current
     if (caret === null) return
     pendingCaret.current = null
-    const el = amountRef.current
-    if (!el) return
-    // Re-focusing is what returns the caret after a pad key moved focus to a
-    // button. It cannot summon a keyboard on the devices the pad is shown on —
-    // that is what inputMode="none" is for. preventScroll stops the sheet
-    // jumping every time a key is pressed.
-    el.focus({ preventScroll: true })
-    el.setSelectionRange(caret, caret)
+    amountRef.current?.setSelectionRange(caret, caret)
   }, [caretTick])
 
-  function onKeypadKey(key: KeypadKey) {
-    const el = amountRef.current
-    const start = el?.selectionStart ?? amount.length
-    const end = el?.selectionEnd ?? start
-    commitAmount(applyKeypadKeyAt(amount, key, start, end))
+  function onAmountChange(el: HTMLInputElement) {
+    const edit = sanitizeAmountInput(el.value, el.selectionStart ?? el.value.length)
+    setAmount(edit.value)
+    if (edit.value === el.value) {
+      // Nothing was dropped, so the browser's own caret is already right — and
+      // leaving a stale one behind is the bug above.
+      pendingCaret.current = null
+      return
+    }
+    pendingCaret.current = edit.caret
+    setCaretTick((n) => n + 1)
   }
 
   useEffect(() => {
@@ -201,7 +207,6 @@ export function AddSheet({
 
   const envById = useMemo(() => new Map(envelopes.map((e) => [e.id, e])), [envelopes])
   const tone = MODE_TONE[mode]
-  const coarse = useCoarsePointer()
   // Entries are outbox-backed and save offline; CATEGORIES are not — db/config.ts
   // writes straight to Supabase. The "Other" panel says so up front rather than
   // letting you name a category, tap save, and collect an error toast.
@@ -407,31 +412,35 @@ export function AddSheet({
           </span>
           <input
             ref={amountRef}
-            // `none` suppresses the OS keyboard without making the field
-            // read-only, so the caret still shows and a hardware keyboard (or
-            // a screen reader's text entry) still works. On a mouse device
-            // there is no pad, so the field keeps its normal decimal keypad
-            // hint — the two are driven by the same flag and cannot disagree.
-            inputMode={coarse ? 'none' : 'decimal'}
+            // `decimal` everywhere: a phone gets its numeric keyboard, a laptop
+            // ignores it and uses the number row. It replaced `coarse ? 'none'`,
+            // which suppressed the phone keyboard for a pad that has since been
+            // removed — and which, once that pad refused an edit, left no way of
+            // typing into the field at all.
+            //
+            // `type` stays text rather than number: a number input silently
+            // discards what it cannot parse (so a half-typed "1." reads as ""),
+            // fires no change for intermediate states, and adds spinners.
+            inputMode="decimal"
+            enterKeyHint="done"
             autoComplete="off"
             autoFocus
             aria-label="Amount in pesos"
-            placeholder={KEYPAD_PLACEHOLDER}
+            placeholder={AMOUNT_PLACEHOLDER}
             value={amount}
             // Typed, pasted or dictated text is filtered on the way in rather
             // than reported in red afterwards: "₱1,250.00" pasted from a chat,
-            // or a stray letter from a hardware keyboard, used to sit in the
-            // field with the save button silently dead. The caret is only
-            // repositioned when something was actually dropped, so ordinary
-            // typing is untouched by this.
-            onChange={(e) => {
-              const el = e.target
-              const edit = sanitizeTypedAmount(el.value, el.selectionStart ?? el.value.length)
-              if (edit.value === el.value) {
-                setAmount(edit.value)
-                return
+            // or a stray letter, used to sit in the field with the save button
+            // silently dead.
+            onChange={(e) => onAmountChange(e.target)}
+            // Enter is "I'm done typing" on a phone, and the sheet has no form to
+            // submit — so it just puts the keyboard away and uncovers the
+            // categories, which is the next thing a tap is going to.
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                amountRef.current?.blur()
               }
-              commitAmount(edit)
             }}
             className={`w-full min-w-0 border-0 bg-transparent py-1 text-center text-[2.75rem] leading-tight font-bold tabular-nums outline-none placeholder:text-ink-mute/40 focus:outline-none ${
               amountOk ? tone.text : 'text-ink'
@@ -477,11 +486,12 @@ export function AddSheet({
             <button
               key={centavos}
               type="button"
-              onClick={() => {
-                const value = (centavos / 100).toFixed(2)
-                commitAmount({ value, caret: value.length })
-              }}
-              className="press flex-1 border-2 border-line bg-raised px-2 py-2 text-sm font-semibold tabular-nums text-ink-soft shadow-[2px_2px_0_0_rgb(0_0_0/0.55)]"
+              // centavosToAmountText, not toFixed(2). "50.00" fills the centavos,
+              // so the next digit typed at the end of it has nowhere to go —
+              // which is precisely how these chips used to hand you an amount
+              // you could only clear and retype.
+              onClick={() => setAmount(centavosToAmountText(centavos))}
+              className="press min-h-11 flex-1 rounded-xl border border-line bg-base/40 px-2 py-2 text-sm font-semibold tabular-nums text-ink-soft"
             >
               {formatPHP(centavos)}
             </button>
@@ -489,21 +499,6 @@ export function AddSheet({
         </div>
       )}
 
-      {/* Touch only. See useCoarsePointer — on a keyboard device the number row
-          beats a tap-pad, and the field keeps its normal OS keyboard there. */}
-      {coarse && (
-        <>
-          <Keypad onKey={onKeypadKey} onClear={() => commitAmount({ value: '', caret: 0 })} />
-          {/* The gesture is invisible otherwise, and clearing a mistyped amount
-              was up to twelve taps on the control the 2-tap path runs through.
-              "delete", not "⌫": neither pixel face covers U+232B, so it painted
-              as a tofu box — and the key is drawn as a wedge anyway, so naming a
-              character that appears nowhere on the pad pointed at nothing. */}
-          <p className="mt-2 text-center text-xs text-ink-mute">
-            Tap the number to fix a digit · hold delete to clear
-          </p>
-        </>
-      )}
       {/* The date lives behind "Note & date", so a blank one has to explain
           itself out here or the save button just looks broken. */}
       {!whenOk && (

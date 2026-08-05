@@ -8,7 +8,7 @@
 
 ## Status — all phases closed (2026-07-22), Phases 9 and 10 added 2026-07-24, Phases 11-12 2026-07-28
 
-**Live at <https://tin-jar.netlify.app>.** Phases 0–12 are done, plus a Phase 3.5 retrofit. 544 tests — including the first component-render tests, added in §17; lint, build and the AA-contrast script all clean. `git push` to `main` deploys.
+**Live at <https://tin-jar.netlify.app>.** Phases 0–12 are done, plus a Phase 3.5 retrofit. 531 tests — including the first component-render tests, added in §17; lint, build and the AA-contrast script all clean. `git push` to `main` deploys.
 
 | Phase | State |
 | ----- | ----- |
@@ -1255,7 +1255,7 @@ Three collisions, each with one right answer:
 
 §14.5, §15.10 and §16.5 all close with the same admission: no component-render test exists, so anything only true in a DOM is unverified. Two of this pass's four items are *entirely* DOM behaviour — a caret on a live input, a history entry and a popstate — so the gap stopped being theoretical.
 
-`vite.config.ts` already documented the opt-in (`// @vitest-environment jsdom`, and `.tsx` in the include glob or the file is silently not collected). Two files now use it: `BottomSheet.test.tsx` covers the back-button contract in all four of its states, and `AddSheet.test.tsx` renders the real sheet against stubbed db modules and drives the pad. 512 → **544 tests.**
+`vite.config.ts` already documented the opt-in (`// @vitest-environment jsdom`, and `.tsx` in the include glob or the file is silently not collected). Two files now use it: `BottomSheet.test.tsx` covers the back-button contract in all four of its states, and `AddSheet.test.tsx` renders the real sheet against stubbed db modules and drives the pad. 512 → **544 tests.** *(531 after §17.9 deleted the pad and its suite.)*
 
 One trap worth writing down: `useCoarsePointer` reads `window.matchMedia`, which jsdom does not implement at all. The hook's optional call means it returns `false` — so without a stub the keypad is **never rendered** and every test of it passes vacuously.
 
@@ -1309,3 +1309,28 @@ Verified in four places, because each covers something the others do not:
 - **`pg_proc`** — `reset_account` present, `prosecdef = true`, `proconfig = {search_path=}`. That empty search path is the security property, not a formatting detail.
 - **The RLS probe** — 38 checks, all green, including the eight-line reset block. Everywhere else the database enforces isolation; there the function does, and this is the only thing that says it aims correctly.
 - **Real rows, both directions.** A schema check proves the column exists, not that anything uses it — and §15.1's failure was a *silent* one at both ends: the push stripped the field after a 42703 and the pull never selected it, so the tag survived about a minute and then vanished with no error anywhere. Server rows written since carry real values (an income's three legs all tagged `reallife`, which is §15.4's both-legs fix holding), and History draws the badges from what it pulled back. Push and pull, closed.
+
+### 17.9 The keypad is gone, and it took two bugs with it (2026-08-05)
+
+Reported from a phone within hours of §17 shipping: *"when pressing any number it automatically goes to something like 1.00, and can't edit it anymore — have to clear it and the same thing happens."* The owner's call was to delete the pad and use the phone's keyboard. That was the right one, and the reasoning is worth keeping because §17.1 had just finished *improving* this thing.
+
+**The dead end.** `applyKeypadKeyAt` refuses any key that would produce an unparseable amount — including a digit typed at the end of a value whose two centavos are already spent. Correct in isolation, and fatal in combination with the other half: **every pre-filled amount went through `(c / 100).toFixed(2)`**, so the frequent-amount chips, History's "Fix" and Settings' money targets all handed you a string ending in `.00`. One tap on any of them and the pad went permanently, silently dead. Clear and retype was genuinely the only move.
+
+**And there was no way out**, which is what turned an annoyance into a wall. `inputMode="none"` suppressed the OS keyboard so the pad would not be covered — so once the pad refused an edit there was no second input method to fall back on. The two decisions were individually defensible and jointly a trap.
+
+The chips also *looked* like a keypad row — same `border-2 border-line bg-raised` and the same offset shadow, sitting directly above the pad — so "pressing a number" and "tapping ₱1.00" were easy to confuse. That is most likely how the `1.00` in the report got there in the first place.
+
+**What replaced it is less code, not more.** `inputMode="decimal"` on a plain text input: the browser inserts at the caret, gives real selection handles and a real backspace, and handles every locale and assistive-input case for free. `lib/keypad.ts`, `components/Keypad.tsx` and `components/useCoarsePointer.ts` are deleted; what survives moved into `lib/money.ts`, because it was always about the field rather than the pad:
+
+- `sanitizeAmountInput` — **only ever removes.** Insertion is the browser's, so a caret the user placed mid-number survives being typed into. That is the whole difference from the pad.
+- `centavosToAmountText` — drops a trailing `.00`, so `₱50.00` pre-fills as `"50"` and stays open for another digit. This is the actual fix for the dead end, independent of the keypad's removal.
+
+`type` stays `text` rather than `number` on purpose: a number input silently discards what it cannot parse, so a half-typed `"1."` reads back as `""`.
+
+**A second bug, found only in the browser.** With the pad gone, typing `12ab.99xx` produced `1299.` — the decimal point landing in front of the digits. Refused characters leave the text *unchanged*, so a caret-restoring effect keyed on the text never fires, and the position it stored goes stale; the next *accepted* character then gets that old position applied to it. The effect is keyed on a counter that increments on every refused edit as well, and a keystroke that drops nothing now explicitly clears the pending caret.
+
+This is the second time in two passes that a real engine found what jsdom could not (§17.6 was the first), and the pattern is the same both times: **jsdom models the state you keep, not the state the browser keeps.** A caret and a history cursor are both the browser's, not React's.
+
+**One thing lost, and it was worth losing.** The pad existed because the OS keyboard covers the category grid that the 2-tap path's second tap needs (ROADMAP 3.2). That trade-off is real and now runs the other way. It is smaller than it was, though: the sheet without a twelve-key pad in it is short enough that the whole category grid fits on one phone screen, and `enterKeyHint="done"` plus Enter-to-blur gives a one-tap way to put the keyboard down.
+
+**Still open:** whether the keyboard covering the grid is actually a problem in daily use. It is the reason the pad was built, and the pad is now gone on the strength of one report; if the second tap starts feeling slow, the fix is a scroll-into-view on blur rather than bringing twelve buttons back.

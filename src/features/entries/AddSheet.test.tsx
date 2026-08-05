@@ -7,9 +7,8 @@
 // this is the wiring between them and the screen, which is where the reported
 // bug actually lived.
 
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { KEYPAD_CLEAR_HOLD_MS } from '../../lib/keypad'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { AddSheet } from './AddSheet'
 
 const ENVELOPES = [
@@ -62,22 +61,6 @@ vi.mock('../../db/sync', () => ({
   subscribeSync: () => () => {},
 }))
 
-beforeAll(() => {
-  // useCoarsePointer gates the keypad on this, and jsdom ships no matchMedia at
-  // all — without the stub the pad simply is not rendered and every test below
-  // passes vacuously.
-  window.matchMedia = ((query: string) => ({
-    matches: query.includes('coarse'),
-    media: query,
-    onchange: null,
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    addListener: () => {},
-    removeListener: () => {},
-    dispatchEvent: () => false,
-  })) as unknown as typeof window.matchMedia
-})
-
 beforeEach(() => {
   addExpense.mockReset()
   addExpense.mockResolvedValue('group-1')
@@ -108,63 +91,93 @@ async function openSheet() {
 
 const tapKey = (name: string) => fireEvent.click(screen.getByRole('button', { name }))
 
+/** What the browser does on a keystroke: splice text in at the caret. */
+function typeAt(input: HTMLInputElement, text: string, at: number) {
+  const next = input.value.slice(0, at) + text + input.value.slice(at)
+  fireEvent.change(input, { target: { value: next, selectionStart: at + text.length } })
+}
+
 describe('AddSheet amount editing', () => {
-  it('types through the keypad', async () => {
+  it('asks for the phone keyboard rather than suppressing it', async () => {
+    // `inputMode="none"` was there to keep the OS keyboard off the category
+    // grid, at the cost of a field only the custom pad could edit. When the pad
+    // then refused an edit — which it did on anything ending in two decimals —
+    // there was no way into the field at all.
     const input = await openSheet()
-    for (const key of ['1', '2', '5', '0']) tapKey(key)
-    expect(input.value).toBe('1250')
+    expect(input.getAttribute('inputmode')).toBe('decimal')
   })
 
-  it('edits at the caret the user tapped, not at the end', async () => {
-    // THE reported bug. On a phone the field carries inputMode="none", so there
-    // is no OS keyboard and tapping into the number is the only way to fix a
-    // digit inside it — and the pad used to append to the end regardless.
+  it('accepts a digit typed at the end of a two-decimal amount', async () => {
+    // THE reported bug: "1.00" and then every further keypress did nothing. The
+    // centavos were full, the pad appended to the end, and the suppressed
+    // keyboard left no other route in. Insertion is the browser's job now, so
+    // this is about the sanitiser not undoing it.
     const input = await openSheet()
-    for (const key of ['1', '2', '5', '0']) tapKey(key)
+    fireEvent.change(input, { target: { value: '1.00' } })
 
-    act(() => {
-      input.focus()
-      input.setSelectionRange(2, 2)
-    })
-    tapKey('9')
+    typeAt(input, '0', 1) // "10.00"
+
+    expect(input.value).toBe('10.00')
+  })
+
+  it('leaves a caret-placed edit where the browser put it', async () => {
+    const input = await openSheet()
+    fireEvent.change(input, { target: { value: '1250' } })
+
+    typeAt(input, '9', 2)
 
     expect(input.value).toBe('12950')
-    // and the caret is left after the digit just typed, ready for the next one
-    expect(input.selectionStart).toBe(3)
   })
 
-  it('backspaces at the caret and puts the caret back', async () => {
-    const input = await openSheet()
-    for (const key of ['1', '2', '5', '0']) tapKey(key)
-    act(() => {
-      input.focus()
-      input.setSelectionRange(2, 2)
-    })
-
-    tapKey('Delete a digit — hold to clear the amount')
-
-    expect(input.value).toBe('150')
-    expect(input.selectionStart).toBe(1)
-  })
-
-  it('clears the whole amount on a long backspace press', async () => {
-    const input = await openSheet()
-    for (const key of ['1', '2', '5', '0']) tapKey(key)
-    const back = screen.getByRole('button', { name: 'Delete a digit — hold to clear the amount' })
-
-    fireEvent.pointerDown(back)
-    await waitFor(() => expect(input.value).toBe(''), { timeout: KEYPAD_CLEAR_HOLD_MS + 500 })
-
-    // …and the release must not then delete a character from the empty field
-    fireEvent.pointerUp(back)
-    fireEvent.click(back)
-    expect(input.value).toBe('')
-  })
-
-  it('filters what a keyboard or a paste puts in the field', async () => {
+  it('filters what a paste puts in the field', async () => {
     const input = await openSheet()
     fireEvent.change(input, { target: { value: '₱1,250.00' } })
     expect(input.value).toBe('1250.00')
+  })
+
+  it('does not replay a refused keystroke’s caret onto the next accepted one', async () => {
+    // Found in a browser, not here: typing "12ab.99xx" came out as "1299.".
+    // A refused character leaves the text unchanged, so an effect keyed on the
+    // text never fires and the caret it stored goes stale — then the next
+    // accepted character gets that old position applied to it, putting the
+    // decimal point in front of the digits.
+    const input = await openSheet()
+    fireEvent.change(input, { target: { value: '12' } })
+
+    // 'a' is refused: value stays '12', and no caret may be left pending
+    fireEvent.change(input, { target: { value: '12a', selectionStart: 3 } })
+    expect(input.value).toBe('12')
+
+    // '.' is accepted at the end and must stay at the end
+    fireEvent.change(input, { target: { value: '12.', selectionStart: 3 } })
+    expect(input.value).toBe('12.')
+    expect(input.selectionStart).toBe(3)
+
+    typeAt(input, '9', 3)
+    typeAt(input, '9', 4)
+    expect(input.value).toBe('12.99')
+  })
+
+  it('refuses a third centavo without disturbing what is already there', async () => {
+    const input = await openSheet()
+    fireEvent.change(input, { target: { value: '1.23' } })
+
+    typeAt(input, '4', 4)
+
+    expect(input.value).toBe('1.23')
+  })
+
+  it('starts a prefilled amount without a trailing .00 to get stuck behind', async () => {
+    render(
+      <AddSheet open prefill={{ mode: 'expense', amountCentavos: 20_000 }} onClose={() => {}} />,
+    )
+    await screen.findByRole('button', { name: 'Food' })
+    const input = screen.getByLabelText('Amount in pesos') as HTMLInputElement
+
+    // "200", not "200.00" — the centavos are not spent, so a digit still fits
+    expect(input.value).toBe('200')
+    typeAt(input, '5', 3)
+    expect(input.value).toBe('2005')
   })
 })
 
@@ -215,7 +228,7 @@ describe('AddSheet category prefill (History → Fix)', () => {
 describe('AddSheet "Other" category', () => {
   async function fillOther(name: string) {
     const input = await openSheet()
-    for (const key of ['1', '5', '0']) tapKey(key)
+    fireEvent.change(input, { target: { value: '150' } })
     tapKey('Online')
     tapKey('Other')
     fireEvent.change(screen.getByLabelText('What was it?'), { target: { value: name } })
@@ -255,12 +268,12 @@ describe('AddSheet "Other" category', () => {
   })
 
   it('will not save until it has a name, an amount and a money type', async () => {
-    await openSheet()
+    const input = await openSheet()
     tapKey('Other')
     const save = () => screen.getByRole('button', { name: /Name it first|Save .* as/ })
     expect((save() as HTMLButtonElement).disabled).toBe(true)
 
-    for (const key of ['1', '5', '0']) tapKey(key)
+    fireEvent.change(input, { target: { value: '150' } })
     fireEvent.change(screen.getByLabelText('What was it?'), { target: { value: 'Haircut' } })
     // still no money type — the guard §15.8 exists for
     expect((save() as HTMLButtonElement).disabled).toBe(true)
