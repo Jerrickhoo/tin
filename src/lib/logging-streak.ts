@@ -370,13 +370,33 @@ export function isRepairable(dayKey: string, now: Date = new Date()): boolean {
  * corrects the figure rather than leaving today looking expensive.
  */
 export function spentOnDay(rows: readonly EntryRow[], dayKey: string): number {
+  return spentInRange(rows, dayKey, dayKey)
+}
+
+/**
+ * Total spent across an inclusive span of Manila days, as positive centavos.
+ *
+ * Same rules as `spentOnDay` — which is now literally this function with both
+ * bounds equal, so the two can never drift into disagreeing about what counts
+ * as spending.
+ *
+ * The comparison is lexical on the day keys. They are zero-padded and
+ * fixed-width, so string order IS calendar order, and no Date arithmetic
+ * happens anywhere near a month boundary.
+ */
+export function spentInRange(
+  rows: readonly EntryRow[],
+  fromDayKey: string,
+  toDayKey: string,
+): number {
   let total = 0
   for (const row of rows) {
     if (row.kind !== 'expense') continue
     if (row.voided_at !== null) continue
     const at = new Date(row.occurred_at)
     if (Number.isNaN(at.getTime())) continue
-    if (manilaDayKey(at) !== dayKey) continue
+    const dayKey = manilaDayKey(at)
+    if (dayKey < fromDayKey || dayKey > toDayKey) continue
     total += Math.abs(row.amount_centavos)
   }
   return total

@@ -225,6 +225,99 @@ console.log('\nappend-only ledger:')
   check('deletes on entries are denied', r2.error !== null || (r2.data ?? []).length === 0)
 }
 
+// ---- un-voiding (§18) ----
+//
+// The undo behind History's void toast needed NO migration, and that is exactly
+// why it belongs here. Its whole safety argument is a reading of one line of
+// 001_core.sql — `revoke update on entries; grant update (voided_at,
+// void_reason)` — namely that writing NULL back into those two columns is
+// already inside the grant. Nothing else in the suite executes that claim: a
+// migration would have brought the probe with it, and this did not.
+//
+// If the reading is wrong, the failure is quiet and expensive. Every undo
+// applies to the Dexie mirror, looks like it worked, and then sits at the head
+// of the outbox failing forever — blocking every money write queued behind it.
+// So it is asserted against real Postgres rather than reasoned about.
+//
+// Its own group, so the entry the reset block asserts on is left alone.
+console.log('\nun-voiding (§18):')
+{
+  const groupId = randomUUID()
+  const entryId = randomUUID()
+  const seed = await asA.from('entries').insert({
+    id: entryId,
+    group_id: groupId,
+    kind: 'adjustment',
+    envelope_id: envelopeAId,
+    amount_centavos: 77,
+    note: 'rls-probe unvoid row',
+    occurred_at: new Date().toISOString(),
+  })
+  check('un-void seed row inserted', !seed.error, seed.error?.message)
+
+  const voided = await asA
+    .from('entries')
+    .update({ voided_at: new Date().toISOString(), void_reason: 'probe' })
+    .eq('group_id', groupId)
+    .is('voided_at', null)
+    .select('id')
+  check('the group voids', !voided.error && (voided.data ?? []).length === 1, voided.error?.message)
+
+  const unvoided = await asA
+    .from('entries')
+    .update({ voided_at: null, void_reason: null })
+    .eq('group_id', groupId)
+    .not('voided_at', 'is', null)
+    .select('id')
+  check(
+    'un-void is permitted by the column grant (no migration needed)',
+    !unvoided.error && (unvoided.data ?? []).length === 1,
+    unvoided.error?.message,
+  )
+
+  const after = await asA
+    .from('entries')
+    .select('voided_at, void_reason')
+    .eq('id', entryId)
+    .single()
+  check(
+    'the row is live again and its void reason is cleared',
+    !after.error && after.data?.voided_at === null && after.data?.void_reason === null,
+    after.error?.message,
+  )
+
+  // The idempotency the outbox leans on: a replay after a lost response must
+  // touch nothing rather than resurrect a group that was voided again since.
+  const replay = await asA
+    .from('entries')
+    .update({ voided_at: null, void_reason: null })
+    .eq('group_id', groupId)
+    .not('voided_at', 'is', null)
+    .select('id')
+  check(
+    'a replayed un-void updates zero rows',
+    !replay.error && (replay.data ?? []).length === 0,
+    replay.error?.message,
+  )
+
+  // And the rule the grant exists to enforce is still enforced.
+  const edit = await asA
+    .from('entries')
+    .update({ amount_centavos: 999 })
+    .eq('id', entryId)
+    .select('id')
+  check(
+    'un-voiding did not open up editing an amount',
+    edit.error !== null || (edit.data ?? []).length === 0,
+  )
+
+  // Left voided so it props up no balance on re-runs.
+  await asA
+    .from('entries')
+    .update({ voided_at: new Date().toISOString(), void_reason: 'rls-probe cleanup' })
+    .eq('group_id', groupId)
+}
+
 // ---- account reset (006): the one function that deletes ledger rows ----
 //
 // `reset_account` is SECURITY DEFINER, so it runs with RLS switched off and

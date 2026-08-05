@@ -95,6 +95,28 @@ export async function pushVoidGroup(
   if (error) throw new Error(error.message)
 }
 
+/**
+ * Put a voided group back.
+ *
+ * Needs NO migration, and that is worth stating because append-only is enforced
+ * at the database rather than by app discipline: `001_core.sql` revokes UPDATE
+ * on entries and grants back exactly `(voided_at, void_reason)`. Writing null
+ * into those two columns is already inside the grant — the schema's rule is
+ * "the only mutation is the voiding pair", not "voiding is one-way".
+ *
+ * Idempotent for the same reason `pushVoidGroup` is, with the filter inverted:
+ * only currently-voided rows are touched, so a retry after a lost response
+ * updates zero rows.
+ */
+export async function pushUnvoidGroup(groupId: string): Promise<void> {
+  const { error } = await supabase
+    .from('entries')
+    .update({ voided_at: null, void_reason: null })
+    .eq('group_id', groupId)
+    .not('voided_at', 'is', null)
+  if (error) throw new Error(error.message)
+}
+
 export interface PulledEntriesPage {
   rows: EntryRow[]
   /** raw server updated_at strings, for cursor advancement (never client clock) */

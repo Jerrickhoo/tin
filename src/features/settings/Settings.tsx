@@ -70,10 +70,25 @@ function downloadFile(name: string, content: string, type: string) {
   }, 0)
 }
 
+/**
+ * What a stuck write was trying to do, in words.
+ *
+ * Switched over the op rather than defaulting, so a fourth op type is a compile
+ * error here instead of a queue entry the discard screen describes as "ledger
+ * rows" while it is actually something else. This is the one screen whose whole
+ * job is telling the user what they are about to throw away.
+ */
 const describeOp = (op: OutboxOp): string => {
-  if (op.op === 'void_group') return 'a void'
-  const n = op.rows.length
-  return `${n} ledger row${n === 1 ? '' : 's'}`
+  switch (op.op) {
+    case 'void_group':
+      return 'a void'
+    case 'unvoid_group':
+      return 'an undone void'
+    case 'insert_entries': {
+      const n = op.rows.length
+      return `${n} ledger row${n === 1 ? '' : 's'}`
+    }
+  }
 }
 
 /**

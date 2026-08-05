@@ -1,7 +1,18 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useLedger, useToast, type AddPrefill } from '../../app-context'
 import { BottomSheet } from '../../components/BottomSheet'
+import { Keypad } from '../../components/Keypad'
 import { useAmountField } from '../../components/useAmountField'
+import { useCoarsePointer } from '../../components/useCoarsePointer'
+import { applyKeypadKeyAt, type KeypadEdit, type KeypadKey } from '../../lib/keypad'
+import {
+  readAmountInputMode,
+  readEntryPrefs,
+  rememberEntryPrefs,
+  writeAmountInputMode,
+  type AmountInputMode,
+  type EntryPrefs,
+} from '../../lib/entry-prefs'
 import {
   addExpense,
   addIncome,
@@ -20,9 +31,10 @@ import { frequentAmounts } from '../../lib/frequent-amounts'
 import { frequentNotes } from '../../lib/frequent-notes'
 import {
   AMOUNT_PLACEHOLDER,
+  amountExpressionTerms,
   centavosToAmountText,
   formatPHP,
-  parseAmountToCentavos,
+  parseAmountExpression,
 } from '../../lib/money'
 import { splitByLargestRemainder } from '../../lib/split'
 import { isRequiredMoneyTypeSelected, type MoneyType } from '../../lib/money-type'
@@ -51,6 +63,16 @@ const MODE_TONE: Record<Mode, { text: string; ring: string }> = {
 /** What a category named from the "Other" panel wears if you give it no emoji. */
 const OTHER_CATEGORY_EMOJI = '🏷️'
 
+/**
+ * How many chips it takes before the grid gets a filter box.
+ *
+ * Below this the grid IS the filter — every category is on screen and reading
+ * them is faster than typing. Above it, `+ Other` has been doing its job and the
+ * ranked grid has become something you scan rather than see, which is the point
+ * at which a text box stops being clutter and starts being the fast path.
+ */
+const CATEGORY_FILTER_THRESHOLD = 12
+
 export function AddSheet({
   open,
   prefill,
@@ -64,6 +86,11 @@ export function AddSheet({
   // (key bump) on every open, so state starts fresh without effect setState.
   const { bump, version } = useLedger()
   const toast = useToast()
+  // Read ONCE per sheet: these are the envelope choices the last save left
+  // behind, and re-reading them mid-edit would let a save in another tab move a
+  // picker under the user's finger. Deliberately does NOT include the money type
+  // — see lib/entry-prefs.ts for why that one is asked every time.
+  const [remembered] = useState<EntryPrefs>(readEntryPrefs)
   const [mode, setMode] = useState<Mode>(prefill?.mode ?? 'expense')
   const [amount, setAmount] = useState(() =>
     prefill?.amountCentavos !== undefined ? centavosToAmountText(prefill.amountCentavos) : '',
@@ -84,6 +111,11 @@ export function AddSheet({
     prefill?.mode === 'transfer' ? (prefill.toEnvelopeId ?? '') : '',
   )
   const [busy, setBusy] = useState(false)
+  // Asked every time, on purpose. This is the one answer on the sheet that is
+  // NOT remembered between openings, and the reasoning is in lib/entry-prefs.ts:
+  // it costs a tap on every entry, and defaulting it would still be wrong,
+  // because a wrong tag is worse than a missing one. A prefill is different —
+  // that is a Fix re-entering a transaction whose type the user already gave.
   const [moneyType, setMoneyType] = useState<MoneyType | null>(() => prefill?.moneyType ?? null)
   const moneyTypeReady = isRequiredMoneyTypeSelected(moneyType)
   const [incomeStrategy, setIncomeStrategy] = useState<'split' | 'single'>('split')
@@ -98,24 +130,92 @@ export function AddSheet({
   const [otherName, setOtherName] = useState('')
   const [otherEmoji, setOtherEmoji] = useState('')
   const [otherEnvelopeId, setOtherEnvelopeId] = useState('')
+  // Type-to-filter over the chips, once there are enough of them to be worth it.
+  const [categoryFilter, setCategoryFilter] = useState('')
 
-  /* --- the amount field ------------------------------------------------------
-     The phone's own keyboard, not a hand-built pad. The pad existed to stop the
-     OS keyboard covering the category grid, and it paid for that with
-     `inputMode="none"` — which suppresses the keyboard without making the field
-     read-only, so the field kept a caret the pad then refused to respect.
+  /* --- the amount field, and the caret in it ---------------------------------
+     Two input methods, and the SECOND one is what makes the first one safe.
 
-     Two bugs came out of that pairing and the second was unescapable. The pad
-     typed at the end of the string regardless of where you tapped; and any
-     value ending in two decimals — which is what EVERY pre-filled amount looked
-     like, since they all went through `toFixed(2)` — had nowhere left to put a
-     digit, so the pad went silently dead and the suppressed keyboard meant
-     there was no other way in. Clear and retype was the only move.
+     The pad exists because the OS keyboard covers the category grid that the
+     2-tap path's next tap needs (ROADMAP 3.2). It went away in §17.9 after a bug
+     report that turned out to be about Settings' money targets, and it is back
+     here only — Settings keeps the native field §17.10 gave it.
 
-     A native keyboard makes both disappear: the browser inserts at the caret,
-     gives real selection handles and a real backspace, and costs no code. The
-     field is left to do its job and this only filters what lands in it. */
-  const { ref: amountRef, handleChange: onAmountChange } = useAmountField({ onChange: setAmount })
+     What is NOT back is the trap. The pad refuses any key that would leave the
+     field unparseable, which was fatal only in combination with
+     `inputMode="none"`: refused key, no keyboard, no way in, clear-and-retype.
+     Two fixes, both load-bearing —
+
+       · every pre-fill goes through `centavosToAmountText`, so no chip hands you
+         a value whose centavos are already full (that was the actual dead end);
+       · the toggle below switches to the OS keyboard and persists per device, so
+         a refusal is never the end of the road.
+
+     The field is a real input either way, and on a phone tapping into it is the
+     only way to reach a digit in the middle of an amount — so every pad edit
+     goes through `applyKeypadKeyAt`, which reports where the caret belongs, and
+     the layout effect puts it there before paint so it never flickers to the end
+     and back. */
+  const coarse = useCoarsePointer()
+  const [amountMode, setAmountMode] = useState<AmountInputMode>(
+    () => readAmountInputMode() ?? (coarse ? 'keypad' : 'keyboard'),
+  )
+  // The pad is for thumbs. On a keyboard device the number row beats it, and
+  // `readAmountInputMode` must not be able to strand a laptop on a tap-pad.
+  const padOpen = coarse && amountMode === 'keypad'
+
+  const amountRef = useRef<HTMLInputElement>(null)
+  const pendingCaret = useRef<number | null>(null)
+  // Always increments, even when the text is unchanged — a REJECTED key still
+  // has a caret to place, and keying the effect on the value instead leaves a
+  // stale position to be applied to the next key that is accepted (§17.9).
+  const [caretTick, setCaretTick] = useState(0)
+
+  function commitAmount(edit: KeypadEdit) {
+    setAmount(edit.value)
+    pendingCaret.current = edit.caret
+    setCaretTick((n) => n + 1)
+  }
+
+  useLayoutEffect(() => {
+    const caret = pendingCaret.current
+    if (caret === null) return
+    pendingCaret.current = null
+    const el = amountRef.current
+    if (!el) return
+    // Re-focusing is what returns the caret after a pad key moved focus to a
+    // button. It cannot summon a keyboard while the pad is up — that is what
+    // inputMode="none" is for. preventScroll stops the sheet jumping on every
+    // key press.
+    el.focus({ preventScroll: true })
+    el.setSelectionRange(caret, caret)
+  }, [caretTick])
+
+  function onKeypadKey(key: KeypadKey) {
+    const el = amountRef.current
+    const start = el?.selectionStart ?? amount.length
+    const end = el?.selectionEnd ?? start
+    commitAmount(applyKeypadKeyAt(amount, key, start, end))
+  }
+
+  function chooseAmountMode(next: AmountInputMode) {
+    setAmountMode(next)
+    writeAmountInputMode(next)
+    // Focusing on the way to the keyboard is what makes the toggle one tap
+    // instead of two — the whole reason it exists is that the pad just refused
+    // something and you need to type NOW.
+    if (next === 'keyboard') requestAnimationFrame(() => amountRef.current?.focus())
+  }
+
+  // Shares the sheet's own ref, so the pad and the keyboard read and write the
+  // same node. Only one of them handles any given edit — with the pad up the
+  // field is `inputMode="none"` and every change arrives through `onKeypadKey`
+  // — so the two caret restorers never write the same tick.
+  const { handleChange: onAmountChange } = useAmountField({
+    onChange: setAmount,
+    allowPlus: true,
+    inputRef: amountRef,
+  })
 
   useEffect(() => {
     if (!open) return
@@ -139,17 +239,45 @@ export function AddSheet({
         // repeated-note chips. Both free.
         setQuickAmounts(frequentAmounts(recent))
         setNoteChips(frequentNotes(recent))
+
+        // Remembered envelope ids are reconciled HERE rather than in a state
+        // initialiser, because until this resolves there is no list to check
+        // them against — and an id whose envelope has since been archived must
+        // degrade to "nothing remembered", not to a picker pointing at a row
+        // that no longer exists and a save button that looks live.
+        //
+        // `current !== ''` is what keeps this from overwriting a prefill (a
+        // "Fix" on a transfer arrives with both ends already set) or anything
+        // the user has touched in the meantime.
+        const prefs = remembered
+        const live = new Set(envs.map((e) => e.id))
+        const restore = (id: string | null) => (id !== null && live.has(id) ? id : '')
+        setFromId((current) => (current === '' ? restore(prefs.transferFromId) : current))
+        setToId((current) => (current === '' ? restore(prefs.transferToId) : current))
+        setIncomeEnvelopeId((current) =>
+          current === '' ? restore(prefs.incomeEnvelopeId) : current,
+        )
       })
       .catch((err) => toast.show(err instanceof Error ? err.message : String(err), 'error'))
     return () => {
       active = false
     }
-  }, [open, toast, version])
+    // `remembered` never changes after mount — it is a lazy initialiser with no
+    // setter — so it is listed to satisfy the rule rather than because a change
+    // in it could ever re-run this.
+  }, [open, toast, version, remembered])
 
   const selectedIncomeEnvelopeId = incomeEnvelopeId || envelopes[0]?.id || ''
 
-  const centavos = useMemo(() => parseAmountToCentavos(amount), [amount])
+  // An EXPRESSION, not a single number: `120+45` is one purchase of two items,
+  // and the alternative is doing the arithmetic in your head before typing —
+  // which is where a mistyped total comes from. A single amount parses through
+  // exactly the same rules it always did.
+  const centavos = useMemo(() => parseAmountExpression(amount), [amount])
   const amountOk = centavos !== null && centavos > 0
+  // Only ever non-null for a genuine sum, so the working shows up when there is
+  // working to show and the field is left alone the rest of the time.
+  const expressionTerms = useMemo(() => amountExpressionTerms(amount), [amount])
   // A datetime-local input can be cleared or left half-typed, and this runs
   // during render — `new Date('').toISOString()` throws, which used to take the
   // whole sheet down to the error boundary mid-entry. Invalid reads as null and
@@ -203,6 +331,23 @@ export function AddSheet({
     return id ? (categories.find((c) => c.id === id) ?? null) : null
   }, [categories, prefill])
 
+  /**
+   * The chips actually on screen.
+   *
+   * The filter is a substring match on the name and NOT a re-sort: the grid is
+   * ranked by use, and re-ordering what survives a search would move the chip
+   * you are aiming at as you type the letter that was going to select it.
+   *
+   * Only offered past a threshold — below it every category is already visible
+   * and reading them is faster than typing.
+   */
+  const showCategoryFilter = categories.length > CATEGORY_FILTER_THRESHOLD
+  const visibleCategories = useMemo(() => {
+    const needle = categoryFilter.trim().toLowerCase()
+    if (!showCategoryFilter || needle === '') return categories
+    return categories.filter((c) => c.name.toLowerCase().includes(needle))
+  }, [categories, categoryFilter, showCategoryFilter])
+
   const otherSavable =
     amountOk &&
     whenOk &&
@@ -236,10 +381,18 @@ export function AddSheet({
     }
   }
 
-  async function run(fn: () => Promise<string>, okMessage: string) {
+  /**
+   * @param remember what this save teaches the next one — envelope choices only,
+   * never the money type (see lib/entry-prefs.ts). Applied on SUCCESS and only
+   * on success: a write that failed is not evidence of anything, and quietly
+   * moving a picker on the strength of one would be a second surprise stacked on
+   * the error toast.
+   */
+  async function run(fn: () => Promise<string>, okMessage: string, remember?: Partial<EntryPrefs>) {
     setBusy(true)
     try {
       const groupId = await fn()
+      if (remember) rememberEntryPrefs(remember)
       bump()
       // A short tick on save. The pressed-block styling promises a physical
       // control; without this the promise stops at the pixel boundary. Guarded
@@ -319,6 +472,7 @@ export function AddSheet({
             targetEnvelopeId: selectedIncomeEnvelopeId,
           }),
         `+${formatPHP(centavos)} to ${selectedEnvelope.name}`,
+        { incomeEnvelopeId: selectedIncomeEnvelopeId },
       )
       return
     }
@@ -342,7 +496,21 @@ export function AddSheet({
           moneyType,
         }),
       `${formatPHP(centavos)} moved ${envById.get(fromId)?.name} → ${envById.get(toId)?.name}`,
+      { transferFromId: fromId, transferToId: toId },
     )
+  }
+
+  /**
+   * Swap the two ends of a transfer.
+   *
+   * Cheap, and it earns its place because of the memory above: the remembered
+   * pair is right about which two envelopes and wrong about the direction
+   * roughly half the time, so the fast path for "the other way this time" has to
+   * be one tap rather than two picks.
+   */
+  function swapTransfer() {
+    setFromId(toId)
+    setToId(fromId)
   }
 
   return (
@@ -379,16 +547,16 @@ export function AddSheet({
           </span>
           <input
             ref={amountRef}
-            // `decimal` everywhere: a phone gets its numeric keyboard, a laptop
-            // ignores it and uses the number row. It replaced `coarse ? 'none'`,
-            // which suppressed the phone keyboard for a pad that has since been
-            // removed — and which, once that pad refused an edit, left no way of
-            // typing into the field at all.
+            // `none` while the pad is up — that is what keeps the OS keyboard
+            // from covering the category grid, which is the pad's entire reason
+            // for existing. It is safe now only because the toggle under the pad
+            // gives a way back to `decimal`; the two together are what §17.9's
+            // trap was missing.
             //
             // `type` stays text rather than number: a number input silently
             // discards what it cannot parse (so a half-typed "1." reads as ""),
             // fires no change for intermediate states, and adds spinners.
-            inputMode="decimal"
+            inputMode={padOpen ? 'none' : 'decimal'}
             enterKeyHint="done"
             autoComplete="off"
             autoFocus
@@ -418,8 +586,61 @@ export function AddSheet({
           className={`mx-auto h-0.5 w-40 transition-colors ${amountOk ? 'bg-current opacity-40' : 'bg-line'} ${amountOk ? tone.text : ''}`}
         />
       </div>
+      {/* The working, when there is any. A sum has to show its total or the
+          field is asking you to trust arithmetic you cannot see — and the total
+          is what actually gets saved, so it is the number that has to be on
+          screen at the moment you commit. */}
+      {expressionTerms !== null && amountOk && (
+        <p className="mt-2 text-center text-sm text-ink-soft tabular-nums">
+          {expressionTerms.map((term) => centavosToAmountText(term)).join(' + ')}
+          <span className="mx-1.5 text-ink-mute">=</span>
+          <span className={`font-semibold ${tone.text}`}>{formatPHP(centavos)}</span>
+        </p>
+      )}
       {amount.trim() !== '' && !amountOk && (
         <p className="mt-2 text-center text-sm text-neg">Up to two decimals, more than zero.</p>
+      )}
+
+      {/* Touch only, and ONE block on purpose.
+          The row is outside the `padOpen` branch, so the escape hatch cannot be
+          rendered away: whatever can show the pad also shows the way off it.
+          That used to be a required prop on `Keypad`; it is structural here,
+          which is stronger, because it also holds while the pad is closed.
+
+          `+ add` sits here rather than in the pad for a reason that only shows
+          up on a phone: `inputMode="decimal"` gives a numeric keyboard with NO
+          `+` KEY, so a `+` that lived on the pad would make sums silently
+          impossible for anyone who had switched to the keyboard — which is
+          exactly the person who is already having trouble.
+
+          A laptop needs neither: the pad is slower than the number row, and a
+          hardware keyboard has a `+` on it. */}
+      {coarse && (
+        <>
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <button
+              type="button"
+              // Not stealing focus is what keeps the caret — and, in keyboard
+              // mode, the keyboard itself — where they were.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onKeypadKey('+')}
+              aria-label="Add another amount to this one"
+              className="press min-h-9 rounded-lg border border-line bg-base/40 px-3 py-1.5 text-sm font-semibold text-ink-soft"
+            >
+              + add
+            </button>
+            <button
+              type="button"
+              onClick={() => chooseAmountMode(padOpen ? 'keyboard' : 'keypad')}
+              className="press min-h-9 rounded-lg border border-line px-3 py-1.5 text-xs text-ink-mute"
+            >
+              {padOpen ? 'Use keyboard' : 'Use keypad'}
+            </button>
+          </div>
+          {padOpen && (
+            <Keypad onKey={onKeypadKey} onClear={() => commitAmount({ value: '', caret: 0 })} />
+          )}
+        </>
       )}
 
       <div className="mt-4 border-t border-line/70 pt-3">
@@ -542,8 +763,32 @@ export function AddSheet({
               Tap a category to save — it picks the envelope for you.
             </p>
           )}
+          {showCategoryFilter && (
+            <div className="relative mb-2.5">
+              <input
+                type="text"
+                inputMode="search"
+                autoComplete="off"
+                aria-label="Filter categories"
+                placeholder={`Filter ${categories.length} categories…`}
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                className="w-full rounded-xl border border-line bg-base/60 px-3 py-2 pr-9 text-sm text-ink outline-none placeholder:text-ink-mute focus:border-accent"
+              />
+              {categoryFilter !== '' && (
+                <button
+                  type="button"
+                  aria-label="Clear category filter"
+                  onClick={() => setCategoryFilter('')}
+                  className="absolute top-1/2 right-2 -translate-y-1/2 px-1 text-ink-mute"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
-            {categories.map((cat) => {
+            {visibleCategories.map((cat) => {
               const env = envById.get(cat.envelope_id)
               const color = env?.color ?? '#AFA7C2'
               // Marked as well as promoted to a button above, so scrolling the
@@ -582,7 +827,15 @@ export function AddSheet({
             <button
               type="button"
               aria-expanded={otherOpen}
-              onClick={() => setOtherOpen((v) => !v)}
+              onClick={() => {
+                // What you typed into the filter IS the name of the thing you
+                // were looking for. Carrying it over turns "no matches" into a
+                // half-filled form rather than an empty one you retype into.
+                if (!otherOpen && otherName === '' && categoryFilter.trim() !== '') {
+                  setOtherName(categoryFilter.trim())
+                }
+                setOtherOpen((v) => !v)
+              }}
               className={`press flex min-h-11 items-center gap-1.5 rounded-xl border border-dashed px-3 py-2 text-sm ${
                 otherOpen ? 'border-accent bg-accent/10 text-ink' : 'border-line text-ink-soft'
               }`}
@@ -592,6 +845,15 @@ export function AddSheet({
             </button>
             {categories.length === 0 && (
               <p className="text-sm text-ink-mute">No categories yet — they seed on first login.</p>
+            )}
+            {/* `+ Other` sits inside the same wrap, so a filter that matches
+                nothing still leaves the way to CREATE the thing you just typed
+                right where your eye already is. */}
+            {categories.length > 0 && visibleCategories.length === 0 && (
+              <p className="w-full text-sm text-ink-mute">
+                Nothing matches “{categoryFilter.trim()}” — name it with{' '}
+                <span className="text-ink-soft">+ Other</span> to keep it.
+              </p>
             )}
           </div>
 
@@ -737,6 +999,19 @@ export function AddSheet({
             disabledId={toId}
             onChange={setFromId}
           />
+          {/* Between the two pickers, where the direction it reverses is
+              legible. Disabled until there is a direction to reverse — a swap
+              of two blanks is a control that does nothing, which is the thing
+              §15.8 is about. */}
+          <button
+            type="button"
+            disabled={fromId === '' && toId === ''}
+            onClick={swapTransfer}
+            aria-label="Swap From and To"
+            className="press -my-1 self-center rounded-lg border border-line bg-base/40 px-3 py-1 text-sm text-ink-soft disabled:opacity-30"
+          >
+            ⇄
+          </button>
           <EnvelopePicker
             label="To"
             envelopes={envelopes}

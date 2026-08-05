@@ -305,6 +305,36 @@ export async function applyLocalVoidGroup(
   notifyOutboxChanged('enqueue')
 }
 
+/**
+ * Put a voided group back — the undo behind History's void toast.
+ *
+ * Mirrors `applyLocalVoidGroup` exactly, including the `.and()` guard, which is
+ * what makes a replay a no-op: only rows that are CURRENTLY voided are touched,
+ * so running this twice cannot resurrect a group that was voided again in
+ * between.
+ *
+ * The reason is cleared along with the timestamp. A void reason describes a void
+ * that no longer exists, and leaving it behind would put "undone" in the ledger
+ * next to a live entry.
+ */
+export async function applyLocalUnvoidGroup(groupId: string): Promise<void> {
+  const db = await localDb()
+  await db.transaction('rw', db.entries, db.outbox, async () => {
+    await db.entries
+      .where('group_id')
+      .equals(groupId)
+      .and((r) => r.voided_at !== null)
+      .modify({ voided_at: null, void_reason: null })
+    await db.outbox.add({
+      created_at: new Date().toISOString(),
+      attempts: 0,
+      last_error: null,
+      payload: { op: 'unvoid_group', groupId },
+    })
+  })
+  notifyOutboxChanged('enqueue')
+}
+
 // ---- outbox primitives used by the drain loop ----
 
 export async function firstOutboxRow(): Promise<OutboxRow | undefined> {

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   MAX_CENTAVOS,
+  amountExpressionTerms,
   centavosToAmountText,
   formatPHP,
+  parseAmountExpression,
   parseAmountToCentavos,
   sanitizeAmountInput,
 } from './money'
@@ -136,5 +138,90 @@ describe('sanitizeAmountInput', () => {
       if (value === '' || value.endsWith('.')) continue
       expect(parseAmountToCentavos(value), `${raw} -> ${value}`).not.toBeNull()
     }
+  })
+})
+
+describe('parseAmountExpression', () => {
+  it('sums the terms', () => {
+    expect(parseAmountExpression('120+45')).toBe(16_500)
+    expect(parseAmountExpression('1+2+3')).toBe(600)
+    expect(parseAmountExpression('12.50+0.75')).toBe(1_325)
+  })
+
+  it('reads a plain amount exactly as parseAmountToCentavos does', () => {
+    for (const raw of ['100', '1,234.5', '0.01', '.5', '1.234', 'x', '']) {
+      expect(parseAmountExpression(raw), raw).toBe(parseAmountToCentavos(raw))
+    }
+  })
+
+  it('treats a trailing + as mid-typing, not as an error', () => {
+    // The field is in this state for as long as it takes to reach for the
+    // second number. Rejecting it would grey out the save controls mid-thought.
+    expect(parseAmountExpression('120+')).toBe(12_000)
+    expect(parseAmountExpression('120+ ')).toBe(12_000)
+  })
+
+  it('rejects an incomplete term that is not the last one', () => {
+    expect(parseAmountExpression('69.+0.77')).toBeNull()
+    expect(parseAmountExpression('+45')).toBeNull()
+    expect(parseAmountExpression('12++45')).toBeNull()
+  })
+
+  it('bounds the SUM, not just each term', () => {
+    // Each term is individually legal at the ceiling; together they are not.
+    expect(parseAmountToCentavos('999999999999.99')).toBe(MAX_CENTAVOS)
+    expect(parseAmountExpression('999999999999.99+999999999999.99')).toBeNull()
+    expect(parseAmountExpression('999999999999+0.99')).toBe(MAX_CENTAVOS)
+  })
+})
+
+describe('amountExpressionTerms', () => {
+  it('is null for anything that is not a real sum', () => {
+    // Nothing to show when there is one number on screen already.
+    expect(amountExpressionTerms('120')).toBeNull()
+    expect(amountExpressionTerms('120+')).toBeNull()
+    expect(amountExpressionTerms('')).toBeNull()
+  })
+
+  it('is null when a term does not parse, so the working is never half-shown', () => {
+    expect(amountExpressionTerms('69.+0.77')).toBeNull()
+  })
+
+  it('gives the terms in order, for showing the working', () => {
+    expect(amountExpressionTerms('120+45')).toEqual([12_000, 4_500])
+    expect(amountExpressionTerms('1+2+3')).toEqual([100, 200, 300])
+  })
+})
+
+describe('sanitizeAmountInput with allowPlus', () => {
+  const plus = { allowPlus: true }
+
+  it('drops + entirely unless it is asked for', () => {
+    // Settings parses with parseAmountToCentavos, so a + would sit in the field
+    // looking accepted over a value that reads as null.
+    expect(sanitizeAmountInput('120+45', 6).value).toBe('12045')
+    expect(sanitizeAmountInput('120+45', 6, plus).value).toBe('120+45')
+  })
+
+  it('drops a leading or doubled +, which no term could complete', () => {
+    expect(sanitizeAmountInput('+45', 3, plus).value).toBe('45')
+    expect(sanitizeAmountInput('12++45', 6, plus).value).toBe('12+45')
+  })
+
+  it('gives each term its own decimal point and its own digit ceiling', () => {
+    expect(sanitizeAmountInput('1.5+2.25', 8, plus).value).toBe('1.5+2.25')
+    expect(sanitizeAmountInput('1.5.5+2', 7, plus).value).toBe('1.55+2')
+    expect(sanitizeAmountInput('1234567890123+1234567890123', 27, plus).value).toBe(
+      '123456789012+123456789012',
+    )
+  })
+
+  it('collapses leading zeros in every term, not only the first', () => {
+    expect(sanitizeAmountInput('012+045', 7, plus)).toEqual({ value: '12+45', caret: 5 })
+  })
+
+  it('carries the caret to where its character ended up', () => {
+    // the '5' the caret sits after survives the dropped '+' padding around it
+    expect(sanitizeAmountInput('12+a45', 4, plus)).toEqual({ value: '12+45', caret: 3 })
   })
 })

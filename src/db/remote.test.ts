@@ -1,17 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { upsertMock, selectMock } = vi.hoisted(() => ({
+const { upsertMock, selectMock, updateMock } = vi.hoisted(() => ({
   upsertMock: vi.fn(),
   selectMock: vi.fn(),
+  updateMock: vi.fn(),
 }))
 
 vi.mock('./supabase', () => ({
   supabase: {
-    from: vi.fn(() => ({ upsert: upsertMock, select: selectMock })),
+    from: vi.fn(() => ({ upsert: upsertMock, select: selectMock, update: updateMock })),
   },
 }))
 
-const { pushInsertEntries, pullEntriesPage } = await import('./remote')
+const { pushInsertEntries, pullEntriesPage, pushUnvoidGroup, pushVoidGroup } =
+  await import('./remote')
 
 /**
  * The chainable PostgREST builder `pullEntriesPage` walks, as a thenable that
@@ -155,5 +157,67 @@ describe('pullEntriesPage', () => {
     )
 
     await expect(pullEntriesPage(null, 100)).rejects.toThrow('permission denied')
+  })
+})
+
+/**
+ * The two voiding pushes, and the filter each one carries.
+ *
+ * That filter is the whole idempotency argument for both — a retry after a lost
+ * response must update ZERO rows, which is what lets the outbox be a dumb FIFO
+ * instead of a sync engine (§1 rule 4). It was written down in ROADMAP §18.4 and
+ * asserted nowhere, which is the exact shape of the mistake this project's own
+ * §0 warns about: a promise that lives in prose.
+ */
+describe('the voiding pushes', () => {
+  /** Records every filter link the call walks, then settles. */
+  function updateResult(calls: string[][], error: unknown = null) {
+    const builder = {
+      eq: (...args: unknown[]) => (calls.push(['eq', ...args.map(String)]), builder),
+      is: (...args: unknown[]) => (calls.push(['is', ...args.map(String)]), builder),
+      not: (...args: unknown[]) => (calls.push(['not', ...args.map(String)]), builder),
+      then: (resolve: (value: unknown) => unknown) => Promise.resolve({ error }).then(resolve),
+    }
+    return builder
+  }
+
+  beforeEach(() => {
+    updateMock.mockReset()
+  })
+
+  it('a void only touches rows that are not yet voided', async () => {
+    const calls: string[][] = []
+    updateMock.mockReturnValueOnce(updateResult(calls))
+
+    await pushVoidGroup('group-1', '2026-08-05T00:00:00.000Z', 'mis-tap')
+
+    expect(updateMock).toHaveBeenCalledWith({
+      voided_at: '2026-08-05T00:00:00.000Z',
+      void_reason: 'mis-tap',
+    })
+    expect(calls).toContainEqual(['eq', 'group_id', 'group-1'])
+    expect(calls).toContainEqual(['is', 'voided_at', 'null'])
+  })
+
+  it('an unvoid only touches rows that ARE voided', async () => {
+    // The filter inverted. Without it a replay would undo a void made after the
+    // one this op was for.
+    const calls: string[][] = []
+    updateMock.mockReturnValueOnce(updateResult(calls))
+
+    await pushUnvoidGroup('group-1')
+
+    // the reason is cleared with the timestamp — it describes a void that is gone
+    expect(updateMock).toHaveBeenCalledWith({ voided_at: null, void_reason: null })
+    expect(calls).toContainEqual(['eq', 'group_id', 'group-1'])
+    expect(calls).toContainEqual(['not', 'voided_at', 'is', 'null'])
+  })
+
+  it('surfaces a rejected unvoid rather than reporting the op pushed', async () => {
+    // A silent failure here would drop the op from the queue with the server
+    // still holding the void.
+    updateMock.mockReturnValueOnce(updateResult([], { message: 'permission denied' }))
+
+    await expect(pushUnvoidGroup('group-1')).rejects.toThrow('permission denied')
   })
 })

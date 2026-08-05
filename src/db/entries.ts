@@ -11,7 +11,7 @@ import { assertSplittable } from '../lib/shares'
 import { balancesFromEntries } from '../lib/balances'
 import type { EntryRow } from '../lib/groups'
 import type { MoneyType } from '../lib/money-type'
-import { applyLocalInsert, applyLocalVoidGroup, localDb } from './dexie'
+import { applyLocalInsert, applyLocalUnvoidGroup, applyLocalVoidGroup, localDb } from './dexie'
 import type { NewEntryRow } from './outbox'
 
 /**
@@ -460,4 +460,22 @@ export async function addOpeningBalances(
 /** The ONLY mutation the ledger allows — and always the whole group. */
 export async function voidGroup(groupId: string, reason: string): Promise<void> {
   await applyLocalVoidGroup(groupId, nowIso(), reason.trim() || null)
+}
+
+/**
+ * Take a void back — the undo behind History's void toast (§18.7).
+ *
+ * This does NOT break rule 3 (append-only), and the distinction matters. A void
+ * is not a delete: the row never went anywhere, `voided_at` is a flag on it, and
+ * the schema's column grant is for the voiding PAIR rather than for a one-way
+ * trip. Clearing the flag restores the same row with the same id and the same
+ * amount — no history is rewritten, and no entry is created or destroyed. What
+ * would break the rule is editing an amount in place, which is still impossible.
+ *
+ * Always the whole group, for exactly the reason voiding is: un-voiding one leg
+ * of an income would put a third of it back into one envelope and corrupt the
+ * split invariant.
+ */
+export async function unvoidGroup(groupId: string): Promise<void> {
+  await applyLocalUnvoidGroup(groupId)
 }

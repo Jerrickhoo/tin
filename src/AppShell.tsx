@@ -271,12 +271,38 @@ export function AppShell() {
   )
 }
 
+/**
+ * How much room the pill takes out of the top of the viewport.
+ *
+ * `top-3` (12px) plus roughly 28px of pill and a little air. Published as a CSS
+ * variable rather than kept here, because the pill is `fixed` with a higher
+ * z-index than anything that scrolls: any element that sticks to the top of the
+ * page has to know about it or the pill lands on top of the element. History's
+ * day header is the one that did.
+ */
+const SYNC_PILL_HEIGHT = '2.75rem'
+
 /** Online/offline indicator + queued-writes badge (ROADMAP 6.5). Silent when
  *  everything is synced and online — status chrome earns its pixels only when
  *  there's status to report. */
 function SyncPill() {
   const snap = useSyncExternalStore(subscribeSync, getSyncSnapshot, getSyncSnapshot)
-  if (snap.online && snap.pending === 0 && !snap.lastError) return null
+  const visible = !(snap.online && snap.pending === 0 && !snap.lastError)
+
+  // Written to the document rather than passed down: the readers are sticky
+  // headers on screens this component knows nothing about, and threading a
+  // number through the router to reach them would be a prop that exists only to
+  // describe a fixed element's height.
+  useEffect(() => {
+    const root = document.documentElement
+    if (visible) root.style.setProperty('--sticky-top', SYNC_PILL_HEIGHT)
+    else root.style.removeProperty('--sticky-top')
+    return () => {
+      root.style.removeProperty('--sticky-top')
+    }
+  }, [visible])
+
+  if (!visible) return null
 
   let text: string
   if (!snap.online) {

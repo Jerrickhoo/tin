@@ -217,3 +217,78 @@ describe('totalsFor', () => {
     })
   })
 })
+
+describe('date range', () => {
+  // Manila is UTC+8, so a 7am Feb 1 Manila transaction is Jan 31 in UTC. The
+  // filter has to group by the Manila day or "this month" quietly loses the
+  // first morning of it.
+  const jan31Manila = row({ occurred_at: '2026-01-31T02:00:00.000Z' }) // Jan 31 10:00 PHT
+  const feb01Manila = row({ occurred_at: '2026-01-31T23:00:00.000Z' }) // Feb 1 07:00 PHT
+  const feb15 = row({ occurred_at: '2026-02-15T04:00:00.000Z' })
+  const groups = groupEntries([jan31Manila, feb01Manila, feb15])
+
+  const run = (over: Partial<LedgerQuery>) =>
+    filterGroups(groups, { ...EMPTY_QUERY, ...over }, NAMES)
+
+  it('counts as an active query, so the whole ledger gets read', () => {
+    expect(isQueryActive({ ...EMPTY_QUERY, from: '2026-02-01' })).toBe(true)
+    expect(isQueryActive({ ...EMPTY_QUERY, to: '2026-02-01' })).toBe(true)
+  })
+
+  it('bounds are inclusive at both ends', () => {
+    expect(run({ from: '2026-02-01', to: '2026-02-15' })).toHaveLength(2)
+    expect(run({ from: '2026-02-02', to: '2026-02-14' })).toHaveLength(0)
+  })
+
+  it('groups by the Manila day, not the UTC one', () => {
+    // The 23:00Z entry is February in Manila and January in UTC.
+    const february = run({ from: '2026-02-01', to: '2026-02-28' })
+    expect(february.map((g) => g.groupId)).toContain(feb01Manila.group_id)
+    expect(february.map((g) => g.groupId)).not.toContain(jan31Manila.group_id)
+  })
+
+  it('takes one bound on its own', () => {
+    expect(run({ from: '2026-02-15' })).toHaveLength(1)
+    expect(run({ to: '2026-01-31' })).toHaveLength(1)
+  })
+
+  it('combines with the other filters rather than replacing them', () => {
+    expect(run({ from: '2026-02-01', kinds: ['income'] })).toHaveLength(0)
+    expect(run({ from: '2026-02-01', kinds: ['expense'] })).toHaveLength(2)
+  })
+})
+
+describe('envelope filter', () => {
+  it('keeps a whole income group when any leg touches the envelope', () => {
+    // The module's one rule: an income splits three ways, and filtering to
+    // Needs must still show it as the income it was, not as a third of one.
+    const income = groupEntries([
+      row({ group_id: 'inc', kind: 'income', envelope_id: 'env-needs', amount_centavos: 70_00 }),
+      row({ group_id: 'inc', kind: 'income', envelope_id: 'env-savings', amount_centavos: 20_00 }),
+      row({ group_id: 'inc', kind: 'income', envelope_id: 'env-wants', amount_centavos: 10_00 }),
+    ])
+    const [group] = filterGroups(income, { ...EMPTY_QUERY, envelopeIds: ['env-savings'] }, NAMES)
+    expect(group.legs).toHaveLength(3)
+    expect(group.totalCentavos).toBe(100_00)
+  })
+
+  it('excludes groups with no leg in the envelope', () => {
+    const groups = groupEntries([
+      row({ envelope_id: 'env-needs' }),
+      row({ envelope_id: 'env-wants' }),
+    ])
+    expect(
+      filterGroups(groups, { ...EMPTY_QUERY, envelopeIds: ['env-wants'] }, NAMES),
+    ).toHaveLength(1)
+  })
+
+  it('treats several envelopes as "any of"', () => {
+    const groups = groupEntries([
+      row({ envelope_id: 'env-needs' }),
+      row({ envelope_id: 'env-wants' }),
+      row({ envelope_id: 'env-savings' }),
+    ])
+    const query = { ...EMPTY_QUERY, envelopeIds: ['env-wants', 'env-savings'] }
+    expect(filterGroups(groups, query, NAMES)).toHaveLength(2)
+  })
+})

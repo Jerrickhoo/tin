@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
-import { Link } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { useAddSheet, useLedger, useToast } from '../../app-context'
 import { buildEnvelopeCardFacts } from './envelope-card-facts'
 import { entriesToJson } from '../../lib/export'
@@ -22,10 +22,17 @@ import { readCheckIns } from '../../db/dexie'
 import { readStreakSaves, repairDay, undoRepair } from '../../db/streak'
 import { allowancePerDay, spentTodayByEnvelope } from '../../lib/allowance'
 import { envelopePace, type EnvelopePace } from '../../lib/envelope-month'
-import { daysRemainingInMonth, manilaDayKey, manilaHour, monthLabel } from '../../lib/dates'
+import {
+  daysRemainingInMonth,
+  manilaDayKey,
+  manilaHour,
+  monthLabel,
+  shiftDayKey,
+} from '../../lib/dates'
 import {
   computeStreak,
   loggingStrip,
+  spentInRange,
   spentOnDay,
   STREAK_WINDOW_DAYS,
   type LoggedDay,
@@ -126,6 +133,7 @@ export function Home() {
   const { version, bump } = useLedger()
   const toast = useToast()
   const addSheet = useAddSheet()
+  const navigate = useNavigate()
   const [cards, setCards] = useState<Card[] | null>(null)
   // Two different emptinesses, and they gate different things. `empty` is a
   // ledger with nothing on it at all, which is the only state where the evening
@@ -147,6 +155,11 @@ export function Home() {
   const [offCardCentavos, setOffCardCentavos] = useState(0)
   const [strip, setStrip] = useState<LoggedDay[] | null>(null)
   const [todayCentavos, setTodayCentavos] = useState(0)
+  // Rolling seven days ending today, not "since Monday". A week-to-date figure
+  // is near-zero every Monday and near-complete every Sunday, so it says more
+  // about the weekday than about the spending — and this sits next to a daily
+  // allowance whose whole job is being comparable from one glance to the next.
+  const [weekCentavos, setWeekCentavos] = useState(0)
   const [spentToday, setSpentToday] = useState<Map<string, number>>(new Map())
   const [paces, setPaces] = useState<Map<string, EnvelopePace>>(new Map())
   const [streak, setStreak] = useState<StreakState | null>(null)
@@ -222,6 +235,8 @@ export function Home() {
         const todayKey = manilaDayKey(new Date())
         setStrip(loggingStrip(recent, checkIns))
         setTodayCentavos(spentOnDay(recent, todayKey))
+        // Sixth use of the same 13-month window, also free.
+        setWeekCentavos(spentInRange(recent, shiftDayKey(todayKey, -6), todayKey))
         // Same window, third use — the per-envelope daily allowance. Free.
         setSpentToday(spentTodayByEnvelope(recent, todayKey))
         // Fourth use, also free: each envelope's run since its last top-up.
@@ -408,10 +423,32 @@ export function Home() {
               now?") and splitting them across cards would make you look twice.
               Hidden at zero — "spent today ₱0.00" before you have bought
               anything reads as a scolding, not a fact. */}
+          {/* The week rides on the same line as the day, because the two are one
+              question asked at two horizons and splitting them would make you
+              look twice. Both hidden at zero — "spent today ₱0.00" before you
+              have bought anything reads as a scolding — and the week is dropped
+              when it equals the day, since on a quiet week that would print the
+              same number twice with two different labels. */}
           {cards && todayCentavos > 0 && (
             <p className="mt-2 text-xs text-ink-soft tabular-nums">
               <span className="text-ink-mute">spent today </span>
               {formatPHP(todayCentavos)}
+              {weekCentavos > todayCentavos && (
+                <>
+                  <span className="mx-1.5 text-ink-mute opacity-50">·</span>
+                  <span className="text-ink-mute">7 days </span>
+                  {formatPHP(weekCentavos)}
+                </>
+              )}
+            </p>
+          )}
+          {/* A quiet day inside a spending week is exactly when the week is the
+              number worth having, so it gets a line of its own rather than
+              disappearing with the day it was hiding behind. */}
+          {cards && todayCentavos === 0 && weekCentavos > 0 && (
+            <p className="mt-2 text-xs text-ink-soft tabular-nums">
+              <span className="text-ink-mute">spent in 7 days </span>
+              {formatPHP(weekCentavos)}
             </p>
           )}
           {strip && <LoggingStrip days={strip} streak={streak} />}
@@ -571,6 +608,13 @@ export function Home() {
                 pace={paces.get(card.id) ?? null}
                 daysLeft={daysLeft}
                 spentTodayCentavos={spentToday.get(card.id) ?? 0}
+                // "Where did Needs go?" is asked standing right here, and the
+                // answer already exists one screen over. History owns the filter
+                // UI; this hands it a starting query through router state, the
+                // same way Insights hands it a category.
+                onOpenLedger={() =>
+                  void navigate('/history', { state: { envelopeIds: [card.id] } })
+                }
                 onCover={() =>
                   addSheet.open({
                     mode: 'transfer',
@@ -944,12 +988,14 @@ function EnvelopeCard({
   daysLeft,
   spentTodayCentavos,
   onCover,
+  onOpenLedger,
 }: {
   card: Card
   pace: EnvelopePace | null
   daysLeft: number
   spentTodayCentavos: number
   onCover: () => void
+  onOpenLedger: () => void
 }) {
   const color = card.color ?? '#AFA7C2'
   const red = card.balanceCentavos < 0
@@ -980,7 +1026,17 @@ function EnvelopeCard({
 
   return (
     <article className="card px-4 pt-3.5 pb-4">
-      <div className="flex items-center justify-between gap-3">
+      {/* The header is the door to this envelope's entries. Only the header —
+          the card also carries a meter with its own aria-label and, when the
+          envelope is red, a "cover from" button, and nesting either inside a
+          button is both invalid and a mis-tap waiting to happen on a card you
+          are only trying to read. */}
+      <button
+        type="button"
+        onClick={onOpenLedger}
+        aria-label={`${card.name}: ${formatPHP(card.balanceCentavos)} — show these entries`}
+        className="press -mx-1 flex w-[calc(100%+0.5rem)] items-center justify-between gap-3 rounded-lg px-1 text-left transition-colors hover:bg-raised/40"
+      >
         <span className="flex min-w-0 items-center gap-2.5">
           {/* A square, and no glow halo. `box-shadow: 0 0 10px` is a blur — the
               one effect that cannot be drawn on a pixel grid — and it was the
@@ -994,7 +1050,7 @@ function EnvelopeCard({
         <span className={`shrink-0 text-lg font-bold tabular-nums ${red ? 'text-neg' : ''}`}>
           {formatPHP(card.balanceCentavos)}
         </span>
-      </div>
+      </button>
 
       <div className="meter mt-3" role="img" aria-label={meterLabel}>
         {/* Flat fill, not a gradient: the meter is already segmented into

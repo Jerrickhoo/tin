@@ -29,6 +29,10 @@ vi.mock('./remote', () => ({
     return Promise.resolve()
   },
   pushVoidGroup: () => Promise.resolve(),
+  // Present because the mock is the WHOLE module surface: `executeOp` switches
+  // on the op type, so a missing function here is not a stub returning nothing,
+  // it is a TypeError the moment that op reaches the queue.
+  pushUnvoidGroup: () => Promise.resolve(),
   pullEntriesPage: () =>
     Promise.resolve({
       rows: server.entries.map((r) => {

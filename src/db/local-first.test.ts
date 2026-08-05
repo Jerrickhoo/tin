@@ -290,6 +290,73 @@ describe('local-first mirror + outbox', () => {
 
   // Placed after the FIFO assertion above deliberately: these write entries, and
   // that test pins the exact op sequence the outbox accumulated before it.
+  it('unvoidGroup puts the money back and enqueues its own op', async () => {
+    // The void path has been covered end to end since Phase 6; the undo behind
+    // History's toast (§18.4) arrived with none, in the subsystem this roadmap
+    // calls the most complex in the app.
+    const group = await entriesDb.addExpense({
+      amountCentavos: 5000,
+      category: {
+        id: 'cat-food',
+        envelope_id: 'env-needs',
+        name: 'Food',
+        emoji: null,
+        archived_at: null,
+      },
+      occurredAt: '2026-07-16T04:00:00.000Z',
+      moneyType: 'online',
+    })
+    const spent = (await entriesDb.fetchBalances()).get('env-needs') ?? 0
+
+    await entriesDb.voidGroup(group, 'mis-tap')
+    expect((await entriesDb.fetchBalances()).get('env-needs')).toBe(spent + 5000)
+
+    await entriesDb.unvoidGroup(group)
+
+    // back in the balance, and back to being an ordinary live row
+    expect((await entriesDb.fetchBalances()).get('env-needs')).toBe(spent)
+    const row = (await entriesDb.fetchAllEntriesForExport()).find((r) => r.group_id === group)!
+    expect(row.voided_at).toBeNull()
+    // the reason described a void that no longer exists — leaving it would put
+    // "mis-tap" in the ledger beside a live entry
+    expect(row.void_reason).toBeNull()
+
+    const executed: OutboxOp[] = []
+    await drainOutbox(async (op) => void executed.push(op))
+    expect(executed.map((op) => op.op)).toEqual(['insert_entries', 'void_group', 'unvoid_group'])
+    const undo = executed[2]
+    expect(undo.op === 'unvoid_group' && undo.groupId).toBe(group)
+  })
+
+  it('a replayed unvoid cannot resurrect a group that was voided again', async () => {
+    // What makes the third op safe to retry: it only touches rows that are
+    // CURRENTLY voided, so a push replayed after a lost response is a no-op
+    // rather than an undo of whatever happened next.
+    const group = await entriesDb.addExpense({
+      amountCentavos: 111,
+      category: {
+        id: 'cat-food',
+        envelope_id: 'env-needs',
+        name: 'Food',
+        emoji: null,
+        archived_at: null,
+      },
+      occurredAt: '2026-07-16T05:00:00.000Z',
+      moneyType: 'online',
+    })
+    await entriesDb.voidGroup(group, 'once')
+    await entriesDb.unvoidGroup(group)
+    await entriesDb.voidGroup(group, 'and again, on purpose')
+
+    await entriesDb.unvoidGroup(group) // the replay
+    await entriesDb.unvoidGroup(group) // and another
+    const row = (await entriesDb.fetchAllEntriesForExport()).find((r) => r.group_id === group)!
+    expect(row.voided_at).toBeNull()
+    expect(row.amount_centavos).toBe(-111) // and the row itself is untouched
+
+    await drainOutbox(async () => {})
+  })
+
   it('a pull that omits money_type leaves the local tag alone', async () => {
     // THE bug. The pull did not select money_type and bulkPut replaces the whole
     // record, so a locally-tagged row came back untagged. With the ~60 s overlap

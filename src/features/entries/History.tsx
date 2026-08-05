@@ -8,11 +8,12 @@ import {
   fetchEnvelopes,
   HISTORY_PAGE_ROWS,
   OPENING_BALANCE_NOTE,
+  unvoidGroup,
   voidGroup,
   type Category,
   type Envelope,
 } from '../../db/entries'
-import { manilaDayKey } from '../../lib/dates'
+import { manilaDayKey, monthLabel, shiftDayKey } from '../../lib/dates'
 import { groupEntries, type EntryKind, type EntryRow, type LedgerGroup } from '../../lib/groups'
 import { filterGroups, isQueryActive, totalsFor, type LedgerQuery } from '../../lib/ledger-filter'
 import { formatPHP } from '../../lib/money'
@@ -49,6 +50,30 @@ function toggle<T>(list: readonly T[], value: T): T[] {
 }
 
 /**
+ * The date shortcuts, as functions of today rather than as fixed dates.
+ *
+ * Computed on tap, so a tab left open overnight cannot hand you a "last 7 days"
+ * that ended yesterday. `to` is always today: History has no future entries
+ * worth excluding, and backdating is welcome, so an open-ended ceiling would
+ * only ever differ by including entries dated tomorrow — which are real, and
+ * belong in "this month".
+ */
+const DATE_PRESETS: { label: string; range: (today: string) => { from: string; to: string } }[] = [
+  { label: '7 days', range: (today) => ({ from: shiftDayKey(today, -6), to: today }) },
+  { label: '30 days', range: (today) => ({ from: shiftDayKey(today, -29), to: today }) },
+  { label: 'This month', range: (today) => ({ from: `${today.slice(0, 7)}-01`, to: today }) },
+  {
+    label: 'Last month',
+    range: (today) => {
+      // The 1st of this month, stepped back one day, lands on the last of last
+      // month — no month-length table and no leap-year case.
+      const lastOfPrev = shiftDayKey(`${today.slice(0, 7)}-01`, -1)
+      return { from: `${lastOfPrev.slice(0, 7)}-01`, to: lastOfPrev }
+    },
+  },
+]
+
+/**
  * A filter handed over by another screen — Insights sends one when you tap a
  * category on "Where it went" or on the movers list.
  *
@@ -64,9 +89,9 @@ function toggle<T>(list: readonly T[], value: T): T[] {
  * in the history entry. A malformed one falls back to no filter instead of
  * putting a non-string into a query the filter code assumes is `string[]`.
  */
-function incomingCategoryIds(state: unknown): string[] {
+function incomingIds(state: unknown, key: 'categoryIds' | 'envelopeIds'): string[] {
   if (typeof state !== 'object' || state === null) return []
-  const ids = (state as { categoryIds?: unknown }).categoryIds
+  const ids = (state as Record<string, unknown>)[key]
   if (!Array.isArray(ids)) return []
   return ids.filter((id): id is string => typeof id === 'string')
 }
@@ -92,21 +117,34 @@ export function History() {
   // list first and then jump, and the jump is the whole thing you came to read.
   const location = useLocation()
   const [categoryIds, setCategoryIds] = useState<string[]>(() =>
-    incomingCategoryIds(location.state),
+    incomingIds(location.state, 'categoryIds'),
+  )
+  // Home's envelope cards send one of these, the same way Insights sends a
+  // category. Both land here rather than in a URL: an id is a UUID that means
+  // nothing to a human and would make a shareable link nobody would share.
+  const [envelopeIds, setEnvelopeIds] = useState<string[]>(() =>
+    incomingIds(location.state, 'envelopeIds'),
   )
   const [kinds, setKinds] = useState<EntryKind[]>([])
+  const [from, setFrom] = useState<string | null>(null)
+  const [to, setTo] = useState<string | null>(null)
   // Opened when a filter arrived with the navigation. The result bar states the
   // totals, but a filtered ledger whose filter is folded away is a screen that
   // looks like it is missing entries — and the control that would explain it is
   // the one thing not on screen.
   const [filtersOpen, setFiltersOpen] = useState(
-    () => incomingCategoryIds(location.state).length > 0,
+    () =>
+      incomingIds(location.state, 'categoryIds').length > 0 ||
+      incomingIds(location.state, 'envelopeIds').length > 0,
   )
 
   const query = useMemo<LedgerQuery>(
-    () => ({ text, categoryIds, kinds }),
-    [text, categoryIds, kinds],
+    () => ({ text, categoryIds, envelopeIds, kinds, from, to }),
+    [text, categoryIds, envelopeIds, kinds, from, to],
   )
+  // A date bound counts, which is what makes the whole ledger get read rather
+  // than the loaded page: "last month" over the newest 200 rows would answer a
+  // question about last month with whatever happened to be in memory.
   const searching = isQueryActive(query)
 
   useEffect(() => {
@@ -188,6 +226,28 @@ export function History() {
     })
   }, [matched])
 
+  /**
+   * Which day sections open a new month, and whether to say so at all.
+   *
+   * A long scroll was an undifferentiated run of "Mar 3 / Mar 2 / Mar 1 / Feb
+   * 28" — the day headers carry no month, so the only signal that you had
+   * crossed one was the date resetting, which reads as noise rather than as a
+   * landmark.
+   *
+   * Suppressed entirely when everything on screen is one month: a lone "August
+   * 2026" over the first day names something the whole list already agrees on.
+   */
+  const monthStarts = useMemo(() => {
+    const starts = new Set<string>()
+    let previous: string | null = null
+    for (const day of days) {
+      const month = day.key.slice(0, 7)
+      if (month !== previous) starts.add(day.key)
+      previous = month
+    }
+    return starts.size > 1 ? starts : new Set<string>()
+  }, [days])
+
   // Only the un-archived ones are offered as filters — the picker should not
   // grow forever — but an archived category's entries still match by name in
   // the text box, because `names` above was built from all of them.
@@ -202,14 +262,43 @@ export function History() {
   function clearFilters() {
     setText('')
     setCategoryIds([])
+    setEnvelopeIds([])
     setKinds([])
+    setFrom(null)
+    setTo(null)
+  }
+
+  /**
+   * Put a void back.
+   *
+   * Every other confirmation in the app offers an undo — a save, a streak
+   * repair, a recurring catch-up — and a void that could not be taken back
+   * taught you the toast was safe in three places and then wasn't in the fourth.
+   * Inconsistent undo is worse than none.
+   *
+   * This does not break the append-only rule: `voided_at` is a flag on a row
+   * that never went anywhere, and the schema grants UPDATE on exactly the
+   * voiding pair (001_core.sql:166), so clearing it needs no migration and
+   * rewrites no history. See db/entries.ts.
+   */
+  async function onUnvoid(groupId: string) {
+    try {
+      await unvoidGroup(groupId)
+      bump()
+      toast.show('Void undone — the entry is back in your balances')
+    } catch (err) {
+      toast.show(err instanceof Error ? err.message : String(err), 'error')
+    }
   }
 
   async function onVoid(group: LedgerGroup, reason: string) {
     try {
       await voidGroup(group.groupId, reason)
       bump()
-      toast.show('Voided — the ledger remembers, balances forget')
+      toast.show('Voided — the ledger remembers, balances forget', 'ok', {
+        label: 'Undo',
+        run: () => void onUnvoid(group.groupId),
+      })
     } catch (err) {
       toast.show(err instanceof Error ? err.message : String(err), 'error')
     }
@@ -265,7 +354,20 @@ export function History() {
     }
   }
 
-  const filterCount = categoryIds.length + kinds.length
+  // A date range is ONE filter however many bounds it has — counting `from` and
+  // `to` separately would badge "Filter · 2" for a single tap on "7 days".
+  const filterCount =
+    categoryIds.length + envelopeIds.length + kinds.length + (from !== null || to !== null ? 1 : 0)
+  const today = manilaDayKey(new Date())
+  const activePreset = DATE_PRESETS.find((preset) => {
+    const range = preset.range(today)
+    return range.from === from && range.to === to
+  })
+
+  const envelopeList = useMemo(
+    () => [...envelopes.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    [envelopes],
+  )
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-5 px-5 py-7 md:max-w-2xl md:px-8 md:py-10">
@@ -321,6 +423,78 @@ export function History() {
                   </Chip>
                 ))}
               </div>
+            </div>
+            {/* The gap this screen had: kinds and categories but no dates, so
+                "what did I spend last week" was unanswerable on the one screen
+                built to answer it. Presets first because they are what gets
+                tapped; the two inputs underneath are for the case a preset does
+                not name. */}
+            <div>
+              <p className="mb-2 text-xs text-ink-mute">When</p>
+              <div className="flex flex-wrap gap-1.5">
+                {DATE_PRESETS.map((preset) => {
+                  const selected = activePreset?.label === preset.label
+                  return (
+                    <Chip
+                      key={preset.label}
+                      selected={selected}
+                      onClick={() => {
+                        if (selected) {
+                          setFrom(null)
+                          setTo(null)
+                          return
+                        }
+                        const range = preset.range(today)
+                        setFrom(range.from)
+                        setTo(range.to)
+                      }}
+                    >
+                      {preset.label}
+                    </Chip>
+                  )
+                })}
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  type="date"
+                  aria-label="From date"
+                  value={from ?? ''}
+                  max={to ?? undefined}
+                  onChange={(e) => setFrom(e.target.value === '' ? null : e.target.value)}
+                  className="min-w-0 flex-1 rounded-xl border border-line bg-base px-2.5 py-2 text-sm text-ink outline-none focus:border-accent"
+                />
+                <span className="text-xs text-ink-mute">to</span>
+                <input
+                  type="date"
+                  aria-label="To date"
+                  value={to ?? ''}
+                  min={from ?? undefined}
+                  onChange={(e) => setTo(e.target.value === '' ? null : e.target.value)}
+                  className="min-w-0 flex-1 rounded-xl border border-line bg-base px-2.5 py-2 text-sm text-ink outline-none focus:border-accent"
+                />
+              </div>
+            </div>
+            {/* Rendered so an envelope filter arriving from Home is legible and
+                clearable. A filter you cannot see is a screen that looks like it
+                has lost entries. */}
+            <div>
+              <p className="mb-2 text-xs text-ink-mute">Envelope</p>
+              {envelopeList.length === 0 ? (
+                <p className="text-sm text-ink-mute">Envelopes arrive with your first sync.</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {envelopeList.map((env) => (
+                    <Chip
+                      key={env.id}
+                      selected={envelopeIds.includes(env.id)}
+                      color={env.color ?? '#AFA7C2'}
+                      onClick={() => setEnvelopeIds((ids) => toggle(ids, env.id))}
+                    >
+                      {env.name}
+                    </Chip>
+                  ))}
+                </div>
+              )}
             </div>
             <div>
               <p className="mb-2 text-xs text-ink-mute">Category</p>
@@ -428,12 +602,31 @@ export function History() {
 
       {days.map(({ key, groups, net }) => (
         <section key={key}>
+          {/* The month landmark. Not sticky — the day header below it already
+              owns that slot, and two stacked sticky bars on a phone is most of
+              the top of the screen spent on chrome.
+              `key` is ALREADY a Manila day key, so its first seven characters
+              are the month key — no Date round-trip, and nothing to get wrong at
+              a boundary. */}
+          {monthStarts.has(key) && (
+            <h2 className="mt-1 mb-2 font-display text-[0.625rem] leading-relaxed text-ink-mute">
+              {monthLabel(key.slice(0, 7)).toUpperCase()}
+            </h2>
+          )}
           {/* Sticky so you always know which day you're scrolling through. */}
           {/* Fully opaque. At 85% it was legible only because a backdrop-blur
               was smearing the rows sliding underneath; without the blur,
               translucency means entry text reads straight through the day
               header it is supposed to be scrolling behind. */}
-          <div className="sticky top-0 z-10 -mx-1 mb-2 flex items-baseline justify-between border-b-2 border-line bg-base px-1 py-1.5">
+          {/* `--sticky-top` rather than `top-0`: the sync pill is fixed at the
+              top of the viewport with a higher z-index, so when a write is
+              stuck — exactly when you come to History to check something — it
+              parked itself on top of the day header. AppShell sets the variable
+              while the pill is on screen and clears it when it goes away. */}
+          <div
+            style={{ top: 'var(--sticky-top, 0px)' }}
+            className="sticky z-10 -mx-1 mb-2 flex items-baseline justify-between border-b-2 border-line bg-base px-1 py-1.5"
+          >
             <h2 className="text-sm font-semibold text-ink-soft">{dayLabel(key)}</h2>
             {net !== 0 && (
               <span

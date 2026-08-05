@@ -60,6 +60,8 @@ function executeOp(op: OutboxOp): Promise<void> {
       return remote.pushInsertEntries(op.rows)
     case 'void_group':
       return remote.pushVoidGroup(op.groupId, op.voidedAt, op.reason)
+    case 'unvoid_group':
+      return remote.pushUnvoidGroup(op.groupId)
   }
 }
 

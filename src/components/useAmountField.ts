@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { sanitizeAmountInput } from '../lib/money'
 
 /**
@@ -21,15 +21,29 @@ import { sanitizeAmountInput } from '../lib/money'
  * hold at all — Settings clamps to the available balance, so that the number on
  * screen and the number stored can never disagree (§15.6). A normalised rewrite
  * is no longer what the user typed, so the caret goes to the end of it.
+ *
+ * `allowPlus` opens the field to `120+45` (§18.5) and is opt-in: the add sheet
+ * parses with `parseAmountExpression` and Settings does not, so a `+` there
+ * would sit in the field looking accepted over a value that reads as null.
+ *
+ * `inputRef` lets a caller that already owns the element share it — the add
+ * sheet does, because its keypad needs the same node to read a selection from.
+ * The two caret restorers cannot fight: only one of them handles any given edit,
+ * and each ignores a tick it did not schedule.
  */
 export function useAmountField({
   onChange,
   normalize,
+  allowPlus = false,
+  inputRef,
 }: {
   onChange: (next: string) => void
   normalize?: (sanitized: string) => string
+  allowPlus?: boolean
+  inputRef?: RefObject<HTMLInputElement | null>
 }) {
-  const ref = useRef<HTMLInputElement>(null)
+  const ownRef = useRef<HTMLInputElement>(null)
+  const ref = inputRef ?? ownRef
   const pendingCaret = useRef<number | null>(null)
   /**
    * Bumped on every edit that needs the caret put back — INCLUDING the ones that
@@ -49,11 +63,15 @@ export function useAmountField({
     if (caret === null) return
     pendingCaret.current = null
     ref.current?.setSelectionRange(caret, caret)
-  }, [caretTick])
+    // `ref` is a stable ref object in both branches; it is in the list only
+    // because the linter cannot see that a caller-supplied one is stable either.
+  }, [caretTick, ref])
 
   const handleChange = useCallback(
     (el: HTMLInputElement) => {
-      const edit = sanitizeAmountInput(el.value, el.selectionStart ?? el.value.length)
+      const edit = sanitizeAmountInput(el.value, el.selectionStart ?? el.value.length, {
+        allowPlus,
+      })
       const next = normalize ? normalize(edit.value) : edit.value
       onChange(next)
       if (next === el.value) {
@@ -65,7 +83,7 @@ export function useAmountField({
       pendingCaret.current = next === edit.value ? edit.caret : next.length
       setCaretTick((n) => n + 1)
     },
-    [onChange, normalize],
+    [onChange, normalize, allowPlus],
   )
 
   return { ref, handleChange }

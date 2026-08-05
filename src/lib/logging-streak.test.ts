@@ -4,6 +4,7 @@ import {
   isRepairable,
   loggingStrip,
   SAVES_PER_MONTH,
+  spentInRange,
   spentOnDay,
   STRIP_DAYS,
 } from './logging-streak'
@@ -369,5 +370,50 @@ describe('spentOnDay', () => {
 
   it('is zero on an empty ledger', () => {
     expect(spentOnDay([], today)).toBe(0)
+  })
+})
+
+describe('spentInRange', () => {
+  it('sums expenses across an inclusive span', () => {
+    const rows = [
+      entry('2026-07-16T01:00:00.000Z', { amount_centavos: -100 }), // Jul 16
+      entry('2026-07-20T01:00:00.000Z', { amount_centavos: -200 }), // Jul 20
+      entry('2026-07-22T01:00:00.000Z', { amount_centavos: -300 }), // Jul 22
+    ]
+    // the rolling week Home shows: today and the six days behind it
+    expect(spentInRange(rows, '2026-07-16', '2026-07-22')).toBe(600)
+    expect(spentInRange(rows, '2026-07-17', '2026-07-22')).toBe(500)
+    expect(spentInRange(rows, '2026-07-20', '2026-07-20')).toBe(200)
+  })
+
+  it('is what spentOnDay is made of, so the two cannot disagree', () => {
+    const rows = [entry('2026-07-22T01:00:00.000Z', { amount_centavos: -1300 })]
+    expect(spentOnDay(rows, '2026-07-22')).toBe(spentInRange(rows, '2026-07-22', '2026-07-22'))
+  })
+
+  it('counts only expenses, and only live ones', () => {
+    const rows = [
+      entry('2026-07-20T01:00:00.000Z', { amount_centavos: -500 }),
+      entry('2026-07-20T02:00:00.000Z', { kind: 'income', amount_centavos: 9000 }),
+      entry('2026-07-20T03:00:00.000Z', { kind: 'transfer', amount_centavos: -400 }),
+      entry('2026-07-20T04:00:00.000Z', { kind: 'adjustment', amount_centavos: -700 }),
+      entry('2026-07-20T05:00:00.000Z', {
+        amount_centavos: -800,
+        voided_at: '2026-07-21T00:00:00.000Z',
+      }),
+    ]
+    expect(spentInRange(rows, '2026-07-20', '2026-07-20')).toBe(500)
+  })
+
+  it('bounds on the Manila day, so a late-evening spend counts on the right one', () => {
+    // 2026-07-22T16:30Z is 00:30 on Jul 23 in Manila.
+    const rows = [entry('2026-07-22T16:30:00.000Z', { amount_centavos: -900 })]
+    expect(spentInRange(rows, '2026-07-16', '2026-07-22')).toBe(0)
+    expect(spentInRange(rows, '2026-07-23', '2026-07-23')).toBe(900)
+  })
+
+  it('ignores an unreadable timestamp rather than counting it somewhere wrong', () => {
+    const rows = [entry('not-a-date', { amount_centavos: -100 })]
+    expect(spentInRange(rows, '2026-07-01', '2026-07-31')).toBe(0)
   })
 })

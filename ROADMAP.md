@@ -8,7 +8,7 @@
 
 ## Status — all phases closed (2026-07-22), Phases 9 and 10 added 2026-07-24, Phases 11-12 2026-07-28
 
-**Live at <https://tin-jar.netlify.app>.** Phases 0–12 are done, plus a Phase 3.5 retrofit. 532 tests — including the first component-render tests, added in §17; lint, build and the AA-contrast script all clean. `git push` to `main` deploys.
+**Live at <https://tin-jar.netlify.app>.** Phases 0–12 are done, plus a Phase 3.5 retrofit. 631 tests — including the component-render tests added in §17 and extended in §18; lint, build and the AA-contrast script all clean. `git push` to `main` deploys.
 
 | Phase | State |
 | ----- | ----- |
@@ -21,13 +21,15 @@
 | 10 The review surfaces | ✅ — History paging + whole-ledger search, **restore from a JSON export**, per-envelope daily allowance, note chips, 6-month trend. See §10. |
 | 11 The Home meter correction | ✅ — the envelope meter drew a target that **punished you for using the app correctly**; replaced with a drain-to-pace meter, and the days-left line deduplicated. See §11. |
 | 12 Whole-app logic audit | ✅ — the money core held; **check-ins only fired on a cold boot**, `repairDay` never checked the budget it was designed around, and `undoRepair` had a DELETE policy but no button. See §12. |
+| 18 QOL pass | ✅ — thirteen changes. The keypad is **back on the add sheet**: §17.9 deleted it over a bug that turned out to be in Settings. Also amount sums, remembered answers, History dates, and undo on a void. See §18. |
 
 This document stops being a plan here and becomes the record of why things are the way they are. The parts worth reading before changing anything: **§1 engineering law**, the **§3** notes on composite ownership FKs and the missing sum-to-10000 check, **§6**'s known CVD gap, and the closure note on Phase 8.
 
-Two lessons this roadmap taught the hard way, both worth keeping:
+Three lessons this roadmap taught the hard way, all worth keeping:
 
 1. **A ticked checklist is not a built product.** Every box for Phases 0–7 was ticked while an entire promised feature (editable percentages, category management) did not exist — because it only ever lived in prose and a file-tree comment, never in a task line. Audit promises against code, not against boxes.
 2. **`[]` is truthy.** `{list && …}` is not a loading guard. On a cold load the local mirror is empty until the first pull; that bug shipped twice, once leaving a picker permanently empty and once crashing a screen outright.
+3. **Fix the screen that was reported, not the screen you were looking at.** §17.9 deleted a whole feature off the add sheet to fix a bug that lived in Settings — §17.10 then found and fixed the real one, on the real screen, without touching the thing that had been removed. Confirm _where_ before deciding _what_. §18.0 put it back.
 
 ---
 
@@ -1355,3 +1357,88 @@ So the fix is a deletion and a merge, not a patch:
 Verified in Edge at 390 px against a seeded ₱5,000 balance: typing `4` gives `4` with the caret after it, `450`, `450.25`, garbage filtered, clear works, no console errors. `useAmountField.test.tsx` covers the rules in jsdom — including the clamp, which had no test at all before.
 
 **One thing the browser run exposed that is not a bug:** on a ledger with a zero balance every keystroke clamps to `0`, because the maximum a target may claim is the balance. That is the §15.6 rule behaving correctly on an empty tin, and it is only reachable before any money has been logged — but if it ever reads as broken, the answer is to disable the inputs and say why, not to loosen the clamp.
+
+## 18. Thirteen quality-of-life changes, and a keypad that came back (2026-08-05)
+
+A QOL pass, chosen off a longer list. Most of it is small; two items are corrections to decisions this document made in the last two sections, and those are the ones worth reading.
+
+The tracking checklist is `QOL-CHECKLIST.md`. 532 → **631 tests.**
+
+### 18.0 The keypad was deleted for the wrong screen's bug
+
+§17.9 removed the on-screen amount pad app-wide, on the strength of one report from a phone. The report was about **Settings → Current money**. The pad was on the add sheet.
+
+The diagnosis in §17.9 was right about the mechanism and wrong about the blast radius, and §17.10 is the proof: it found the _same dead end_ in Settings, arrived at by a different route (`updateValue` running the field through `toFixed(2)` on every keystroke), and fixed it there without any pad being involved. Settings never had a pad. Deleting the pad could not have fixed the screen that was actually broken.
+
+So the pad is back on the add sheet, and Settings keeps the native field §17.10 gave it. What is **not** back is the trap, and both halves of it had to be answered because either one alone was survivable:
+
+- **The pad refuses any key that would leave the field unparseable.** Correct in isolation.
+- **`inputMode="none"` suppressed the OS keyboard** so the pad would not be covered. Also correct in isolation — it is the pad's entire reason for existing, since the keyboard is ~40% of a phone screen and it lands on the category grid the next tap needs.
+- **Every pre-filled amount went through `(c / 100).toFixed(2)`**, so the frequent-amount chips, History's "Fix" and Settings' targets all handed you a string whose centavos were already full. One tap and the pad went permanently, silently dead with no second way in.
+
+The third item is already fixed and stays fixed: `centavosToAmountText` drops a trailing `.00`, so no pre-fill arrives with its centavos spent. That alone kills the reported failure. The other half is new: **the sheet carries a keyboard toggle**, persisted per device, so a refusal is never the end of the road.
+
+That escape hatch started as a **required prop** on `Keypad`, to put "this pad always has a way off it" in the type system rather than in a comment. It ended up somewhere better. The toggle now lives on a row in `AddSheet` that renders under the same `coarse` condition which can show the pad, and sits **outside** the `padOpen` branch — so a pad without an escape hatch is not merely discouraged, it is unrepresentable, and the guarantee also holds in the other direction (the way back to the pad is on the same row). Structure beat the type signature here.
+
+`lib/keypad.ts` came back smaller than it left. `sanitizeTypedAmount` did not return with it: `money.ts` owns sanitising now and §17.10's one-parser rule is not being un-done. `collapseAmountLeadingZeros` moved _into_ `money.ts` and is shared, for the same reason.
+
+### 18.1 The fuzz test found the second deletion-overflow
+
+§17.1's fuzz test found that backspacing the point out of `12345678901.23` merges the centavos into the pesos and produces thirteen integer digits — a _deletion_ that overflows, which is not the shape of overflow anyone guards against.
+
+Adding sums (§18.3) gave it a sibling, and the fuzz test found that one too, on the first run: backspacing the `5` out of `69.5+0.77` leaves `69.` stranded **mid-sum**. A trailing dot at the very end is the documented mid-entry state — it is what pressing `.` looks like before the centavos arrive — but in the middle it is a term nothing will ever complete, so the whole expression stops parsing and the save goes quiet with no visible cause.
+
+The fix is not another special case. `settle()` now asks **`parseAmountExpression` itself** whether a candidate edit is allowed, instead of re-implementing its rules as a bounds check. The promise this module makes is "the pad cannot strand the field in a state the save gate rejects", and the only way to keep that promise without drift is to ask the save gate. The one forgiven state — a trailing dot after a digit, at the end of the string — is now a single named function (`stripTypingDot`) rather than a condition spread across two checks.
+
+### 18.2 Three taps for a two-tap path — and the one that stays three
+
+The money type is required before any save control on the add sheet lights up, and it started at `null` on every open. It is also the same answer on almost every entry. So the "2-tap path" that ROADMAP 3.2 sets a 5-second budget for was really three taps, one of which looked like ceremony.
+
+**It was made to default to the last one saved, and then that was taken back out.** The reversal is the part worth keeping, because the convenience argument was the strongest of the three and it still loses.
+
+§15 exists because untagged money is dishonest. But the failure it was built to prevent is a *gap*, and defaulting introduces a different failure: a **wrong** tag. The first cash spend after a run of online ones gets filed as Online, silently, and the two are not equivalent —
+
+- an untagged row is an honest gap, and the Home card reports it as its own third bucket precisely so the app never invents an answer only the user can give (§15's whole argument);
+- a mis-tagged row is a confident lie, and it is **invisible**. A wrongly-remembered envelope shows up in the split the moment you look at Home. A wrongly-defaulted money type looks exactly like a correctly-picked one, in every screen, forever.
+
+The tap is real and it is the price of the ledger meaning what it says. The envelope memories stay — the transfer pair and the single-envelope income target, both in `lib/entry-prefs.ts` — because their mistakes are legible.
+
+Two rules keep those memories from becoming a liability:
+
+- **It is only written on SUCCESS.** A write that failed is not evidence of anything, and quietly moving a picker on the strength of one would be a second surprise stacked on the error toast. There is a test for this.
+- **Envelope ids are reconciled against the live list, not trusted.** An id whose envelope has since been archived degrades to "nothing remembered" rather than to a picker pointing at a row that no longer exists behind a save button that looks live. That reconciliation cannot happen in a state initialiser, because until the fetch resolves there is no list to check against.
+
+A stored blob written by the build that *did* remember a money type still has one in it. It is simply never read — the field is gone from `EntryPrefs`, so nothing can reach it, and the next write drops it. There is a test pinning that, because "we removed the feature" and "the old data cannot come back" are two different claims.
+
+`ENTRY_PREFS_KEY` is user-scoped and clears on logout; `AMOUNT_INPUT_KEY` is not. The line between them is the one `lib/texture.ts` already argues: "I hold my phone and prefer a pad" describes the device, while "my money is usually cash and my transfers run Savings → Needs" is a description of someone's finances and has no business greeting the next person on a shared laptop.
+
+### 18.3 The rest of the add sheet
+
+- **`120+45`.** One purchase is often several prices, and the alternative to typing the sum is doing the arithmetic in your head first — which is where a mistyped total comes from. `parseAmountExpression` sums the terms; each one goes through `parseAmountToCentavos`, so every existing rule holds per term, and **the sum is bounds-checked too** (twelve terms at the ceiling are individually legal and jointly nonsense). A trailing `+` is explicitly _not_ an error: that is the field mid-thought, and greying the grid out there would punish you for knowing there is more to come. The total is shown as working (`120 + 45 = ₱165.00`) because it is what actually gets saved. `allowPlus` is opt-in, so Settings — which parses with `parseAmountToCentavos` — cannot end up with a `+` sitting in a field over a value that reads as null.
+
+  **`+ add` is not on the pad, and the reason is only visible on a phone.** It started in the pad's footer, outside the 3×4 grid because three columns is what makes the pad thumb-shaped. But `inputMode="decimal"` gives a phone a numeric keyboard with **no `+` key at all** — so a `+` that belonged to the pad made sums silently impossible for anyone who had taken the keyboard escape hatch, which is precisely the person already having trouble. It moved to the shared row above the pad. The argument that kept it out of the grid — it is an *action*, not a digit — turns out to say it belongs to the **field** rather than to the pad, and following it one step further closed a gap nobody had reported yet. A laptop needs no button: a hardware keyboard has a `+` on it.
+- **A category filter**, past twelve chips. Below that the grid _is_ the filter. It does **not** re-sort what survives — the grid is ranked by use, and re-ordering on each keystroke would move the chip you are aiming at as you type the letter that was going to select it. A no-match hands the typed name straight to `+ Other`, already filled in.
+- **A `⇄` between the transfer pickers.** It earns its place _because_ of the memory: the remembered pair is right about which two envelopes and wrong about the direction roughly half the time.
+
+### 18.4 History
+
+- **Dates**, which this screen simply did not have — kinds and categories only, so "what did I spend last week" was unanswerable on the one screen built to answer it. Four presets plus two date inputs. The comparison is lexical on Manila day keys: they are zero-padded and fixed-width, so string order _is_ calendar order and no `Date` arithmetic happens near a month boundary. A date bound counts as an active query, which is what makes the whole ledger get read instead of the loaded page — "last month" over the newest 200 rows would answer a question about last month with whatever happened to be in memory.
+- **Undo on a void.** Every other confirmation in the app offers one (save, streak repair, recurring catch-up); a void that could not be taken back taught you the toast was safe in three places and then wasn't in the fourth. **This needed no migration**, which is worth recording: `001_core.sql` revokes UPDATE on entries and grants back exactly `(voided_at, void_reason)`, so writing null into that pair is already inside the grant. The schema's rule is "the only mutation is the voiding pair", not "voiding is one-way". Nor does it break rule 3 — `voided_at` is a flag on a row that never went anywhere, so clearing it rewrites no history and creates no entry. `unvoid_group` is a **third** outbox op rather than a void with a null in it, and it retries the same way the other two do: the push filters on rows that are currently voided, so a replay after a lost response updates zero rows. `describeOp` in Settings is now a `switch` with no default, so a fourth op is a compile error on the one screen whose job is telling you what you are about to discard.
+- **Month separators**, suppressed when the whole list is one month.
+- **Envelope filters**, so the one Home now sends is legible and clearable rather than invisible.
+- **The sticky day header no longer collides with the sync pill.** The pill is `fixed` at `top-3` with a higher z-index, so when a write was stuck — exactly when you come to History to check something — it parked itself on the day header. `SyncPill` publishes `--sticky-top` on the document while it is visible; the header reads it. Written to the document rather than threaded through the router, because the readers are sticky headers on screens the pill knows nothing about.
+
+### 18.5 Home and Insights
+
+- **Envelope cards open their own entries.** Insights already did this for categories; envelopes were the missing half, and Home is where the question gets asked. Only the card _header_ is the button — the meter carries its own `aria-label` and a red card carries a "cover from" button, and nesting either inside a button is both invalid and a mis-tap waiting to happen.
+- **A weekly number**, beside the daily one. Rolling seven days rather than week-to-date: a week-to-date figure is near-zero every Monday and near-complete every Sunday, so it says more about the weekday than about the spending — and it sits next to a daily allowance whose whole job is being comparable from one glance to the next. `spentOnDay` is now literally `spentInRange` with both bounds equal, so the two cannot drift apart on what counts as spending.
+- **Insights' month label is a picker.** Paging back a year took twelve taps, and ‹ disables itself at the first month with anything in it — so the arrows knew where the ledger began and would not say. Bounded at both ends by the same rules the arrows enforce, with a hard iteration cap so a corrupt `earliestMonth` from the future cannot build a list forever.
+
+### 18.6 Still open
+
+- ~~**None of this ran in a real browser.**~~ **Done before the pass was committed.** Edge at 390×844 with touch emulation: the pad renders on a coarse pointer with `inputMode="none"`; typing `1250`, tapping to caret 2 and pressing `9` gives `12950` with the caret at 3 — §17.1's bug does not recur on the restored pad; hold-⌫ clears; `+ add` leaves `120+` in the field before anything else is typed; `120+45` draws `120 + 45 = ₱165.00` and stays live while a term is edited (`120 + 4 = ₱124.00`); a single amount draws no working line; the keyboard toggle flips `inputMode` to `decimal`, hides the pad, and **survives a full reload**; a 2-tap save closes the sheet. No console errors. The caveat §17.6 and §17.9 both raise still stands for everything not on that list.
+- **A void can only be undone from its toast**, which lasts eight seconds. A mis-tap noticed a minute later has no path back, and `unvoidGroup` exists and would serve it. A permanent "restore" button on every voided entry was deliberately not built in this pass — it changes the ledger's character rather than adding a convenience, and that is a decision to make on purpose rather than as a side effect of adding an undo.
+- ~~**`pushUnvoidGroup` has no RLS-probe coverage.**~~ **Closed before the pass was committed — and it was the right thing to have worried about.** The claim was load-bearing and had no execution behind it: a wrong reading of `revoke update … grant update (voided_at, void_reason)` would have meant every undo applied to the mirror, looked like it worked, and then sat at the head of the outbox failing forever — **blocking every money write queued behind it**, which is a data-loss-shaped failure dressed as a UI convenience. The probe now has an `un-voiding (§18)` block against real Postgres, in its own group so the reset block's assertions are untouched: the grant does permit writing `null` back, the row comes back live with its reason cleared, a replay updates zero rows, and editing an amount is *still* refused. Observed, not reasoned about. **A migration would have dragged the probe along with it; this needed none, which is exactly how the gap opened** — worth remembering the next time something ships without one.
+- **`--sticky-top` has one publisher and one reader**, and nothing asserts they agree. If the pill's height changes, the header's offset goes wrong silently.
+- **`History.tsx` has no render test, and this pass proved what that costs.** A JSX comment placed illegally inside a `&&` expression left the file with an outright **syntax error** — and `npm test` reported 631 passing, because nothing imports that module. `tsc` caught it; the suite structurally could not. The same is true of `Home.tsx`'s and `Insights.tsx`'s changes here. Green tests say nothing about a screen no test renders, and this pass touched three of them. **Run `tsc` as well as the suite** until they have one.
+- **The category filter threshold is a guess.** Twelve is where a wrapped grid stops fitting a phone screen in the layouts checked by eye, not a measured number.

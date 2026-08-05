@@ -25,19 +25,32 @@ export const OPENING_SKIPPED_KEY = 'tin.opening-skipped'
 /** Reduced-texture display preference (lib/texture.ts). */
 export const TEXTURE_KEY = 'tin.texture'
 
+/** What the add sheet remembers between openings (lib/entry-prefs.ts). */
+export const ENTRY_PREFS_KEY = 'tin.entry-prefs'
+
+/** Keypad or the OS keyboard for amounts (lib/entry-prefs.ts). */
+export const AMOUNT_INPUT_KEY = 'tin.amount-input'
+
 /**
  * Keys that describe the PERSON, and so must not survive a logout.
  *
- * TEXTURE_KEY is deliberately absent: it describes the device and the eyes
- * looking at it, not the account. lib/texture.ts argues that case at length, and
- * clearing it on logout would reset the screen for whoever set it in order to
- * protect nothing.
+ * TEXTURE_KEY and AMOUNT_INPUT_KEY are deliberately absent: they describe the
+ * device and the eyes and thumb in front of it, not the account. lib/texture.ts
+ * argues that case at length, and clearing either would reset the screen for
+ * whoever set it in order to protect nothing.
+ *
+ * ENTRY_PREFS_KEY is here, and the line between it and AMOUNT_INPUT_KEY is the
+ * whole point of the distinction: "I hold my phone and prefer a pad" is about
+ * the device, while "my money is usually cash and my transfers usually run
+ * Savings → Needs" is a description of a person's finances and has no business
+ * greeting the next person on a shared laptop.
  */
 export const USER_SCOPED_LOCAL_KEYS = [
   MONEY_TYPE_SNAPSHOT_KEY,
   LAST_EXPORT_KEY,
   DISMISSED_GAP_KEY,
   OPENING_SKIPPED_KEY,
+  ENTRY_PREFS_KEY,
 ] as const
 
 /**

@@ -86,6 +86,7 @@ export function Insights() {
   const [earliestMonth, setEarliestMonth] = useState<string | null>(null)
   const [streak, setStreak] = useState<StreakState | null>(null)
   const [trend, setTrend] = useState<SpendTrend | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -231,6 +232,31 @@ export function Insights() {
 
   const atEarliest = earliestMonth !== null && monthKey <= earliestMonth
 
+  /**
+   * Every month that could be shown, newest first.
+   *
+   * Paging back a year took twelve taps, and ‹ disables itself at the first
+   * month with anything in it — so the arrows knew where the ledger began and
+   * would not tell you. This lists it.
+   *
+   * Bounded at BOTH ends by the same rules the arrows already enforce, so the
+   * picker can never reach somewhere the arrows refuse to go. With no ledger yet
+   * (`earliestMonth === null`) it is just the current month, which is also every
+   * month there is.
+   */
+  const selectableMonths = useMemo(() => {
+    const months: string[] = []
+    let key = currentMonth
+    // A hard stop as well as the bound: a corrupt `earliestMonth` from the
+    // future would otherwise walk backwards forever building a list.
+    for (let i = 0; i < 240; i += 1) {
+      months.push(key)
+      if (earliestMonth === null || key <= earliestMonth) break
+      key = prevMonthKey(key)
+    }
+    return months
+  }, [currentMonth, earliestMonth])
+
   // One tap from "Food was 32% of July" to the entries behind it. History owns
   // the filter UI; this hands it a starting query through router state rather
   // than duplicating a category picker here.
@@ -255,9 +281,18 @@ export function Insights() {
           >
             ‹
           </button>
-          <span className="w-24 text-center text-xs font-semibold" aria-live="polite">
-            {monthLabel(monthKey)}
-          </span>
+          {/* The label was a `<span>` sitting between two arrows — the one part
+              of this control that names where you are, and the only one you
+              could not use to get anywhere. */}
+          <button
+            type="button"
+            onClick={() => setPickerOpen((open) => !open)}
+            aria-expanded={pickerOpen}
+            aria-label={`${monthLabel(monthKey)} — pick a month`}
+            className="press w-24 text-center text-xs font-semibold"
+          >
+            <span aria-live="polite">{monthLabel(monthKey)}</span>
+          </button>
           <button
             type="button"
             aria-label="Next month"
@@ -269,6 +304,39 @@ export function Insights() {
           </button>
         </div>
       </div>
+
+      {pickerOpen && (
+        <div className="card flex max-h-64 flex-wrap gap-1.5 overflow-y-auto p-3">
+          {selectableMonths.map((key) => {
+            const selected = key === monthKey
+            return (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => {
+                  setMonthKey(key)
+                  setPickerOpen(false)
+                }}
+                className={`press min-h-9 rounded-xl border px-2.5 py-1.5 text-xs ${
+                  selected
+                    ? 'border-accent bg-accent/15 font-semibold text-accent'
+                    : 'border-line text-ink-soft'
+                }`}
+              >
+                {shortMonthLabel(key)} {key.slice(0, 4)}
+              </button>
+            )
+          })}
+          {/* Says where the list stops and why, so a short list reads as the
+              beginning of the ledger rather than as a picker that is broken. */}
+          <p className="mt-1 w-full text-[0.625rem] text-ink-mute">
+            {earliestMonth === null
+              ? 'Nothing logged yet — this month is all there is.'
+              : `Back to ${monthLabel(earliestMonth)}, where your ledger starts.`}
+          </p>
+        </div>
+      )}
 
       {/* The way home. Paging back six months took six taps to undo, and ›
           disables itself the moment you arrive, so there was no signal that you
