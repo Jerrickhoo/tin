@@ -8,7 +8,7 @@
 
 ## Status — all phases closed (2026-07-22), Phases 9 and 10 added 2026-07-24, Phases 11-12 2026-07-28
 
-**Live at <https://tin-jar.netlify.app>.** Phases 0–12 are done, plus a Phase 3.5 retrofit. 512 tests; lint, build and the AA-contrast script all clean. `git push` to `main` deploys.
+**Live at <https://tin-jar.netlify.app>.** Phases 0–12 are done, plus a Phase 3.5 retrofit. 544 tests — including the first component-render tests, added in §17; lint, build and the AA-contrast script all clean. `git push` to `main` deploys.
 
 | Phase | State |
 | ----- | ----- |
@@ -1129,7 +1129,7 @@ Rewritten, and the round trip is now covered where it was not: a pull that omits
 
 - **No render test for the money card.** The three-bucket arithmetic and the snapshot precedence are unit-tested; that Home *draws* them, and that the drift line appears when targets disagree with the balance, are not. Same gap §14.5 names for Home generally.
 - **No backfill for untagged history.** By design — the app cannot know how a coffee in March was paid — but it means the untagged line will be large for existing users and there is no bulk-tagging tool. A "tag these N entries" flow in History is the obvious next step and is not built.
-- **Migration 005 has to be applied by hand.** The client tolerates its absence on both the entry pull and the template fetch, so nothing breaks in the window; but until it is run, money types still do not persist to the server. **This is the deploy-order bite §9.6 warned about, and it is the one step that cannot be skipped.**
+- **Migration 005 has to be applied by hand.** The client tolerates its absence on both the entry pull and the template fetch, so nothing breaks in the window; but until it is run, money types still do not persist to the server. **This is the deploy-order bite §9.6 warned about, and it is the one step that cannot be skipped.** *(Applied 2026-08-05 — see §17.8.)*
 
 ---
 
@@ -1185,5 +1185,127 @@ The part that matters most is the **backup button inside the flow**. "Export fir
 
 - **No render test for the danger panel.** `isResetConfirmed` and `describeResetSummary` are unit-tested and the local clear is covered against a fake IndexedDB, but that the button is *disabled* until the phrase is typed is one JSX expression with nothing asserting it. Same gap §14.5 and §15.10 name — the project still has no component-render harness.
 - **The server half is only covered by the RLS probe**, which needs live credentials and is run by hand. There is no test that `reset_account` deletes in an FK-safe order; a future table with a `RESTRICT` reference to `entries` would break it at runtime, not at CI.
-- **Migration 006 has to be applied by hand**, like 005. The client turns the missing-function error into a plain sentence ("this app is newer than its database") and deletes nothing, so the window is safe — but the danger zone does not work until it is run.
+- **Migration 006 has to be applied by hand**, like 005. The client turns the missing-function error into a plain sentence ("this app is newer than its database") and deletes nothing, so the window is safe — but the danger zone does not work until it is run. *(Applied 2026-08-05 — see §17.8.)*
 - **A reset does not propagate to other devices, and cannot with this sync design.** The delta pull carries changes forward by `updated_at`; a deleted row has no `updated_at` to carry, so a second device keeps rendering the old ledger indefinitely and will push any queued write back into the freshly-reset account. Tombstones would fix it properly and are wildly disproportionate here — the whole point of §6's "dumb queue instead of a CRDT research project". The panel tells the user to log out and back in on other devices, which wipes those mirrors wholesale (6.6). **This is an instruction, not a guarantee**, and it is the sharpest edge left on the feature.
+
+---
+
+## 17. Four quality-of-life fixes, and the app's first render tests (2026-08-05)
+
+Four requests, three of them defects wearing polish clothes. The common thread is that every one of them was invisible from a desk: a caret you can only move with a finger, a back button a laptop does not have, a card that only overstays if you live with it for a week.
+
+### 17.1 The keypad ignored the caret it invited you to move
+
+The amount field carries `inputMode="none"` on a coarse pointer — that is the whole reason the custom pad exists (see the header of `lib/keypad.ts`: the OS keyboard covers the category grid the next tap needs). But it is still a real `<input>`, focused, drawing a caret, and happy to move that caret wherever you tap.
+
+`applyKeypadKey` appended and backspaced **at the end of the string, unconditionally**. So on a phone — where tapping into the number is the *only* way to reach a digit inside it, there being no keyboard — the field accepted your tap, showed the caret where you put it, and then typed somewhere else. Fixing the 2 in ₱1,250 meant deleting four digits and retyping them.
+
+`applyKeypadKeyAt(current, key, start, end)` returns `{ value, caret }`: insert at the caret, backspace the character before it, replace a selection whole. `AddSheet` restores the caret in a `useLayoutEffect` (before paint, so it never flickers to the end and back) and re-focuses the field, which is what brings the caret back after a pad key moved focus to a button. The pad's keys also `preventDefault` on mousedown so they do not steal focus in the first place.
+
+The old append-at-the-end export survives as a one-line wrapper, and Settings' money targets keep using it deliberately: those inputs render **comma-grouped** text, so a caret offset in what is displayed does not address the same character in the digits underneath. Appending is the only honest thing to do there.
+
+Three more things in the same field:
+
+- **Hold ⌫ to clear.** Clearing a mistyped amount was up to twelve taps, on the control the entire 2-tap path runs through. A long press rather than a thirteenth key — the three-column grid is what makes the pad thumb-shaped, and the gesture belongs on the key that already means "undo what I typed". The press that follows the hold is swallowed, or letting go would immediately backspace the field it just emptied.
+- **Typed and pasted text is filtered on the way in.** `₱1,250.00` pasted out of a chat, or a stray letter from a hardware keyboard, used to sit in the field with the save button silently dead and one line of red as the only explanation. `sanitizeTypedAmount` drops what cannot belong and carries the caret to wherever its character ended up — and it only repositions the caret when something was actually dropped, so ordinary typing is untouched.
+- **The hint line says the two things you cannot see.** It reads "hold delete", not "hold ⌫": neither pixel face covers U+232B, so it painted as a tofu box in the browser — and the key is drawn as a *wedge* anyway, so naming a character that appears nowhere on the pad pointed at nothing.
+
+**A fuzz test found a real bug in the fix.** 4,000 random key/caret pairs asserting the field stays parseable turned up `53630167534607` — fourteen integer digits. Backspacing the decimal point out of `12345678901.23` **merges the centavos into the pesos**, which is a *deletion* that overflows the twelve-digit cap. Not the shape of overflow anyone thinks to guard. Every path now funnels through one `settle()` that collapses leading zeros and then bounds-checks, insertions and deletions alike. It takes a ₱10-billion ledger to reach; "the pad cannot strand the field in an unsaveable state" is either true or it is not.
+
+### 17.2 Back navigated away from a half-typed entry
+
+On Android — and on an iOS swipe — back is what "cancel" means. With the add sheet open over Home it did the one thing it must not: left the screen, threw out the amount, and (the sheet living in `AppShell` rather than a route) often left it open on top of wherever you landed.
+
+`useBackDismiss` pushes one dummy history entry at the same URL when a sheet opens and pops it again when the sheet closes any other way. It lives in `BottomSheet`, so **all five sheets** in the app inherit it — add, opening balances, envelope editor, category editor, recurring template — rather than the one that was complained about.
+
+Two rules keep it from fighting react-router:
+
+- **The existing `history.state` is spread through the push.** `pushState` replaces state wholesale, and nulling react-router's `idx`/`key` out from under it on every sheet open is not a trade worth making for a dismissal. `AppShell`'s PWA-shortcut cleanup was passing a literal `null` for the same reason and now carries state forward too — it runs *after* the sheet's push, child effects going first, so it was wiping the marker on exactly the deep link that opens a sheet.
+- **Back is only consumed when the state landed on is no longer ours.** Navigate with a sheet open and its entry ends up buried; coming back *to* it must read as "here is the sheet again", and the close that follows must not silently steal a real navigation.
+
+The sheet id is held in a ref rather than minted per effect run, which is what makes StrictMode's double-invoke benign: with a fresh id each time, the cleanup's `back()` and the second run's `push()` left the sheet watching for an id no longer on the stack, and back navigated away exactly as before — in development only, which is the worst place for a bug to hide.
+
+### 17.3 "START FROM THE TRUTH" outstayed its welcome
+
+This card has now been wrong in **both** directions, and the second one is instructive.
+
+Gated on `hasAnyEntries` it was a one-shot door: log a coffee on day one and the only entry point to the opening-balances sheet was gone forever, with no path to it from Settings or History. The fix was to gate it on `hasOpeningBalances` instead — correct, and it made the card **permanent**. Decline it and a prompt headed "START FROM THE TRUTH" sat on the screen you read ten times a day, for as long as you kept declining, telling you to begin something your envelopes plainly already held.
+
+It is now an offer with a shelf life: it retires after entries on **three distinct Manila days**. Days, not entries — a first session easily produces six entries and is still the session where "I should tell it what's in my GCash" has not occurred to you yet. Three days means the app has survived being closed and reopened twice. There is also a plain **"Skip"**, which outranks the window, because an answer that expires is not an answer.
+
+**The expiry is only safe because of the other half.** Settings → Setup now holds a permanent door, so nothing becomes unreachable this time. That door needed a warning the old card never did: a second save **adds** a second adjustment group rather than replacing the first, so the balances double. The card says so when the group already exists, and the sheet repeats it above the inputs.
+
+`OpeningBalancesSheet` moved to `features/entries/` in the process — it is a ledger write, and with two callers in different features, leaving it under `home/` meant Settings importing across a feature boundary.
+
+### 17.4 "Other", and where a new category comes from
+
+The starter set is seven categories; real spending is not. Anything outside it went into the note field — which lives behind a disclosure the 2-tap path never opens — filed under whichever chip was closest, and Insights then reported that chip.
+
+A dashed **`+ Other`** chip closes the grid. Name the thing, pick the envelope it comes out of, save: it becomes a **real category**, so it is a one-tap chip from the next entry onward and appears under its own name in the breakdown. Same thing Settings' category manager does, reached from the moment you actually need it.
+
+The chip itself is deliberately **not** disabled by the save guards the category chips carry — it opens a panel, it does not save — while its own button carries all of them (§15.8 is about save controls that look live and are not).
+
+Three collisions, each with one right answer:
+
+- **The name already exists here** → file under it, no write. Matched case-insensitively in the loaded list, because the unique constraint is case-*sensitive* and without this "food" under Needs becomes a second chip beside "Food". This path also works offline, since no category has to be created.
+- **It exists but is archived** → the mirror hides it, so the insert hits `23505`; `ensureCategory` adopts the row and un-archives it. Naming a category again is the clearest possible statement that you want it back, and the alternative is a name you can neither use nor create.
+- **You are offline** → said up front, in the panel, rather than after the tap. Entries are outbox-backed and save in a dead spot; `db/config.ts` writes go straight to Supabase and cannot.
+
+### 17.5 The render harness the last three sections kept asking for
+
+§14.5, §15.10 and §16.5 all close with the same admission: no component-render test exists, so anything only true in a DOM is unverified. Two of this pass's four items are *entirely* DOM behaviour — a caret on a live input, a history entry and a popstate — so the gap stopped being theoretical.
+
+`vite.config.ts` already documented the opt-in (`// @vitest-environment jsdom`, and `.tsx` in the include glob or the file is silently not collected). Two files now use it: `BottomSheet.test.tsx` covers the back-button contract in all four of its states, and `AddSheet.test.tsx` renders the real sheet against stubbed db modules and drives the pad. 512 → **544 tests.**
+
+One trap worth writing down: `useCoarsePointer` reads `window.matchMedia`, which jsdom does not implement at all. The hook's optional call means it returns `false` — so without a stub the keypad is **never rendered** and every test of it passes vacuously.
+
+Verified in a real browser as well (Edge at a 390 px touch viewport, against a throwaway route that seeded the Dexie mirror): typing `1250`, tapping the caret to position 2 and pressing 9 gives `12950`; a 700 ms hold on ⌫ empties the field; the Other panel lays out inside the sheet; console clean throughout.
+
+### 17.6 Two more, and the bug that only existed in development
+
+Added in the same pass, after the four above.
+
+**"Fix" was still making you re-pick the category.** It carried the amount, note, date and money type; the one field it dropped is the one that *commits* the entry, since tapping a category is what saves an expense. So a correction reopened complete except for the control you have to find — in a grid ranked by use, where the category you want is not necessarily near the front.
+
+The sheet now surfaces it as a single `Save ₱200.00 to Transport` button above the grid, with the chip itself marked (`aria-pressed`, full-strength border) so scrolling still shows where the entry came from. The grid is deliberately **not** reordered: it is ranked by use, and quietly moving a chip to the front would make every other chip's position depend on how you happened to open the sheet.
+
+The category is looked up in the **live** list, not trusted from the prefill, so an archived one yields nothing and the grid behaves exactly as before. Offering to re-file into a retired category would be the one place in the app that puts an archived category back in front of you.
+
+**The drag handle finally does something.** It has been drawn since Phase 3 as a touch affordance for a gesture that was never wired up — which is worse than drawing nothing, because it teaches you that pulling down does not work here.
+
+The handle only, not the whole panel: the sheet scrolls and the add sheet is taller than a phone, so a drag starting anywhere in the body would compete with the scroll on every touch. The usual escape hatch (allow it only at `scrollTop === 0`) still fights the keypad and the category grid, both of which are twelve-plus tap targets you swipe a thumb across. The grab area is the full sheet width and ~28 px tall — the 4 px bar is the sign, the strip is the target — and `touch-none` on it is load-bearing: without it the browser claims the vertical drag for scrolling and the moves stop arriving the moment the finger travels far enough to mean anything.
+
+Dismiss at 88 px, or on a flick (>24 px above 0.55 px/ms) so a decisive pull does not have to be a long one. Below both it snaps back, because the failure that matters is a thumb brushing the handle on the way to the mode tabs and throwing away a half-typed entry. The transform is written straight to the node during the drag rather than held in state — a React render per frame to move one element is what makes a cheap phone feel like a cheap phone.
+
+#### The StrictMode traversal race
+
+Driving the sheet in a real browser found §17.2 closing itself **the instant it opened**, in development only. It is worth writing down because every test was green and the production build was fine.
+
+React StrictMode runs each effect twice in development — run, clean up, run. The first version of `useBackDismiss` pushed an entry on each run and called `history.back()` in the cleanup between them. **Chrome resolves a traversal against the entry it was called from**, not the one current when the traversal task actually runs: so the `back()` issued while sitting on entry A targeted the entry *beneath* A, run 2 then pushed B on top, and the traversal landed two entries down on something carrying no marker — which `onPop` read, correctly by its own rules, as a dismissal.
+
+**jsdom resolves the delta the other way**, against the current entry. So the jsdom tests modelled the sequence faithfully and still passed. Two engines, two defensible readings of the same spec, and the test environment happened to pick the one where the bug does not appear.
+
+The fix does not reason about the delta at all. The pop is **deferred by a tick** so an immediately-following re-run can cancel it, and the push is **skipped** when the hook already owns the current entry. A double-invoke is then a genuine no-op rather than a race. The regression test asserts *one push and no traversal* — deliberately not where you land, because that is exactly the assertion jsdom would keep passing.
+
+The lesson generalises past this hook: **a browser-history test in jsdom verifies your bookkeeping, not the browser's.** Anything that depends on when a traversal resolves has to be driven in a real engine.
+
+### 17.7 Still open
+
+- **The Home card and the Settings card have no render test.** `shouldOfferOpeningBalances` is unit-tested and the sheet is not, so "the offer disappears on day three" and "the double-save warning appears" are both still JSX with nothing asserting them. The harness exists now — this is a gap of coverage, not of capability.
+- **`ensureCategory`'s archived-revival path is not covered.** It needs a live Postgres to produce the `23505` the branch keys on; the RLS probe is where it would go.
+- **The back-dismiss leaves one stale history entry** if a sheet is closed while it is buried under a navigation. Popping it would mean undoing that navigation, which is worse; the entry is at the same URL, so the cost is one invisible back press.
+- **The drag never runs in CI against a real compositor.** The jsdom tests fire synthetic pointer events, so the thresholds, the `touch-none` scroll hand-off and the snap-back transition are verified by eye in a browser and by nothing afterwards. The same caveat §17.6 draws about traversals applies here: jsdom confirms the arithmetic, not the gesture.
+- **The RLS probe does not cover `money_type` at all** — zero references to it in the file. It is the thing you re-run after every migration, so it is easy to read a green probe as "the migration worked" when for 005 it proves nothing. Verifying that one needs `information_schema.columns` or the app itself.
+
+### 17.8 Migrations 005 and 006 applied (2026-08-05)
+
+Both were outstanding since the passes that wrote them, and both are now on the live database — §15.10's "the one step that cannot be skipped" and §16.5's counterpart are closed.
+
+Applied by hand through the dashboard SQL editor rather than `supabase db push`, and that choice is worth recording: the CLI applies every migration the remote history table does not list, and `001_core.sql` uses plain `create table` with no `if not exists`. On a database that already has those tables it fails partway. 005 and 006 are both idempotent on their own (`if not exists`, guarded `do $$` blocks, `create or replace`), so pasting them is safe and re-pasting them is a no-op.
+
+Verified in four places, because each covers something the others do not:
+
+- **`information_schema.columns`** — two `money_type` columns, on `entries` and `recurring_templates`. The only check that covers 005, since the probe does not.
+- **`pg_proc`** — `reset_account` present, `prosecdef = true`, `proconfig = {search_path=}`. That empty search path is the security property, not a formatting detail.
+- **The RLS probe** — 38 checks, all green, including the eight-line reset block. Everywhere else the database enforces isolation; there the function does, and this is the only thing that says it aims correctly.
+- **Real rows, both directions.** A schema check proves the column exists, not that anything uses it — and §15.1's failure was a *silent* one at both ends: the push stripped the field after a 42703 and the pull never selected it, so the tag survived about a minute and then vanished with no error anywhere. Server rows written since carry real values (an income's three legs all tagged `reallife`, which is §15.4's both-legs fix holding), and History draws the badges from what it pulled back. Push and pull, closed.
