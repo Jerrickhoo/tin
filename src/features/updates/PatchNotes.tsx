@@ -45,10 +45,10 @@ export function PatchNotes() {
               </h2>
               <p className="mt-3 text-sm leading-relaxed text-ink-soft">{release.summary}</p>
               <Link
-                to="/settings#appearance"
+                to={release.action.to}
                 className="press mt-4 inline-block rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-on-accent"
               >
-                Try a theme →
+                {release.action.label}
               </Link>
             </header>
 

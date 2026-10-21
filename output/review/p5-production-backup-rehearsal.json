@@ -1,0 +1,42 @@
+{
+  "checked_at": "2026-10-21T19:13:43.592Z",
+  "passed": true,
+  "read_only_production": true,
+  "backup_verified": true,
+  "local_restore_verified": true,
+  "all_fields_preserved_after_rehearsal": true,
+  "invariants_passed": true,
+  "tables": 11,
+  "entries": 423,
+  "table_counts": {
+    "profiles": 1,
+    "envelopes": 4,
+    "categories": 16,
+    "ledger_groups": 363,
+    "entries": 423,
+    "recurring_templates": 0,
+    "streak_saves": 1,
+    "checkin_days": 79,
+    "obligations": 0,
+    "ledger_operations": 0,
+    "ledger_audit": 0
+  },
+  "migrations": [
+    {
+      "file": "011_schedules.sql",
+      "sha256": "34e6339a64f4f4e2bbe0223cbc4639945166ac411d69bd0f65ab63498a927f03"
+    },
+    {
+      "file": "012_finite_schedule_obligations.sql",
+      "sha256": "bac08a3fe89ba52a6246cf3aca84d7f7e8f95272454b4aff526abf6554797911"
+    },
+    {
+      "file": "013_future_schedule_terms.sql",
+      "sha256": "6161fdabb6de69a6f6c7d0eb36e57aa070794dc87e097dc4619ce6a76ae2edf2"
+    },
+    {
+      "file": "014_schedule_command_bounds.sql",
+      "sha256": "e60ffe79a688531bba2f1bf9777dfd9f6701355aebe85fcd0d2c7248161b1c77"
+    }
+  ]
+}

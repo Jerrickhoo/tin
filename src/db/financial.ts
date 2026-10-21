@@ -14,6 +14,7 @@ import { applyLocalFinancialOperation, financialCapability, localDb } from './de
 import { probeFinancialCapability } from './remote'
 import { requireBudgetCapability } from './budget'
 import { requireGoalCapability } from './goals'
+import { requireScheduleCapability } from './schedules'
 import { afterBudgetAudit, afterOperationRows, plannedCapture } from '../lib/goal-operations'
 import { goalHeads } from '../lib/goals'
 import { uuidv5 } from '../lib/uuidv5'
@@ -45,6 +46,8 @@ export function financialMetadata(
 
 export async function commitFinancial(operation: FinancialOperation): Promise<void> {
   await requireFinancialCapability()
+  if (operation.schedule_events?.length || operation.audit?.some((a) => a.details.schedules))
+    await requireScheduleCapability()
   const db = await localDb(),
     replay = await db.financialJournal.get(operation.id)
   if (replay && !operation.goal_events) {

@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { checkGoalsSql } from './check-goals-sql.mjs'
+import { checkSchedulesSql } from './check-schedules-sql.mjs'
 process.on('uncaughtException', (error) => {
   console.error(error.message, error.where ?? '')
   process.exit(1)
@@ -12,7 +13,12 @@ process.on('uncaughtException', (error) => {
 const { PGlite } = await import(
   process.argv[2] ? pathToFileURL(process.argv[2]).href : '@electric-sql/pglite'
 )
-const db = new PGlite()
+const { uuid_ossp } = await import(
+  process.argv[2]
+    ? new URL('./contrib/uuid_ossp.js', pathToFileURL(process.argv[2])).href
+    : '@electric-sql/pglite/contrib/uuid_ossp'
+)
+const db = new PGlite({ extensions: { uuid_ossp } })
 const user = randomUUID(),
   other = randomUUID(),
   env = randomUUID(),
@@ -597,5 +603,6 @@ await db.query(
 )
 passed++
 passed += await checkGoalsSql(db)
+passed += await checkSchedulesSql(db)
 await db.close()
 console.log(`Financial SQL rehearsal passed (${passed} assertions; disposable PostgreSQL only).`)

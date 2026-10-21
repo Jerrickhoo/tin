@@ -2,10 +2,47 @@ import { PATCH_NOTES_READ_KEY } from './local-keys'
 
 export const PATCH_NOTES = [
   {
+    id: '2026.10.22.p5',
+    date: '2026-10-22',
+    title: 'Know what is coming due.',
+    summary:
+      'Subscriptions and installment plans now have a home in Upcoming, with payments you review before recording.',
+    action: { to: '/recurring', label: 'Open Upcoming →' },
+    sections: [
+      {
+        kind: 'added',
+        label: 'Upcoming & installments',
+        items: [
+          'Create subscriptions with a billing day, payment account and category. Due dates and in-app reminders never deduct money.',
+          'Track finite installment plans, partial payments, entered fees and reviewed early payoff. Creating a plan records no upfront expense.',
+          'Link an already recorded expense, open the same payment in History, or void it to reopen the unpaid amount.',
+        ],
+      },
+      {
+        kind: 'improved',
+        label: 'Balances & backups',
+        items: [
+          'See account funds and budget after reservations separately. Held subscription money reduces available spending once.',
+          'Reservations, schedule revisions and payment links survive offline reloads, sync and JSON backup/restore.',
+          'Existing auto-post templates keep their behavior until you review conversion to payment confirmation.',
+        ],
+      },
+      {
+        kind: 'fixed',
+        label: 'Payment safeguards',
+        items: [
+          'Duplicate confirmations cannot record a second payment. Paid terms retain their original amounts after future price changes.',
+          'Subscription pause and cancel controls preserve actual history. Installment obligations remain visible until paid.',
+        ],
+      },
+    ],
+  },
+  {
     id: '2026.10.21.p4',
     date: '2026-10-21',
     title: 'A fresh look. A clearer ledger.',
     summary: 'More ways to make Tin yours, and better tools for keeping your money honest.',
+    action: { to: '/settings#appearance', label: 'Try a theme →' },
     sections: [
       {
         kind: 'added',

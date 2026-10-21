@@ -15,9 +15,15 @@ async function main() {
   if (!process.env.npm_execpath) throw new Error('Run this check through npm run check.')
   for (const args of [
     ['audit', '--audit-level=moderate'],
-    ...['lint', 'format:check', 'check:contrast', 'check:tokens', 'test', 'check:guards'].map(
-      (name) => ['run', name],
-    ),
+    ...[
+      'lint',
+      'format:check',
+      'check:contrast',
+      'check:tokens',
+      'check:sql',
+      'test',
+      'check:guards',
+    ].map((name) => ['run', name]),
   ]) {
     await new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [process.env.npm_execpath, ...args], {

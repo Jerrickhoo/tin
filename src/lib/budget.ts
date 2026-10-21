@@ -9,6 +9,7 @@ import {
 import type { EntryRow } from './groups'
 import { ActionError } from './errors'
 import { projectGoals } from './goals'
+import { commitmentReserved } from './schedules'
 
 interface Revision {
   key: string
@@ -313,11 +314,14 @@ export function envelopeAvailability(
   now: Date,
 ): Availability {
   const base = baseEnvelopeAvailability(rows, audit, envelopeId, now)
-  const reserved = sumCentavos(
-    projectGoals(rows, audit, now, assignedMonths(audit))
-      .filter((g) => g.goal.envelope_id === envelopeId)
-      .map((g) => g.reserved),
-  )
+  const reserved = sumCentavos([
+    commitmentReserved(rows, audit, envelopeId, now),
+    sumCentavos(
+      projectGoals(rows, audit, now, assignedMonths(audit))
+        .filter((g) => g.goal.envelope_id === envelopeId)
+        .map((g) => g.reserved),
+    ),
+  ])
   if (!reserved) return base
   const free = sumCentavos([base.balance, -base.held, -reserved])
   return { ...base, reserved, available: Math.max(0, free), shortfall: Math.max(0, -free) }

@@ -25,6 +25,8 @@ import {
 import { ActionError } from '../lib/errors'
 import { validateBudgetHistory, validateBudgetChange } from '../lib/budget'
 import { validateGoalHistory, validateGoalOperation } from '../lib/goal-operations'
+import { validateScheduleHistory } from '../lib/schedules'
+import { validateScheduleOperation } from '../lib/schedule-operations'
 
 export interface FinancialJournal {
   id: string
@@ -566,6 +568,7 @@ export async function applyLocalFinancialOperation(operation: FinancialOperation
           (item) =>
             operation.check ||
             operation.goal_events?.length ||
+            operation.schedule_events?.length ||
             (operation.budget_event &&
               item.operation.budget_event?.key === operation.budget_event.key) ||
             [
@@ -581,6 +584,13 @@ export async function applyLocalFinancialOperation(operation: FinancialOperation
         ...(operation.obligations ?? []),
       ])
       validateGoalOperation(operation, entries, audit, await db.envelopes.toArray())
+      validateScheduleOperation(
+        operation,
+        entries,
+        audit,
+        await db.envelopes.toArray(),
+        await db.categories.toArray(),
+      )
       if (operation.budget_event) {
         validateBudgetChange(operation.budget_event, audit, entries, operation.rows)
         const event = operation.budget_event
@@ -685,6 +695,7 @@ export async function applyLocalFinancialOperation(operation: FinancialOperation
             : { reason: operation.reason ?? null }),
           ...(operation.budget_event ? { budget: operation.budget_event } : {}),
           ...(operation.goal_events?.length ? { goals: operation.goal_events } : {}),
+          ...(operation.schedule_events?.length ? { schedules: operation.schedule_events } : {}),
         },
       })
       await db.financialJournal.add({
@@ -807,6 +818,12 @@ export async function mirrorLedgerPull(params: {
           await db.audit.toArray(),
           await db.entries.toArray(),
           new Set((await db.envelopes.toArray()).map((e) => e.id)),
+        )
+        validateScheduleHistory(
+          await db.audit.toArray(),
+          await db.entries.toArray(),
+          new Set((await db.envelopes.toArray()).map((e) => e.id)),
+          new Map((await db.categories.toArray()).map((c) => [c.id, c.envelope_id])),
         )
       }
       if (params.cursor !== null) await setCursor(params.cursor)

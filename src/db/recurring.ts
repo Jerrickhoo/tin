@@ -13,6 +13,10 @@ import { splitByLargestRemainder } from '../lib/split'
 import { dueDateOccurredAt, dueDatesUpTo, firstRunOnOrAfter, nextRunAfter } from '../lib/recurring'
 import { TIN_RECURRING_NAMESPACE, uuidv5 } from '../lib/uuidv5'
 import type { MoneyType } from '../lib/money-type'
+import { localDb } from './dexie'
+import { scheduleHeads, type ScheduleDefinition } from '../lib/schedules'
+import { scheduleBase } from './schedules'
+import { canonicalJson } from '../lib/financial'
 
 export interface RecurringTemplate {
   id: string
@@ -215,7 +219,14 @@ export async function runCatchUp(): Promise<CatchUpResult> {
     warnings: [],
   }
 
+  const converted = new Set(
+    [...scheduleHeads(await (await localDb()).audit.toArray()).values()]
+      .filter((e): e is ScheduleDefinition => e.type === 'schedule' && !!e.legacy_template_id)
+      .map((e) => e.legacy_template_id),
+  )
+
   for (const template of templates) {
+    if (converted.has(template.id)) continue
     if (template.paused_at !== null) continue
     const dueDates = dueDatesUpTo(template, today)
     if (dueDates.length === 0) continue
@@ -327,4 +338,60 @@ export async function runCatchUp(): Promise<CatchUpResult> {
   }
 
   return result
+}
+
+/** Review a fresh server cursor; the owner-locked transition checks it again. */
+export async function prepareLegacyConversion(
+  template: RecurringTemplate,
+): Promise<ScheduleDefinition> {
+  if (isOffline()) throw new RangeError('Connect and sync before converting a legacy template')
+  const db = await localDb()
+  if (await db.outbox.count())
+    throw new RangeError('Finish syncing before reviewing this conversion')
+  const current = (await fetchTemplates()).find((t) => t.id === template.id)
+  if (
+    !current ||
+    canonicalJson(current) !== canonicalJson(template) ||
+    current.kind !== 'expense' ||
+    !current.category_id ||
+    !current.money_type
+  )
+    throw new RangeError(
+      'Refresh the template and choose an explicit payment account before conversion',
+    )
+  const category = (await fetchCategories()).find((c) => c.id === current.category_id)
+  if (!category) throw new RangeError('Choose an active category before conversion')
+  let start = current.next_run_on
+  for (let i = 0; i < 2400; i++) {
+    const group = await uuidv5(TIN_RECURRING_NAMESPACE, `${current.id}:${start}:group`)
+    const { data, error } = await supabase
+      .from('entries')
+      .select('id')
+      .eq('group_id', group)
+      .limit(1)
+    if (error) throw error
+    if (!data?.length) break
+    start = nextRunAfter(start, current.day_of_month)
+    if (i === 2399) throw new RangeError('Review the legacy cursor before conversion')
+  }
+  const sid = crypto.randomUUID()
+  return {
+    ...scheduleBase(`schedule:${sid}`),
+    type: 'schedule',
+    schedule_id: sid,
+    name: current.note ?? category.name,
+    kind: 'subscription',
+    envelope_id: category.envelope_id,
+    category_id: category.id,
+    money_type: current.money_type,
+    start_on: start,
+    day: current.day_of_month,
+    effective_month: start.slice(0, 7),
+    state: 'active',
+    amounts: [current.amount_centavos],
+    fees: [0],
+    purchase_reviewed: false,
+    legacy_template_id: current.id,
+    cutover_on: start,
+  }
 }

@@ -147,7 +147,9 @@ export function History() {
   // do. A lazy initialiser, not an effect: an effect would paint the unfiltered
   // list first and then jump, and the jump is the whole thing you came to read.
   const location = useLocation()
-  const requestedReceipt = new URLSearchParams(location.search).get('receipt')
+  const requestedReceipt =
+    new URLSearchParams(location.search).get('receipt') ??
+    new URLSearchParams(location.search).get('payment')
   const receipt =
     requestedReceipt && /^[a-f0-9-]{36}$/.test(requestedReceipt) ? requestedReceipt : null
   const [categoryIds, setCategoryIds] = useState<string[]>(() =>
@@ -463,7 +465,7 @@ export function History() {
       </p>
       {receipt && (
         <p className="text-sm">
-          Showing one linked receipt.{' '}
+          Showing one linked movement.{' '}
           <Link to="/history" className="text-accent underline">
             All actual activity
           </Link>
@@ -518,6 +520,27 @@ export function History() {
                 Review current budget before trying again →
               </a>
             </div>
+          )}
+          {!!item.operation.schedule_events?.length && (
+            <details className="mt-2 space-y-2 break-words">
+              <summary>Saved scheduling draft</summary>
+              {item.operation.schedule_events.map((event) => (
+                <p key={event.id}>
+                  {event.type === 'schedule'
+                    ? `${event.name} · ${event.kind} · ${event.state} · starts ${event.start_on} · nominal day ${event.day} · ${formatPHP(sumCentavos([...event.amounts, ...event.fees]))} entered total`
+                    : event.type === 'occurrence'
+                      ? `Due ${event.due_on} · ${formatPHP(sumCentavos([event.amount_centavos, event.fee_centavos]))}`
+                      : event.type === 'payment'
+                        ? `Payment links: ${event.allocations.map((a) => formatPHP(a.amount_centavos)).join(', ')}`
+                        : event.type === 'reservation'
+                          ? `Reservation ${formatPHP(event.amount_centavos)}`
+                          : `Occurrence ${event.state}`}
+                </p>
+              ))}
+              <Link className="inline-block text-accent underline" to="/recurring">
+                Review current Upcoming items before trying again →
+              </Link>
+            </details>
           )}
           {item.operation.action === 'correct' && (
             <button

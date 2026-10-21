@@ -17,7 +17,12 @@ export async function checkReleaseSchema(config, request = fetch) {
       throw new Error('Release requires a public anonymous key; private keys cannot be bundled.')
   } else if (!key.startsWith('sb_publishable_'))
     throw new Error('Release requires a public Supabase key.')
-  for (const name of ['financial_capabilities', 'budget_capabilities', 'goals_capabilities']) {
+  for (const name of [
+    'financial_capabilities',
+    'budget_capabilities',
+    'goals_capabilities',
+    'schedules_capabilities',
+  ]) {
     const response = await request(`${url}/rest/v1/rpc/${name}`, {
       method: 'POST',
       headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
@@ -46,7 +51,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url))
     .then(() => console.log('Release schema prerequisites passed (read-only public-key checks).'))
     .catch(() => {
       console.error(
-        'Release schema prerequisites failed. Verify backend configuration and migrations 007–010 before publishing.',
+        'Release schema prerequisites failed. Verify backend configuration and migrations 007–011 before publishing.',
       )
       process.exitCode = 1
     })

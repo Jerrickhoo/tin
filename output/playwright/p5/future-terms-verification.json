@@ -1,0 +1,11 @@
+{
+  "passed": true,
+  "daily_project_excluded": true,
+  "checked_at": "2026-10-21T19:15:19.820Z",
+  "original_future_terms_preserved": true,
+  "revised_principal": 120000,
+  "held_centavos_unchanged": 100000,
+  "actual_entries_unchanged": 5,
+  "active_cash_centavos": 870100,
+  "payment_linked_repricing_rejected": true
+}

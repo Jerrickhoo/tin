@@ -24,7 +24,9 @@ describe('supabase client bootstrap', () => {
     vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'test-public-key')
     await import('./supabase')
     expect(clientFactory).toHaveBeenCalledWith('https://example.test', 'test-public-key', {
-      global: { headers: { 'X-Client-Info': 'tin-ledger/2', 'X-Tin-Goals': '1' } },
+      global: {
+        headers: { 'X-Client-Info': 'tin-ledger/2', 'X-Tin-Goals': '1', 'X-Tin-Schedules': '1' },
+      },
     })
   })
 

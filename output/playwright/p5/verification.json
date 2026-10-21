@@ -1,0 +1,15 @@
+{
+  "checked_at": "2026-10-21T18:32:54.394Z",
+  "daily_project_excluded": true,
+  "passed": true,
+  "scenarios": [
+    "anonymous/foreign-owner isolation, capability and helper permissions",
+    "reminder-only creation has zero cash effect",
+    "competing confirmations, exact replay and partial installment accounting",
+    "goal/commitment reservation overlap and server free-money validation",
+    "early payoff, explicitly entered terms and void reopens obligation",
+    "old client/direct writes cannot bypass schedule invariants",
+    "legacy cutover pauses posting atomically and cannot be resumed",
+    "linked history restores across owners after source reset"
+  ]
+}

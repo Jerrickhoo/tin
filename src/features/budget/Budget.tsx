@@ -616,7 +616,7 @@ function AvailabilitySummary({
         Actual balance now: <strong>{formatPHP(a.balance)}</strong>
       </p>
       <p>Assigned to future months: {formatPHP(a.held)}</p>
-      {!!a.reserved && <p>Reserved for goals: {formatPHP(a.reserved)}</p>}
+      {!!a.reserved && <p>Reserved for goals and payments: {formatPHP(a.reserved)}</p>}
       <p>
         Available now: <strong>{formatPHP(a.available)}</strong>
       </p>

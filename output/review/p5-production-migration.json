@@ -1,0 +1,34 @@
+{
+  "checked_at": "2026-10-21T19:17:15.950Z",
+  "passed": true,
+  "atomic": true,
+  "tables_compared": 11,
+  "all_existing_fields_preserved": true,
+  "all_owner_invariants_passed": true,
+  "backup_restore_rehearsed": true,
+  "ledger_test_writes": false,
+  "migrations": [
+    {
+      "file": "011_schedules.sql",
+      "sha256": "34e6339a64f4f4e2bbe0223cbc4639945166ac411d69bd0f65ab63498a927f03"
+    },
+    {
+      "file": "012_finite_schedule_obligations.sql",
+      "sha256": "bac08a3fe89ba52a6246cf3aca84d7f7e8f95272454b4aff526abf6554797911"
+    },
+    {
+      "file": "013_future_schedule_terms.sql",
+      "sha256": "6161fdabb6de69a6f6c7d0eb36e57aa070794dc87e097dc4619ce6a76ae2edf2"
+    },
+    {
+      "file": "014_schedule_command_bounds.sql",
+      "sha256": "e60ffe79a688531bba2f1bf9777dfd9f6701355aebe85fcd0d2c7248161b1c77"
+    }
+  ],
+  "budget_version": 1,
+  "entries": 423,
+  "financial_version": 1,
+  "goals_version": 1,
+  "registered_migrations": 4,
+  "schedules_version": 1
+}

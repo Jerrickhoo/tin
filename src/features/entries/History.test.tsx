@@ -6,15 +6,16 @@ import { History } from './History'
 import { ledgerRow as row } from '../../lib/test-support/financial-fixtures'
 import { AddSheetContext } from '../../app-context'
 
-const { page, all, envs, cats, voidGroup } = vi.hoisted(() => ({
+const { page, all, envs, cats, voidGroup, financial } = vi.hoisted(() => ({
   page: vi.fn(),
   all: vi.fn(),
   envs: vi.fn(),
   cats: vi.fn(),
   voidGroup: vi.fn(),
+  financial: vi.fn(),
 }))
 vi.mock('../../db/financial', () => ({
-  financialRecords: async () => ({ obligations: [], audit: [], conflicts: [] }),
+  financialRecords: financial,
 }))
 vi.mock('../../db/entries', () => ({
   fetchEntryPage: page,
@@ -35,6 +36,7 @@ function open(state: unknown = null) {
 }
 beforeEach(() => {
   vi.resetAllMocks()
+  financial.mockResolvedValue({ obligations: [], audit: [], conflicts: [], outstanding: {} })
   page.mockResolvedValue({ rows: [row('a')], hasMore: true })
   all.mockResolvedValue([row('a'), row('old', { note: 'old purchase' })])
   envs.mockResolvedValue([
@@ -161,4 +163,52 @@ it('opens a correction draft without changing the original', async () => {
     expect.objectContaining({ amountCentavos: 5000, categoryId: 'food', moneyType: 'reallife' }),
   )
   // Closing this draft cannot undo the earlier void. P1 records the limitation.
+})
+
+it('keeps a rejected schedule-only draft reviewable after rollback', async () => {
+  const sid = crypto.randomUUID(),
+    id = crypto.randomUUID()
+  financial.mockResolvedValue({
+    obligations: [],
+    audit: [],
+    outstanding: {},
+    conflicts: [
+      {
+        id,
+        status: 'conflict',
+        before: [],
+        operation: {
+          id,
+          action: 'post',
+          recorded_at: new Date().toISOString(),
+          rows: [],
+          schedule_events: [
+            {
+              id: crypto.randomUUID(),
+              key: `schedule:${sid}`,
+              previous_event_id: null,
+              type: 'schedule',
+              schedule_id: sid,
+              name: 'Saved subscription',
+              kind: 'subscription',
+              state: 'active',
+              start_on: '2026-10-22',
+              day: 22,
+              amounts: [29900],
+              fees: [0],
+            },
+          ],
+        },
+      },
+    ],
+  })
+  open()
+  const alert = await screen.findByRole('alert')
+  fireEvent.click(within(alert).getByText('Saved scheduling draft'))
+  expect(within(alert).getByText(/Saved subscription/)).toBeTruthy()
+  expect(
+    within(alert)
+      .getByRole('link', { name: /Review current Upcoming/ })
+      .getAttribute('href'),
+  ).toBe('/recurring')
 })

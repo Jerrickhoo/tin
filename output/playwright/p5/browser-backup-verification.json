@@ -1,0 +1,10 @@
+{
+  "passed": true,
+  "format_version": 5,
+  "entries": 5,
+  "schedule_events": 19,
+  "all_entry_ids_match_staging": true,
+  "all_schedule_event_ids_match_staging": true,
+  "future_term_history_included": true,
+  "checked_at": "2026-10-21T19:21:25.380Z"
+}

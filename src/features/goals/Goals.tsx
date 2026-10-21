@@ -200,7 +200,7 @@ export function Goals() {
                 <dd className="font-semibold">{formatPHP(a.available)}</dd>
               </div>
               <div>
-                <dt className="text-ink-soft">Reserved for goals</dt>
+                <dt className="text-ink-soft">Reserved for goals and payments</dt>
                 <dd>{formatPHP(a.reserved ?? 0)}</dd>
               </div>
               <div>
@@ -209,8 +209,8 @@ export function Goals() {
               </div>
             </dl>
             <p className="text-xs text-ink-soft">
-              Goal reservations are part of the envelope total. Future goal allocations stay inside
-              their future budget hold until that month.
+              Goal and payment reservations are part of the envelope total. Future goal allocations
+              stay inside their future budget hold until that month.
             </p>
             <p className="text-sm">
               {rate === null

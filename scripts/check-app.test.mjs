@@ -34,7 +34,7 @@ test('release gate accepts authenticated-only capability discovery without loggi
       }),
     }
   })
-  assert.equal(paths.length, 3)
+  assert.equal(paths.length, 4)
 })
 test('release gate refuses a missing schema and ambiguous authentication failures', async () => {
   for (const code of ['PGRST202', 'PGRST301'])

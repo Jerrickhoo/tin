@@ -33,6 +33,7 @@ export interface SyncSnapshot {
   pending: number
   syncing: boolean
   lastError: string | null
+  lastSyncedAt?: number
 }
 
 let snapshot: SyncSnapshot = { online: !isOffline(), pending: 0, syncing: false, lastError: null }
@@ -152,7 +153,10 @@ async function runOnce(): Promise<void> {
     // A day this mirror had not seen is a real change: another device's visit
     // moves the streak, and every other pull in this function already says so.
     if (await mirrorMergeCheckIns(checkIns)) changed = true
-    patchSnapshot({ lastError: drained.blocked ? drained.error : null })
+    patchSnapshot({
+      lastError: drained.blocked ? drained.error : null,
+      lastSyncedAt: drained.blocked ? undefined : Date.now(),
+    })
   } catch (err) {
     patchSnapshot({ lastError: errorMessage(err, 'sync your data') })
   } finally {
@@ -246,6 +250,7 @@ export function startSync(opts: { onApplied: () => void }): void {
 
 export function stopSync(): void {
   stopped = true
+  patchSnapshot({ lastSyncedAt: undefined })
   teardown?.()
   teardown = null
   onApplied = null

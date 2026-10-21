@@ -1149,6 +1149,7 @@ function EnvelopeCard({
       {!!card.availability?.reserved && (
         <p className="mt-2 text-xs text-ink-soft">
           {formatPHP(available)} free · {formatPHP(card.availability.reserved)} reserved for goals
+          and payments
         </p>
       )}
       {!!card.availability?.shortfall && (

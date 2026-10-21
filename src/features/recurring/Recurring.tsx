@@ -21,7 +21,13 @@ import { formatEnvelopeShareSummary } from './recurring-share-summary'
 const ordinal = (n: number) =>
   `${n}${n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th'}`
 
-export function Recurring() {
+export function LegacyRecurring({
+  onConvert,
+  convertedIds,
+}: {
+  convertedIds?: Set<string | null>
+  onConvert?: (template: RecurringTemplate) => void
+}) {
   const { version, bump } = useLedger()
   const toast = useToast()
   const [templates, setTemplates] = useState<RecurringTemplate[] | null>(null)
@@ -77,9 +83,9 @@ export function Recurring() {
   }
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-6 py-8 md:max-w-2xl md:px-8 md:py-10">
+    <section className="flex min-w-0 flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h1 className="font-display text-[1rem] text-ink">Recurring</h1>
+        <h2 className="font-display text-[1rem] text-ink">Legacy auto-post templates</h2>
         <button
           type="button"
           onClick={() => setEditing('new')}
@@ -88,7 +94,10 @@ export function Recurring() {
           New template
         </button>
       </div>
-      <p className="text-sm text-ink-soft">Templates post automatically on their due date.</p>
+      <p className="text-sm text-ink-soft">
+        Auto-post on open: these existing instructions record actual money when Tin opens online.
+        Review an expense template to convert it to payment confirmation.
+      </p>
 
       {loadError && (
         <div className="card border-neg/40 p-4">
@@ -107,81 +116,96 @@ export function Recurring() {
         <p className="text-ink-soft">None yet. Add monthly bills, income, or subscriptions.</p>
       )}
 
-      {templates?.map((template) => {
-        const category = template.category_id ? categoriesById.get(template.category_id) : undefined
-        const label =
-          template.note ?? (template.kind === 'income' ? 'Income' : (category?.name ?? 'Expense'))
-        return (
-          <div key={template.id} className={`card p-4 ${template.paused_at ? 'opacity-60' : ''}`}>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium">
-                  {template.kind === 'income' ? '↳ ' : ''}
-                  {label}
-                  {template.paused_at && <span className="ml-2 text-xs text-ink-mute">paused</span>}
-                </p>
-                <p className="mt-0.5 text-sm text-ink-mute">
-                  every {ordinal(template.day_of_month)}
-                  {template.kind === 'expense' && category
-                    ? ` · ${category.emoji ?? ''} ${category.name}`
-                    : ` · ${formatEnvelopeShareSummary(envelopes.filter((env) => env.share_bp > 0))}`}
-                  {template.paused_at ? '' : ` · next ${template.next_run_on}`}
-                  {/* Stated on the row, because a template posts unattended and
+      {templates
+        ?.filter((t) => !convertedIds?.has(t.id))
+        .map((template) => {
+          const category = template.category_id
+            ? categoriesById.get(template.category_id)
+            : undefined
+          const label =
+            template.note ?? (template.kind === 'income' ? 'Income' : (category?.name ?? 'Expense'))
+          return (
+            <div key={template.id} className={`card p-4 ${template.paused_at ? 'opacity-60' : ''}`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium">
+                    {template.kind === 'income' ? '↳ ' : ''}
+                    {label}
+                    {template.paused_at && (
+                      <span className="ml-2 text-xs text-ink-mute">paused</span>
+                    )}
+                  </p>
+                  <p className="mt-0.5 text-sm text-ink-mute">
+                    every {ordinal(template.day_of_month)}
+                    {template.kind === 'expense' && category
+                      ? ` · ${category.emoji ?? ''} ${category.name}`
+                      : ` · ${formatEnvelopeShareSummary(envelopes.filter((env) => env.share_bp > 0))}`}
+                    {template.paused_at ? '' : ` · next ${template.next_run_on}`}
+                    {/* Stated on the row, because a template posts unattended and
                       an untagged one keeps adding to Home's untagged line every
                       month with nothing on this screen explaining why. */}
-                  {` · ${template.money_type ? getMoneyTypeLabel(template.money_type) : 'no money type'}`}
-                </p>
+                    {` · ${template.money_type ? getMoneyTypeLabel(template.money_type) : 'no money type'}`}
+                  </p>
+                </div>
+                <span
+                  className={`font-semibold tabular-nums ${template.kind === 'income' ? 'text-pos' : 'text-neg'}`}
+                >
+                  {template.kind === 'income' ? '+' : '−'}
+                  {formatPHP(template.amount_centavos)}
+                </span>
               </div>
-              <span
-                className={`font-semibold tabular-nums ${template.kind === 'income' ? 'text-pos' : 'text-neg'}`}
-              >
-                {template.kind === 'income' ? '+' : '−'}
-                {formatPHP(template.amount_centavos)}
-              </span>
-            </div>
-            <div className="mt-3 flex gap-2 text-sm">
-              <button
-                type="button"
-                onClick={() => setEditing(template)}
-                className="rounded-xl border border-line px-3 py-1.5 text-accent"
-              >
-                Edit
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  act(
-                    () => setTemplatePaused(template.id, !template.paused_at),
-                    template.paused_at ? 'Resumed — re-anchored to the next due date' : 'Paused',
-                  )
-                }
-                className="rounded-xl border border-line px-3 py-1.5 text-ink-soft"
-              >
-                {template.paused_at ? 'Resume' : 'Pause'}
-              </button>
-              {confirmDelete === template.id ? (
+              <div className="mt-3 flex flex-wrap gap-2 text-sm">
+                {onConvert && template.kind === 'expense' && (
+                  <button
+                    type="button"
+                    className="min-h-11 rounded-xl border border-line px-3 py-2"
+                    onClick={() => onConvert(template)}
+                  >
+                    Review conversion
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setEditing(template)}
+                  className="rounded-xl border border-line px-3 py-1.5 text-accent"
+                >
+                  Edit
+                </button>
                 <button
                   type="button"
                   onClick={() =>
-                    act(() => deleteTemplate(template.id), 'Template deleted — history stays')
+                    act(
+                      () => setTemplatePaused(template.id, !template.paused_at),
+                      template.paused_at ? 'Resumed — re-anchored to the next due date' : 'Paused',
+                    )
                   }
-                  className="rounded-xl bg-neg/20 px-3 py-1.5 font-medium text-neg"
+                  className="rounded-xl border border-line px-3 py-1.5 text-ink-soft"
                 >
-                  Really delete?
+                  {template.paused_at ? 'Resume' : 'Pause'}
                 </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setConfirmDelete(template.id)}
-                  className="rounded-xl border border-line px-3 py-1.5 text-neg"
-                >
-                  Delete
-                </button>
-              )}
+                {confirmDelete === template.id ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      act(() => deleteTemplate(template.id), 'Template deleted — history stays')
+                    }
+                    className="rounded-xl bg-neg/20 px-3 py-1.5 font-medium text-neg"
+                  >
+                    Really delete?
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDelete(template.id)}
+                    className="rounded-xl border border-line px-3 py-1.5 text-neg"
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-        )
-      })}
+          )
+        })}
 
       <p className="mt-auto text-center text-sm text-ink-mute">
         <Link to="/settings" className="text-accent">
@@ -204,7 +228,7 @@ export function Recurring() {
           onError={(msg) => toast.show(msg, 'error')}
         />
       )}
-    </main>
+    </section>
   )
 }
 

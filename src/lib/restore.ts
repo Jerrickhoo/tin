@@ -35,6 +35,7 @@ import {
 import { validateBudgetHistory, parseBudgetEvent, budgetKey } from './budget'
 import { goalKey, parseGoalEvent } from './goals'
 import { validateGoalHistory } from './goal-operations'
+import { parseScheduleEvent, validateScheduleHistory } from './schedules'
 
 const KINDS = new Set<EntryKind>(['income', 'expense', 'transfer', 'adjustment'])
 
@@ -97,10 +98,11 @@ export function parseBundle(text: string): ParsedBundle {
     raw.format_version !== 1 &&
     raw.format_version !== 2 &&
     raw.format_version !== 3 &&
-    raw.format_version !== 4
+    raw.format_version !== 4 &&
+    raw.format_version !== 5
   ) {
     fail(
-      `Unsupported export version ${String(raw.format_version)} — this app reads versions 1, 2, 3 and 4.`,
+      `Unsupported export version ${String(raw.format_version)} — this app reads versions 1 through 5.`,
     )
   }
   if (!Array.isArray(raw.entries)) fail('That export has no entries array.')
@@ -165,9 +167,17 @@ export function parseBundle(text: string): ParsedBundle {
 
   const audit = parseAudit(raw.audit)
   validateBudgetHistory(audit, entries, new Set(envelopes.map((e) => e.id)))
-  if (raw.format_version !== 4 && audit.some((a) => a.details.goals))
+  if (Number(raw.format_version) < 4 && audit.some((a) => a.details.goals))
     fail('Goal history needs export version 4.')
   validateGoalHistory(audit, entries, new Set(envelopes.map((e) => e.id)))
+  if (raw.format_version !== 5 && audit.some((a) => a.details.schedules))
+    fail('Schedule history needs export version 5.')
+  validateScheduleHistory(
+    audit,
+    entries,
+    new Set(envelopes.map((e) => e.id)),
+    new Map(categories.map((c) => [c.id, c.envelope_id])),
+  )
   return {
     exportedAt: typeof raw.exported_at === 'string' ? raw.exported_at : null,
     envelopes,
@@ -347,6 +357,30 @@ export function planRestore(bundle: ParsedBundle, targets: RestoreTargets): Rest
 
   const audit = (bundle.audit ?? []).map((sourceEvent) => {
     let event = sourceEvent
+    if (Array.isArray(event.details.schedules)) {
+      const schedules = event.details.schedules.map((raw) => {
+        const schedule = { ...parseScheduleEvent(raw) }
+        if (schedule.type === 'schedule') {
+          const original = bundleEnvelopeById.get(schedule.envelope_id),
+            local = original ? localEnvelopeByName.get(nameKey(original.name)) : undefined
+          const originalCategory = bundle.categories.find((c) => c.id === schedule.category_id)
+          const category =
+            originalCategory && local
+              ? targets.categories.find(
+                  (c) =>
+                    c.envelope_id === local.id &&
+                    nameKey(c.name) === nameKey(originalCategory.name),
+                )
+              : undefined
+          if (!local) missingEnvelopes.add(original?.name ?? schedule.envelope_id)
+          else schedule.envelope_id = local.id
+          if (!category) missingCategories.add(originalCategory?.name ?? schedule.category_id)
+          else schedule.category_id = category.id
+        }
+        return schedule
+      })
+      event = { ...event, details: { ...event.details, schedules } }
+    }
     if (Array.isArray(event.details.goals)) {
       const goals = event.details.goals.map((raw) => {
         const goal = { ...parseGoalEvent(raw) }

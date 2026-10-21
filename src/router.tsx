@@ -9,7 +9,7 @@ import { UpdatePassword } from './features/auth/UpdatePassword'
 import { Home } from './features/home/Home'
 import { History } from './features/entries/History'
 import { Insights } from './features/analytics/Insights'
-import { Recurring } from './features/recurring/Recurring'
+import { Upcoming } from './features/recurring/Upcoming'
 import { ImportStatement } from './features/import/ImportStatement'
 import { Settings } from './features/settings/Settings'
 import { Envelopes } from './features/settings/Envelopes'
@@ -36,7 +36,7 @@ export function AppRouter() {
             <Route path="/" element={<Home />} />
             <Route path="/history" element={<History />} />
             <Route path="/insights" element={<Insights />} />
-            <Route path="/recurring" element={<Recurring />} />
+            <Route path="/recurring" element={<Upcoming />} />
             <Route path="/import" element={<ImportStatement />} />
             <Route path="/envelopes" element={<Envelopes />} />
             <Route path="/settings" element={<Settings />} />

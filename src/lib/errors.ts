@@ -9,6 +9,8 @@ const NEXT_STEP: Record<FailureKind, string> = {
 }
 
 const ACTION_FAILURES = {
+  schedule_upgrade:
+    'Scheduling needs a server update. Connect and refresh Tin before saving this item.',
   goal_upgrade:
     'Goals need the latest server update. Connect after the update and retry; your draft is kept.',
   goal_stale:

@@ -2,6 +2,7 @@ import type { EntryRow } from './groups'
 import { ActionError } from './errors'
 import type { BudgetEvent } from './budget'
 import type { GoalEvent } from './goals'
+import type { ScheduleEvent } from './schedules'
 import {
   assertPositiveCentavos,
   intentOf,
@@ -40,6 +41,7 @@ export interface FinancialOperation {
   reason?: string | null
   budget_event?: BudgetEvent
   goal_events?: GoalEvent[]
+  schedule_events?: ScheduleEvent[]
 }
 
 export function sameRows(a: readonly EntryRow[], b: readonly EntryRow[]): boolean {

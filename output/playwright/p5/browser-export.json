@@ -1,0 +1,596 @@
+{
+  "exported_at": "2026-10-21T19:19:16.562Z",
+  "app": "tin",
+  "format_version": 5,
+  "envelopes": [
+    {
+      "id": "3e53108c-9363-4a20-98c3-e6b4a5bfc38c",
+      "user_id": "3d888ed3-5a2d-4a9f-8a20-bfdeb6bd267f",
+      "name": "Needs",
+      "share_bp": 10000,
+      "sort_order": 0,
+      "color": null,
+      "archived_at": null,
+      "created_at": "2026-10-21T18:32:37.540909+00:00",
+      "updated_at": "2026-10-21T18:32:37.540909+00:00"
+    }
+  ],
+  "categories": [
+    {
+      "id": "5df09599-bf2c-4cf9-b38d-61be62e431c0",
+      "user_id": "3d888ed3-5a2d-4a9f-8a20-bfdeb6bd267f",
+      "envelope_id": "3e53108c-9363-4a20-98c3-e6b4a5bfc38c",
+      "name": "Bills",
+      "emoji": "📅",
+      "archived_at": null,
+      "created_at": "2026-10-21T18:32:37.722347+00:00",
+      "updated_at": "2026-10-21T18:32:37.722347+00:00"
+    }
+  ],
+  "entries": [
+    {
+      "id": "d69ecb5a-bfbe-4fd8-b704-69bb081249b0",
+      "group_id": "670cde77-67e4-49c1-a205-a15c27bf8245",
+      "kind": "income",
+      "envelope_id": "3e53108c-9363-4a20-98c3-e6b4a5bfc38c",
+      "category_id": null,
+      "amount_centavos": 1000000,
+      "note": null,
+      "occurred_at": "2026-10-21T18:32:37.352Z",
+      "voided_at": null,
+      "void_reason": null,
+      "money_type": "online",
+      "financial": {
+        "intent": "ordinary_income",
+        "version": 1,
+        "chain_id": "670cde77-67e4-49c1-a205-a15c27bf8245",
+        "recorded_at": "2026-10-21T18:32:37.352Z",
+        "operation_id": "c2a7acd8-83e3-4218-9ec3-714b2bf23c1f"
+      }
+    },
+    {
+      "id": "d26abae5-06cc-47b9-b482-096ee1f04175",
+      "group_id": "925faf08-5e5e-44c8-8600-d05089c2bfd2",
+      "kind": "expense",
+      "envelope_id": "3e53108c-9363-4a20-98c3-e6b4a5bfc38c",
+      "category_id": "5df09599-bf2c-4cf9-b38d-61be62e431c0",
+      "amount_centavos": -29900,
+      "note": "Music subscription",
+      "occurred_at": "2026-10-21T18:35:47.276Z",
+      "voided_at": null,
+      "void_reason": null,
+      "money_type": "online",
+      "financial": {
+        "intent": "purchase",
+        "version": 1,
+        "chain_id": "925faf08-5e5e-44c8-8600-d05089c2bfd2",
+        "recorded_at": "2026-10-21T18:35:47.276Z",
+        "operation_id": "5d8d0f5f-2ce6-43f0-8abb-baebc2e51cca"
+      }
+    },
+    {
+      "id": "45b8e6c6-1d94-459d-87b7-56ac7adf7e58",
+      "group_id": "c7244933-4146-4eba-b1c0-d28a49a37a21",
+      "kind": "expense",
+      "envelope_id": "3e53108c-9363-4a20-98c3-e6b4a5bfc38c",
+      "category_id": "5df09599-bf2c-4cf9-b38d-61be62e431c0",
+      "amount_centavos": -40000,
+      "note": "Phone installments",
+      "occurred_at": "2026-10-21T18:36:44.720Z",
+      "voided_at": null,
+      "void_reason": null,
+      "money_type": "online",
+      "financial": {
+        "intent": "purchase",
+        "version": 1,
+        "chain_id": "c7244933-4146-4eba-b1c0-d28a49a37a21",
+        "recorded_at": "2026-10-21T18:36:44.720Z",
+        "operation_id": "8c21821b-62e2-46d6-8e89-398032c20f04"
+      }
+    },
+    {
+      "id": "01bd5610-bd42-411d-9da0-42f9a36d4239",
+      "group_id": "5309a6eb-4266-4910-93f5-a54a99437067",
+      "kind": "expense",
+      "envelope_id": "3e53108c-9363-4a20-98c3-e6b4a5bfc38c",
+      "category_id": "5df09599-bf2c-4cf9-b38d-61be62e431c0",
+      "amount_centavos": -60000,
+      "note": "Phone installments",
+      "occurred_at": "2026-10-21T18:36:47.574Z",
+      "voided_at": null,
+      "void_reason": null,
+      "money_type": "online",
+      "financial": {
+        "intent": "purchase",
+        "version": 1,
+        "chain_id": "5309a6eb-4266-4910-93f5-a54a99437067",
+        "recorded_at": "2026-10-21T18:36:47.574Z",
+        "operation_id": "e3ab19f7-87b1-4a7d-9feb-668d89993a1d"
+      }
+    },
+    {
+      "id": "3acc95cf-2fdb-48bc-82bb-24890e28673a",
+      "group_id": "ae03c792-f9cf-4fcb-9575-4e0d5b1a93a5",
+      "kind": "expense",
+      "envelope_id": "3e53108c-9363-4a20-98c3-e6b4a5bfc38c",
+      "category_id": "5df09599-bf2c-4cf9-b38d-61be62e431c0",
+      "amount_centavos": -200000,
+      "note": "Phone installments",
+      "occurred_at": "2026-10-21T18:37:08.206Z",
+      "voided_at": "2026-10-21T18:37:08.324Z",
+      "void_reason": "Voided from Upcoming",
+      "money_type": "online",
+      "financial": {
+        "intent": "purchase",
+        "version": 1,
+        "chain_id": "ae03c792-f9cf-4fcb-9575-4e0d5b1a93a5",
+        "recorded_at": "2026-10-21T18:37:08.206Z",
+        "operation_id": "f5042eb9-ce00-4bc9-97de-62787aeea6ac"
+      }
+    }
+  ],
+  "obligations": [],
+  "audit": [
+    {
+      "id": "09221407-9e59-4965-9d20-2c6d95a21181",
+      "operation_id": "09221407-9e59-4965-9d20-2c6d95a21181",
+      "group_id": "ae03c792-f9cf-4fcb-9575-4e0d5b1a93a5",
+      "action": "void",
+      "recorded_at": "2026-10-21T18:37:08.324Z",
+      "details": {
+        "reason": "Voided from Upcoming"
+      }
+    },
+    {
+      "id": "0d5334e0-8165-44c3-83d8-2e91eaaf9d85",
+      "operation_id": "0d5334e0-8165-44c3-83d8-2e91eaaf9d85",
+      "group_id": null,
+      "action": "post",
+      "recorded_at": "2026-10-21T19:10:28.254Z",
+      "details": {
+        "reason": null,
+        "schedules": [
+          {
+            "id": "4f0ee73f-c98a-44f5-bd55-ba15282f780b",
+            "day": 22,
+            "key": "schedule:0621698c-3757-4679-8fba-4bfcbeb2a753",
+            "fees": [
+              0,
+              0
+            ],
+            "kind": "installment",
+            "name": "Term review",
+            "type": "schedule",
+            "state": "active",
+            "amounts": [
+              100000,
+              100000
+            ],
+            "start_on": "2026-10-22",
+            "cutover_on": null,
+            "money_type": "online",
+            "category_id": "5df09599-bf2c-4cf9-b38d-61be62e431c0",
+            "envelope_id": "3e53108c-9363-4a20-98c3-e6b4a5bfc38c",
+            "schedule_id": "0621698c-3757-4679-8fba-4bfcbeb2a753",
+            "effective_month": "2026-10",
+            "previous_event_id": null,
+            "purchase_reviewed": true,
+            "legacy_template_id": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "3b8ca0f7-d779-4319-8461-006a17c6fd98",
+      "operation_id": "3b8ca0f7-d779-4319-8461-006a17c6fd98",
+      "group_id": null,
+      "action": "post",
+      "recorded_at": "2026-10-21T18:42:02.707Z",
+      "details": {
+        "reason": null,
+        "schedules": [
+          {
+            "id": "6eeee997-642a-4f59-87b0-8af1710165f6",
+            "day": 1,
+            "key": "schedule:e86b8fe0-593a-4c9c-9633-9dfac7b35944",
+            "fees": [
+              0
+            ],
+            "kind": "subscription",
+            "name": "Legacy music",
+            "type": "schedule",
+            "state": "active",
+            "amounts": [
+              29900
+            ],
+            "start_on": "2026-11-01",
+            "cutover_on": "2026-11-01",
+            "money_type": "online",
+            "category_id": "5df09599-bf2c-4cf9-b38d-61be62e431c0",
+            "envelope_id": "3e53108c-9363-4a20-98c3-e6b4a5bfc38c",
+            "schedule_id": "e86b8fe0-593a-4c9c-9633-9dfac7b35944",
+            "effective_month": "2026-11",
+            "previous_event_id": null,
+            "purchase_reviewed": false,
+            "legacy_template_id": "ae2d3c27-f5bb-4e50-9ae9-439a82843f91"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4b09d1e5-7558-47d1-b57e-bdbd2cd154c9",
+      "operation_id": "4b09d1e5-7558-47d1-b57e-bdbd2cd154c9",
+      "group_id": null,
+      "action": "post",
+      "recorded_at": "2026-10-21T18:36:24.401Z",
+      "details": {
+        "reason": null,
+        "schedules": [
+          {
+            "id": "9df166a2-61c1-42d4-aa64-b1a845e13209",
+            "day": 22,
+            "key": "schedule:7984aa34-48ca-4170-9962-b7a35155c5cc",
+            "fees": [
+              0,
+              0,
+              0
+            ],
+            "kind": "installment",
+            "name": "Phone installments",
+            "type": "schedule",
+            "state": "active",
+            "amounts": [
+              100000,
+              100000,
+              100000
+            ],
+            "start_on": "2026-10-22",
+            "cutover_on": null,
+            "money_type": "online",
+            "category_id": "5df09599-bf2c-4cf9-b38d-61be62e431c0",
+            "envelope_id": "3e53108c-9363-4a20-98c3-e6b4a5bfc38c",
+            "schedule_id": "7984aa34-48ca-4170-9962-b7a35155c5cc",
+            "effective_month": "2026-10",
+            "previous_event_id": null,
+            "purchase_reviewed": true,
+            "legacy_template_id": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "5d8d0f5f-2ce6-43f0-8abb-baebc2e51cca",
+      "operation_id": "5d8d0f5f-2ce6-43f0-8abb-baebc2e51cca",
+      "group_id": "925faf08-5e5e-44c8-8600-d05089c2bfd2",
+      "action": "post",
+      "recorded_at": "2026-10-21T18:35:47.276Z",
+      "details": {
+        "reason": null,
+        "schedules": [
+          {
+            "id": "8dec407c-b169-43ea-b207-4b6e22d34d7a",
+            "key": "payment:925faf08-5e5e-44c8-8600-d05089c2bfd2",
+            "type": "payment",
+            "allocations": [
+              {
+                "occurrence_key": "due:48ef8e43-5d0c-4dda-8635-31d5ce9b34c3:2026-10",
+                "amount_centavos": 29900
+              }
+            ],
+            "previous_event_id": null,
+            "purchase_chain_id": "925faf08-5e5e-44c8-8600-d05089c2bfd2"
+          }
+        ]
+      }
+    },
+    {
+      "id": "5de0ed3d-214c-4a55-95cd-cbb4151489a8",
+      "operation_id": "5de0ed3d-214c-4a55-95cd-cbb4151489a8",
+      "group_id": null,
+      "action": "post",
+      "recorded_at": "2026-10-21T18:35:05.685Z",
+      "details": {
+        "reason": null,
+        "schedules": [
+          {
+            "id": "93738316-5801-5708-acc8-5ddc3c306e11",
+            "key": "due:48ef8e43-5d0c-4dda-8635-31d5ce9b34c3:2026-10",
+            "type": "occurrence",
+            "due_on": "2026-10-22",
+            "period": "2026-10",
+            "schedule_id": "48ef8e43-5d0c-4dda-8635-31d5ce9b34c3",
+            "fee_centavos": 0,
+            "definition_id": "4e4c14b1-04ba-485c-a864-a1a489a36955",
+            "amount_centavos": 29900,
+            "previous_event_id": null
+          },
+          {
+            "id": "675fbb0e-aae0-4afb-8207-c6ba97d5ed2a",
+            "key": "reservation:due:48ef8e43-5d0c-4dda-8635-31d5ce9b34c3:2026-10",
+            "type": "reservation",
+            "occurrence_key": "due:48ef8e43-5d0c-4dda-8635-31d5ce9b34c3:2026-10",
+            "amount_centavos": 29900,
+            "previous_event_id": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "8c21821b-62e2-46d6-8e89-398032c20f04",
+      "operation_id": "8c21821b-62e2-46d6-8e89-398032c20f04",
+      "group_id": "c7244933-4146-4eba-b1c0-d28a49a37a21",
+      "action": "post",
+      "recorded_at": "2026-10-21T18:36:44.720Z",
+      "details": {
+        "reason": null,
+        "schedules": [
+          {
+            "id": "7cde770b-6129-5555-a5a0-4f17c3829095",
+            "key": "due:7984aa34-48ca-4170-9962-b7a35155c5cc:1",
+            "type": "occurrence",
+            "due_on": "2026-10-22",
+            "period": "1",
+            "schedule_id": "7984aa34-48ca-4170-9962-b7a35155c5cc",
+            "fee_centavos": 0,
+            "definition_id": "9df166a2-61c1-42d4-aa64-b1a845e13209",
+            "amount_centavos": 100000,
+            "previous_event_id": null
+          },
+          {
+            "id": "204a760d-bdf6-4afb-97cd-26dc60690c50",
+            "key": "payment:c7244933-4146-4eba-b1c0-d28a49a37a21",
+            "type": "payment",
+            "allocations": [
+              {
+                "occurrence_key": "due:7984aa34-48ca-4170-9962-b7a35155c5cc:1",
+                "amount_centavos": 40000
+              }
+            ],
+            "previous_event_id": null,
+            "purchase_chain_id": "c7244933-4146-4eba-b1c0-d28a49a37a21"
+          }
+        ]
+      }
+    },
+    {
+      "id": "b8c9a951-2b2c-4044-8f67-75471b52ffb0",
+      "operation_id": "b8c9a951-2b2c-4044-8f67-75471b52ffb0",
+      "group_id": null,
+      "action": "post",
+      "recorded_at": "2026-10-21T19:11:23.082Z",
+      "details": {
+        "reason": null,
+        "schedules": [
+          {
+            "id": "bfb911f8-2baa-4777-85cb-7c74f76ec69d",
+            "day": 22,
+            "key": "schedule:0621698c-3757-4679-8fba-4bfcbeb2a753",
+            "fees": [
+              0,
+              0
+            ],
+            "kind": "installment",
+            "name": "Term review",
+            "type": "schedule",
+            "state": "active",
+            "amounts": [
+              100000,
+              120000
+            ],
+            "start_on": "2026-10-22",
+            "cutover_on": null,
+            "money_type": "online",
+            "category_id": "5df09599-bf2c-4cf9-b38d-61be62e431c0",
+            "envelope_id": "3e53108c-9363-4a20-98c3-e6b4a5bfc38c",
+            "schedule_id": "0621698c-3757-4679-8fba-4bfcbeb2a753",
+            "effective_month": "2026-11",
+            "previous_event_id": "4f0ee73f-c98a-44f5-bd55-ba15282f780b",
+            "purchase_reviewed": true,
+            "legacy_template_id": null
+          },
+          {
+            "id": "53f1a39f-1ded-47e2-886d-320ed4a6537c",
+            "key": "due:0621698c-3757-4679-8fba-4bfcbeb2a753:2",
+            "type": "occurrence",
+            "due_on": "2026-11-22",
+            "period": "2",
+            "schedule_id": "0621698c-3757-4679-8fba-4bfcbeb2a753",
+            "fee_centavos": 0,
+            "definition_id": "bfb911f8-2baa-4777-85cb-7c74f76ec69d",
+            "amount_centavos": 120000,
+            "previous_event_id": "54c2168a-2edc-5de8-ba50-f11cdfe97179"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c2a7acd8-83e3-4218-9ec3-714b2bf23c1f",
+      "operation_id": "c2a7acd8-83e3-4218-9ec3-714b2bf23c1f",
+      "group_id": "670cde77-67e4-49c1-a205-a15c27bf8245",
+      "action": "post",
+      "recorded_at": "2026-10-21T18:32:37.352Z",
+      "details": {
+        "reason": null
+      }
+    },
+    {
+      "id": "c45c0eb6-3b1e-400a-beda-2f9fbe494121",
+      "operation_id": "c45c0eb6-3b1e-400a-beda-2f9fbe494121",
+      "group_id": null,
+      "action": "post",
+      "recorded_at": "2026-10-21T18:56:39.138Z",
+      "details": {
+        "reason": null,
+        "schedules": [
+          {
+            "id": "f06e335c-cf7a-5958-a901-4acd86b263c1",
+            "key": "due:e86b8fe0-593a-4c9c-9633-9dfac7b35944:2026-11",
+            "type": "occurrence",
+            "due_on": "2026-11-01",
+            "period": "2026-11",
+            "schedule_id": "e86b8fe0-593a-4c9c-9633-9dfac7b35944",
+            "fee_centavos": 0,
+            "definition_id": "6eeee997-642a-4f59-87b0-8af1710165f6",
+            "amount_centavos": 29900,
+            "previous_event_id": null
+          },
+          {
+            "id": "976f2727-ebc7-4092-a852-1697f4a70c34",
+            "key": "reservation:due:e86b8fe0-593a-4c9c-9633-9dfac7b35944:2026-11",
+            "type": "reservation",
+            "occurrence_key": "due:e86b8fe0-593a-4c9c-9633-9dfac7b35944:2026-11",
+            "amount_centavos": 29900,
+            "previous_event_id": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "c545b63a-9f74-4687-8d95-a2cd0d89425b",
+      "operation_id": "c545b63a-9f74-4687-8d95-a2cd0d89425b",
+      "group_id": null,
+      "action": "post",
+      "recorded_at": "2026-10-21T18:34:44.149Z",
+      "details": {
+        "reason": null,
+        "schedules": [
+          {
+            "id": "4e4c14b1-04ba-485c-a864-a1a489a36955",
+            "day": 22,
+            "key": "schedule:48ef8e43-5d0c-4dda-8635-31d5ce9b34c3",
+            "fees": [
+              0
+            ],
+            "kind": "subscription",
+            "name": "Music subscription",
+            "type": "schedule",
+            "state": "active",
+            "amounts": [
+              29900
+            ],
+            "start_on": "2026-10-22",
+            "cutover_on": null,
+            "money_type": "online",
+            "category_id": "5df09599-bf2c-4cf9-b38d-61be62e431c0",
+            "envelope_id": "3e53108c-9363-4a20-98c3-e6b4a5bfc38c",
+            "schedule_id": "48ef8e43-5d0c-4dda-8635-31d5ce9b34c3",
+            "effective_month": "2026-10",
+            "previous_event_id": null,
+            "purchase_reviewed": false,
+            "legacy_template_id": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "c7d5a8b2-16f6-480f-9ad8-0445c0726ad7",
+      "operation_id": "c7d5a8b2-16f6-480f-9ad8-0445c0726ad7",
+      "group_id": null,
+      "action": "post",
+      "recorded_at": "2026-10-21T19:10:28.525Z",
+      "details": {
+        "reason": null,
+        "schedules": [
+          {
+            "id": "54c2168a-2edc-5de8-ba50-f11cdfe97179",
+            "key": "due:0621698c-3757-4679-8fba-4bfcbeb2a753:2",
+            "type": "occurrence",
+            "due_on": "2026-11-22",
+            "period": "2",
+            "schedule_id": "0621698c-3757-4679-8fba-4bfcbeb2a753",
+            "fee_centavos": 0,
+            "definition_id": "4f0ee73f-c98a-44f5-bd55-ba15282f780b",
+            "amount_centavos": 100000,
+            "previous_event_id": null
+          },
+          {
+            "id": "b6c0c634-ec0c-47b3-a8f9-cf8439c44982",
+            "key": "reservation:due:0621698c-3757-4679-8fba-4bfcbeb2a753:2",
+            "type": "reservation",
+            "occurrence_key": "due:0621698c-3757-4679-8fba-4bfcbeb2a753:2",
+            "amount_centavos": 100000,
+            "previous_event_id": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "e3ab19f7-87b1-4a7d-9feb-668d89993a1d",
+      "operation_id": "e3ab19f7-87b1-4a7d-9feb-668d89993a1d",
+      "group_id": "5309a6eb-4266-4910-93f5-a54a99437067",
+      "action": "post",
+      "recorded_at": "2026-10-21T18:36:47.574Z",
+      "details": {
+        "reason": null,
+        "schedules": [
+          {
+            "id": "eb41b85a-81c1-461d-a543-0cf0968acdaa",
+            "key": "payment:5309a6eb-4266-4910-93f5-a54a99437067",
+            "type": "payment",
+            "allocations": [
+              {
+                "occurrence_key": "due:7984aa34-48ca-4170-9962-b7a35155c5cc:1",
+                "amount_centavos": 60000
+              }
+            ],
+            "previous_event_id": null,
+            "purchase_chain_id": "5309a6eb-4266-4910-93f5-a54a99437067"
+          }
+        ]
+      }
+    },
+    {
+      "id": "f5042eb9-ce00-4bc9-97de-62787aeea6ac",
+      "operation_id": "f5042eb9-ce00-4bc9-97de-62787aeea6ac",
+      "group_id": "ae03c792-f9cf-4fcb-9575-4e0d5b1a93a5",
+      "action": "post",
+      "recorded_at": "2026-10-21T18:37:08.206Z",
+      "details": {
+        "reason": null,
+        "schedules": [
+          {
+            "id": "429d6124-3558-509c-9fec-44fdc511dfa7",
+            "key": "due:7984aa34-48ca-4170-9962-b7a35155c5cc:2",
+            "type": "occurrence",
+            "due_on": "2026-11-22",
+            "period": "2",
+            "schedule_id": "7984aa34-48ca-4170-9962-b7a35155c5cc",
+            "fee_centavos": 0,
+            "definition_id": "9df166a2-61c1-42d4-aa64-b1a845e13209",
+            "amount_centavos": 100000,
+            "previous_event_id": null
+          },
+          {
+            "id": "ceb1947a-fff2-5c51-9d97-06e29dd26e74",
+            "key": "due:7984aa34-48ca-4170-9962-b7a35155c5cc:3",
+            "type": "occurrence",
+            "due_on": "2026-12-22",
+            "period": "3",
+            "schedule_id": "7984aa34-48ca-4170-9962-b7a35155c5cc",
+            "fee_centavos": 0,
+            "definition_id": "9df166a2-61c1-42d4-aa64-b1a845e13209",
+            "amount_centavos": 100000,
+            "previous_event_id": null
+          },
+          {
+            "id": "0bd0d5fc-7621-42ac-b8a6-80928c8656a7",
+            "key": "payment:ae03c792-f9cf-4fcb-9575-4e0d5b1a93a5",
+            "type": "payment",
+            "allocations": [
+              {
+                "occurrence_key": "due:7984aa34-48ca-4170-9962-b7a35155c5cc:2",
+                "amount_centavos": 100000
+              },
+              {
+                "occurrence_key": "due:7984aa34-48ca-4170-9962-b7a35155c5cc:3",
+                "amount_centavos": 100000
+              }
+            ],
+            "previous_event_id": null,
+            "purchase_chain_id": "ae03c792-f9cf-4fcb-9575-4e0d5b1a93a5"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -93,7 +93,7 @@ export function entriesToCsv(
 export interface ExportBundle {
   exported_at: string
   app: 'tin'
-  format_version: 2 | 3 | 4
+  format_version: 2 | 3 | 4 | 5
   envelopes: unknown[]
   categories: unknown[]
   entries: readonly EntryRow[]
@@ -110,11 +110,13 @@ export function entriesToJson(
   const bundle: ExportBundle = {
     exported_at: new Date().toISOString(),
     app: 'tin',
-    format_version: extra.audit?.some((a) => a.details.goals)
-      ? 4
-      : extra.audit?.some((a) => a.details.budget)
-        ? 3
-        : 2,
+    format_version: extra.audit?.some((a) => a.details.schedules)
+      ? 5
+      : extra.audit?.some((a) => a.details.goals)
+        ? 4
+        : extra.audit?.some((a) => a.details.budget)
+          ? 3
+          : 2,
     envelopes,
     categories,
     entries,

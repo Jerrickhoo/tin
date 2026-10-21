@@ -1,6 +1,7 @@
 import { assignedMonths, baseEnvelopeAvailability, receiptMonth } from './budget'
 import { manilaMonthKey } from './dates'
 import { ActionError } from './errors'
+import { commitmentReserved } from './schedules'
 import { canonicalJson, intentOf, sumCentavos, type LedgerAudit } from './financial'
 import type { FinancialOperation } from './financial-operation'
 import type { EntryRow } from './groups'
@@ -81,6 +82,7 @@ export function goalFree(
     sumCentavos([
       base.balance,
       -base.held,
+      -commitmentReserved(rows, audit, envelope, now),
       -sumCentavos(
         projectGoals(rows, audit, now, assignedMonths(audit))
           .filter((g) => g.goal.envelope_id === envelope)

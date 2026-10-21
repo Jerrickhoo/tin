@@ -1,0 +1,13 @@
+{
+  "checked_at": "2026-10-21T19:17:28.651Z",
+  "passed": true,
+  "read_only": true,
+  "all_public_data_matches_backup": true,
+  "authenticated_owners_checked": 2,
+  "foreign_owner_reads_denied": true,
+  "capability_permissions_passed": true,
+  "private_helpers_not_executable": true,
+  "postgrest_discovery_passed": true,
+  "ledger_test_writes": false,
+  "entries": 423
+}

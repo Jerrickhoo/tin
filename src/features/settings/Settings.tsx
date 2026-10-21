@@ -86,6 +86,8 @@ function downloadFile(name: string, content: string, type: string) {
 const describeOp = (op: OutboxOp): string => {
   switch (op.op) {
     case 'financial':
+      if (op.operation.schedule_events?.length)
+        return `scheduled activity (${op.operation.schedule_events.map((e) => e.type).join(', ')})${op.operation.rows.length ? ' with an actual payment' : ' (no money movement)'}`
       if (op.operation.goal_events?.length)
         return `goal activity (${op.operation.goal_events.map((e) => e.type).join(', ')})${op.operation.rows.length ? ' with actual money movement' : ' (reservations only)'}`
       if (op.operation.budget_event)
@@ -667,9 +669,9 @@ function RestoreSection() {
       <h3 className="font-display text-[0.6875rem] leading-relaxed">Restore from a backup</h3>
       <p className="mt-1 mb-3 text-sm text-ink-soft">
         Read a <code className="text-ink">tin-export-….json</code> back in. Entries, linked
-        financial records, budget plans and goals — envelopes, categories and your 70/20/10 split
-        are matched by name, never overwritten. Re-reading the same file changes nothing, so it is
-        safe to retry.
+        financial records, subscriptions, installment plans, budget plans and goals — envelopes,
+        categories and your 70/20/10 split are matched by name, never overwritten. Re-reading the
+        same file changes nothing, so it is safe to retry.
       </p>
 
       {plan === null ? (
@@ -846,9 +848,9 @@ function DangerZone({
     <section className="card border-neg/40 p-4">
       <h3 className="font-display text-[0.6875rem] leading-relaxed text-neg">Erase everything</h3>
       <p className="mt-1 text-sm text-ink-soft">
-        Delete every entry, envelope, category, recurring template, budget plan and goal on this
-        account and start over as if it were new. This cannot be undone — not by Tin, and not by
-        anyone else.
+        Delete every entry, envelope, category, recurring template, subscription, installment plan,
+        budget plan and goal on this account and start over as if it were new. This cannot be undone
+        — not by Tin, and not by anyone else.
       </p>
 
       {!open ? (
@@ -872,7 +874,7 @@ function DangerZone({
                 {counts ? `${counts.envelopes} envelopes` : 'your envelopes'} and{' '}
                 {counts ? `${counts.categories} categories` : 'categories'}, back to the starter set
               </li>
-              <li>every recurring template</li>
+              <li>every recurring template, subscription and installment plan</li>
               <li>
                 your streak, {counts ? `${counts.checkIns} check-in days` : 'check-in days'} and any
                 repair saves
@@ -1102,8 +1104,9 @@ export function Settings() {
           <NavCard to="/goals" title="Goals & allocations">
             Reserve money within an envelope, split new income, and review monthly allocations.
           </NavCard>
-          <NavCard to="/recurring" title="Recurring">
-            Rent, allowance, subscriptions — they log themselves on app open.
+          <NavCard to="/recurring" title="Upcoming">
+            Review subscriptions, installments and monthly allocations, or manage legacy auto-post
+            templates.
           </NavCard>
           <NavCard to="/import" title="Import a statement">
             Backfill old transactions from a pasted table or CSV. Read on this device, reviewed row
