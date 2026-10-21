@@ -1,0 +1,25 @@
+{
+  "checked_at": "2026-10-21T17:58:06.239Z",
+  "passed": true,
+  "atomic": true,
+  "tables_compared": 11,
+  "all_existing_fields_preserved": true,
+  "all_owner_invariants_passed": true,
+  "backup_restore_rehearsed": true,
+  "ledger_test_writes": false,
+  "migrations": [
+    {
+      "file": "009_goals_allocations.sql",
+      "sha256": "708986861e296078201deaec68d43929224857e5cb59f45818d40d91af652bc7"
+    },
+    {
+      "file": "010_goals_clock.sql",
+      "sha256": "3487c2770ec70f09874b525213cbd10b28771d0bf27d9ccc6583a9db0f3afcfb"
+    }
+  ],
+  "budget_version": 1,
+  "entries": 423,
+  "financial_version": 1,
+  "goals_version": 1,
+  "registered_migrations": 2
+}

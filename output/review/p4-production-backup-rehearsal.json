@@ -1,0 +1,34 @@
+{
+  "checked_at": "2026-10-21T17:57:44.152Z",
+  "passed": true,
+  "read_only_production": true,
+  "backup_verified": true,
+  "local_restore_verified": true,
+  "all_fields_preserved_after_rehearsal": true,
+  "invariants_passed": true,
+  "tables": 11,
+  "entries": 423,
+  "table_counts": {
+    "profiles": 1,
+    "envelopes": 4,
+    "categories": 16,
+    "ledger_groups": 363,
+    "entries": 423,
+    "recurring_templates": 0,
+    "streak_saves": 1,
+    "checkin_days": 79,
+    "obligations": 0,
+    "ledger_operations": 0,
+    "ledger_audit": 0
+  },
+  "migrations": [
+    {
+      "file": "009_goals_allocations.sql",
+      "sha256": "708986861e296078201deaec68d43929224857e5cb59f45818d40d91af652bc7"
+    },
+    {
+      "file": "010_goals_clock.sql",
+      "sha256": "3487c2770ec70f09874b525213cbd10b28771d0bf27d9ccc6583a9db0f3afcfb"
+    }
+  ]
+}

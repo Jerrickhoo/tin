@@ -1,0 +1,26 @@
+{
+  "checked_at": "2026-10-21T18:03:47.987Z",
+  "passed": true,
+  "url": "https://tin-jar.netlify.app",
+  "authenticated_existing_probe": true,
+  "real_backend_reads": true,
+  "production_ledger_writes": false,
+  "checkin_suppressed": true,
+  "strict_csp": true,
+  "assets": [
+    "/assets/index-2BEoQ3so.js"
+  ],
+  "release_marker": "2026.10.21.p4",
+  "phone_width": 390,
+  "deep_link_routes": [
+    "/goals",
+    "/budget",
+    "/history",
+    "/settings",
+    "/patch-notes"
+  ],
+  "new_goal_cancel": true,
+  "offline_service_worker_reload": true,
+  "errors": [],
+  "cspErrors": []
+}
