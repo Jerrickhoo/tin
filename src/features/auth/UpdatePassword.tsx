@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router'
 import { supabase } from '../../db/supabase'
 import { AuthShell, buttonClass, fieldClass } from './AuthShell'
 import { useSession } from './useSession'
+import { authErrorMessage } from '../../lib/errors'
 
 /**
  * Landing page for the password-recovery email link. The link carries a code
@@ -20,10 +21,15 @@ export function UpdatePassword() {
     e.preventDefault()
     setBusy(true)
     setError(null)
-    const { error } = await supabase.auth.updateUser({ password })
-    setBusy(false)
-    if (error) setError(error.message)
-    else navigate('/', { replace: true })
+    try {
+      const { error } = await supabase.auth.updateUser({ password })
+      if (error) throw error
+      navigate('/', { replace: true })
+    } catch (error) {
+      setError(authErrorMessage(error, 'save your new password'))
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -42,6 +48,7 @@ export function UpdatePassword() {
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
           <input
             type="password"
+            aria-label="New password"
             required
             minLength={8}
             autoComplete="new-password"
@@ -50,7 +57,11 @@ export function UpdatePassword() {
             onChange={(e) => setPassword(e.target.value)}
             className={fieldClass}
           />
-          {error && <p className="text-sm text-neg">{error}</p>}
+          {error && (
+            <p role="alert" className="text-sm text-neg">
+              {error}
+            </p>
+          )}
           <button type="submit" disabled={busy} className={buttonClass}>
             {busy ? 'Saving…' : 'Save new password'}
           </button>

@@ -1,5 +1,6 @@
 import { MONEY_TYPE_SNAPSHOT_KEY } from './local-keys'
 import type { EntryRow } from './groups'
+import { sumCentavos } from './financial'
 
 export type MoneyType = 'online' | 'reallife'
 
@@ -138,9 +139,8 @@ export function summarizeMoneyTypeTotals(rows: readonly EntryRow[]): MoneyTypeTo
   return rows.reduce<MoneyTypeTotals>(
     (totals, row) => {
       if (row.voided_at !== null) return totals
-      if (row.money_type === 'online') totals.online += row.amount_centavos
-      else if (row.money_type === 'reallife') totals.reallife += row.amount_centavos
-      else totals.untagged += row.amount_centavos
+      const bucket = row.money_type ?? 'untagged'
+      totals[bucket] = sumCentavos([totals[bucket], row.amount_centavos])
       return totals
     },
     { online: 0, reallife: 0, untagged: 0 },

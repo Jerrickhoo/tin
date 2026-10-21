@@ -19,6 +19,7 @@
 
 import { manilaDayKey } from './dates'
 import type { EntryRow } from './groups'
+import { intentOf, projectFinancial, sumCentavos } from './financial'
 
 /**
  * Balance spread evenly over the days the month has left, today included.
@@ -52,7 +53,7 @@ export function allowancePerDay(balanceCentavos: number, daysRemaining: number):
  * Today's spending, split by envelope.
  *
  * The same exclusions `spentOnDay` applies and for the same reasons — expenses
- * only, voided rows dropped. Transfers are excluded even though they do move an
+ * less qualifying returns on receipt day, voided rows dropped. Transfers are excluded even though they do move an
  * envelope's balance: money crossing between envelopes has not left the tin, so
  * counting it as spending would make covering an overdraft look like a purchase.
  */
@@ -62,14 +63,17 @@ export function spentTodayByEnvelope(
 ): Map<string, number> {
   const byEnvelope = new Map<string, number>()
   for (const row of rows) {
-    if (row.kind !== 'expense') continue
+    if (!['purchase', 'merchant_refund', 'expense_reimbursement'].includes(intentOf(row))) continue
     if (row.voided_at !== null) continue
     const at = new Date(row.occurred_at)
     if (Number.isNaN(at.getTime())) continue
     if (manilaDayKey(at) !== dayKey) continue
     byEnvelope.set(
       row.envelope_id,
-      (byEnvelope.get(row.envelope_id) ?? 0) + Math.abs(row.amount_centavos),
+      sumCentavos([
+        byEnvelope.get(row.envelope_id) ?? 0,
+        projectFinancial([row]).netSpendingCentavos,
+      ]),
     )
   }
   return byEnvelope

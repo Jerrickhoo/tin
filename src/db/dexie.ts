@@ -11,6 +11,30 @@
 import Dexie, { type EntityTable } from 'dexie'
 import type { EntryRow } from '../lib/groups'
 import type { OutboxOp } from './outbox'
+import {
+  canonicalJson,
+  assertLedgerBounds,
+  type LedgerAudit,
+  type Obligation,
+} from '../lib/financial'
+import {
+  sameRows,
+  validateFinancialOperation,
+  type FinancialOperation,
+} from '../lib/financial-operation'
+import { ActionError } from '../lib/errors'
+import { validateBudgetHistory, validateBudgetChange } from '../lib/budget'
+import { validateGoalHistory, validateGoalOperation } from '../lib/goal-operations'
+
+export interface FinancialJournal {
+  id: string
+  status: 'pending' | 'accepted' | 'conflict'
+  operation: FinancialOperation
+  before: EntryRow[]
+  beforeObligations?: Obligation[]
+  beforeAudit?: LedgerAudit[]
+  dependencies?: string[]
+}
 
 // Envelope/category mirrors keep every pulled column (extras land in the
 // index signature) so Settings exports lose no fidelity by going local.
@@ -86,6 +110,9 @@ class TinDb extends Dexie {
   checkIns!: EntityTable<CheckInRow, 'day_key'>
   outbox!: EntityTable<OutboxRow, 'seq'>
   meta!: EntityTable<MetaRow, 'key'>
+  obligations!: EntityTable<Obligation, 'id'>
+  audit!: EntityTable<LedgerAudit, 'id'>
+  financialJournal!: EntityTable<FinancialJournal, 'id'>
 
   constructor() {
     super('tin-local')
@@ -108,12 +135,23 @@ class TinDb extends Dexie {
     this.version(3).stores({
       checkIns: 'day_key, synced',
     })
+    this.version(4).stores({
+      obligations: 'id, origin_group_id',
+      audit: 'id, group_id',
+      financialJournal: 'id, status',
+    })
   }
 }
 
 // ---- lifecycle: the db opens once a user is known; reads await the gate ----
 
 let current: TinDb | null = null
+let lifecycle = Promise.resolve()
+function serializeLifecycle(action: () => Promise<void>): Promise<void> {
+  const result = lifecycle.then(action)
+  lifecycle = result.catch(() => {})
+  return result
+}
 let resolveGate: (db: TinDb) => void
 let gate = new Promise<TinDb>((resolve) => {
   resolveGate = resolve
@@ -125,22 +163,17 @@ export function localDb(): Promise<TinDb> {
 }
 
 /** Idempotent; called on login. A different owner means wipe-then-adopt. */
-export async function openForUser(userId: string): Promise<void> {
-  if (!current) current = new TinDb()
-  const owner = await current.meta.get('owner')
-  if (owner && owner.value !== userId) {
-    await Promise.all([
-      current.entries.clear(),
-      current.envelopes.clear(),
-      current.categories.clear(),
-      current.streakSaves.clear(),
-      current.checkIns.clear(),
-      current.outbox.clear(),
-      current.meta.clear(),
-    ])
-  }
-  await current.meta.put({ key: 'owner', value: userId })
-  resolveGate(current)
+export function openForUser(userId: string): Promise<void> {
+  return serializeLifecycle(async () => {
+    const db = current ?? (current = new TinDb())
+    await db.transaction('rw', db.tables, async () => {
+      const owner = await db.meta.get('owner')
+      if (owner && owner.value !== userId)
+        await Promise.all(db.tables.map((table) => table.clear()))
+      await db.meta.put({ key: 'owner', value: userId })
+    })
+    resolveGate(db)
+  })
 }
 
 /** How much of this account is on this device, per table. */
@@ -150,6 +183,8 @@ export interface LocalRowCounts {
   categories: number
   checkIns: number
   streakSaves: number
+  obligations: number
+  audit: number
 }
 
 /**
@@ -164,14 +199,17 @@ export interface LocalRowCounts {
  */
 export async function localRowCounts(): Promise<LocalRowCounts> {
   const db = await localDb()
-  const [entries, envelopes, categories, checkIns, streakSaves] = await Promise.all([
-    db.entries.count(),
-    db.envelopes.count(),
-    db.categories.count(),
-    db.checkIns.count(),
-    db.streakSaves.count(),
-  ])
-  return { entries, envelopes, categories, checkIns, streakSaves }
+  const [entries, envelopes, categories, checkIns, streakSaves, obligations, audit] =
+    await Promise.all([
+      db.entries.count(),
+      db.envelopes.count(),
+      db.categories.count(),
+      db.checkIns.count(),
+      db.streakSaves.count(),
+      db.obligations.count(),
+      db.audit.count(),
+    ])
+  return { entries, envelopes, categories, checkIns, streakSaves, obligations, audit }
 }
 
 /**
@@ -199,7 +237,18 @@ export async function clearLocalDataForReset(userId: string): Promise<void> {
   const db = await localDb()
   await db.transaction(
     'rw',
-    [db.entries, db.envelopes, db.categories, db.streakSaves, db.checkIns, db.outbox, db.meta],
+    [
+      db.entries,
+      db.envelopes,
+      db.categories,
+      db.streakSaves,
+      db.checkIns,
+      db.outbox,
+      db.meta,
+      db.obligations,
+      db.audit,
+      db.financialJournal,
+    ],
     async () => {
       await Promise.all([
         db.entries.clear(),
@@ -213,6 +262,9 @@ export async function clearLocalDataForReset(userId: string): Promise<void> {
         // the money the user just asked to be rid of. The UI warns first.
         db.outbox.clear(),
         db.meta.clear(),
+        db.obligations.clear(),
+        db.audit.clear(),
+        db.financialJournal.clear(),
       ])
       await db.meta.put({ key: 'owner', value: userId })
     },
@@ -223,13 +275,15 @@ export async function clearLocalDataForReset(userId: string): Promise<void> {
 }
 
 /** Logout hygiene (ROADMAP 6.6): delete the whole database, re-arm the gate. */
-export async function wipeLocalDb(): Promise<void> {
-  const db = current ?? new TinDb()
-  current = null
-  gate = new Promise<TinDb>((resolve) => {
-    resolveGate = resolve
+export function wipeLocalDb(): Promise<void> {
+  return serializeLifecycle(async () => {
+    const db = current ?? new TinDb()
+    current = null
+    gate = new Promise<TinDb>((resolve) => {
+      resolveGate = resolve
+    })
+    await db.delete()
   })
-  await db.delete()
 }
 
 // ---- outbox change notifications (sync.ts listens; UI badge follows) ----
@@ -270,9 +324,12 @@ export async function applyLocalInsert(
   rows: readonly Omit<EntryRow, 'voided_at' | 'void_reason'>[],
 ): Promise<void> {
   const db = await localDb()
+  if (rows.some((row) => row.financial))
+    throw new RangeError('Classified entries require an atomic financial operation')
   const full: EntryRow[] = rows.map((r) => ({ ...r, voided_at: null, void_reason: null }))
   await db.transaction('rw', db.entries, db.outbox, async () => {
     await mirrorInsertIgnoringDuplicates(db, full)
+    assertLedgerBounds(await db.entries.toArray())
     await db.outbox.add({
       created_at: new Date().toISOString(),
       attempts: 0,
@@ -384,6 +441,7 @@ export async function discardOutboxRow(seq: number): Promise<void> {
   if (!head || head.seq !== seq) {
     throw new Error('That write is no longer at the front of the queue — nothing was discarded.')
   }
+  if (head.payload.op === 'financial') await rejectFinancialOperation(head.payload.operation.id)
   await db.outbox.delete(seq)
   notifyOutboxChanged('drain')
 }
@@ -415,23 +473,350 @@ function normalizeIso(value: string): string {
  */
 export async function mirrorApplyPulledEntries(rows: readonly EntryRow[]): Promise<void> {
   const db = await localDb()
-  const ids = rows.map((r) => r.id)
-  const existing = new Map(
-    (await db.entries.where('id').anyOf(ids).toArray()).map((r) => [r.id, r]),
+  await db.transaction('rw', db.entries, db.financialJournal, async () => {
+    const pending = await db.financialJournal.where('status').equals('pending').toArray()
+    const heldGroups = new Set(
+      pending
+        .flatMap((item) => [
+          item.operation.target_group_id,
+          item.operation.predecessor?.[0]?.group_id,
+          ...item.operation.rows.map((row) => row.group_id),
+        ])
+        .filter((id): id is string => !!id),
+    )
+    rows = rows.filter((row) => !heldGroups.has(row.group_id))
+    const ids = rows.map((r) => r.id)
+    const existing = new Map(
+      (await db.entries.where('id').anyOf(ids).toArray()).map((r) => [r.id, r]),
+    )
+    await db.entries.bulkPut(
+      rows.map((r) => {
+        const next: EntryRow = {
+          ...r,
+          occurred_at: normalizeIso(r.occurred_at),
+          voided_at: r.voided_at === null ? null : normalizeIso(r.voided_at),
+        }
+        if (!('money_type' in r)) {
+          const local = existing.get(r.id)?.money_type
+          if (local !== undefined) next.money_type = local
+        }
+        if (!('financial' in r)) {
+          const local = existing.get(r.id)?.financial
+          if (local !== undefined) next.financial = local
+        }
+        return next
+      }),
+    )
+  })
+}
+
+export async function financialCapability(): Promise<boolean> {
+  return (await (await localDb()).meta.get('financial_version'))?.value === '1'
+}
+
+export async function setFinancialCapability(supported: boolean): Promise<void> {
+  await (await localDb()).meta.put({ key: 'financial_version', value: supported ? '1' : '0' })
+}
+
+export async function applyLocalFinancialOperation(operation: FinancialOperation): Promise<void> {
+  const db = await localDb()
+  if (!(await financialCapability())) throw new ActionError('financial_upgrade')
+  await db.transaction(
+    'rw',
+    [
+      db.entries,
+      db.obligations,
+      db.audit,
+      db.financialJournal,
+      db.outbox,
+      db.envelopes,
+      db.categories,
+    ],
+    async () => {
+      const replay = await db.financialJournal.get(operation.id)
+      if (replay) {
+        if (canonicalJson(replay.operation) !== canonicalJson(operation))
+          throw new RangeError('Operation identity was reused')
+        if (replay.status === 'conflict') throw new ActionError('financial_conflict')
+        return
+      }
+      const [entries, obligations, pending, audit] = await Promise.all([
+        db.entries.toArray(),
+        db.obligations.toArray(),
+        db.financialJournal.where('status').equals('pending').toArray(),
+        db.audit.toArray(),
+      ])
+      const targets = new Set(
+        [
+          operation.target_group_id,
+          operation.cancel_obligation_id,
+          operation.predecessor?.[0]?.group_id,
+          operation.obligation?.origin_group_id,
+          ...(operation.budget_event && operation.budget_event.type !== 'schedule'
+            ? [operation.budget_event.receipt_chain_id]
+            : []),
+          ...operation.rows.flatMap((row) => [
+            row.financial?.origin_group_id,
+            row.financial?.obligation_id,
+          ]),
+        ].filter(Boolean),
+      )
+      const dependencies = pending
+        .filter(
+          (item) =>
+            operation.check ||
+            operation.goal_events?.length ||
+            (operation.budget_event &&
+              item.operation.budget_event?.key === operation.budget_event.key) ||
+            [
+              item.operation.target_group_id,
+              item.operation.predecessor?.[0]?.group_id,
+              item.operation.obligation?.id,
+              ...item.operation.rows.flatMap((row) => [row.group_id, row.financial?.obligation_id]),
+            ].some((id) => id && targets.has(id)),
+        )
+        .map((item) => item.id)
+      validateFinancialOperation(operation, entries, [
+        ...obligations,
+        ...(operation.obligations ?? []),
+      ])
+      validateGoalOperation(operation, entries, audit, await db.envelopes.toArray())
+      if (operation.budget_event) {
+        validateBudgetChange(operation.budget_event, audit, entries, operation.rows)
+        const event = operation.budget_event
+        if (
+          event.type !== 'assignment' &&
+          event.envelope_id &&
+          !(await db.envelopes.get(event.envelope_id))
+        )
+          throw new RangeError('Choose an envelope on this ledger')
+      }
+      if (operation.audit) {
+        validateBudgetHistory(
+          [
+            ...audit.filter((a) => !operation.audit!.some((b) => b.id === a.id)),
+            ...operation.audit,
+          ],
+          [...entries.filter((e) => !operation.rows.some((r) => r.id === e.id)), ...operation.rows],
+          new Set((await db.envelopes.toArray()).map((e) => e.id)),
+        )
+        validateGoalHistory(
+          [
+            ...audit.filter((a) => !operation.audit!.some((b) => b.id === a.id)),
+            ...operation.audit,
+          ],
+          [...entries.filter((e) => !operation.rows.some((r) => r.id === e.id)), ...operation.rows],
+          new Set((await db.envelopes.toArray()).map((e) => e.id)),
+        )
+      }
+      const groupId = operation.predecessor?.[0]?.group_id ?? operation.target_group_id
+      const ids = new Set(operation.rows.map((row) => row.id))
+      const before = entries.filter((row) => row.group_id === groupId || ids.has(row.id))
+      const beforeObligations = obligations.filter(
+        (item) =>
+          operation.cancel_obligation_id === item.id ||
+          operation.obligations?.some((next) => next.id === item.id),
+      )
+      const beforeAudit = operation.audit
+        ? await db.audit.bulkGet(operation.audit.map((item) => item.id))
+        : []
+      // Existing ids are accepted only as exact replay, never overwrite money.
+      for (const row of operation.rows) {
+        if (!(await db.envelopes.get(row.envelope_id)))
+          throw new RangeError('Choose an envelope on this ledger')
+        if (
+          row.category_id &&
+          (await db.categories.get(row.category_id))?.envelope_id !== row.envelope_id
+        )
+          throw new RangeError('The category must belong to its envelope')
+        const old = entries.find((item) => item.id === row.id)
+        if (old && !sameRows([old], [row])) throw new ActionError('financial_conflict')
+      }
+      await db.entries.bulkPut(operation.rows)
+      if (
+        groupId &&
+        (operation.action === 'correct' ||
+          operation.action === 'void' ||
+          operation.action === 'restore')
+      ) {
+        await db.entries
+          .where('group_id')
+          .equals(groupId)
+          .modify({
+            voided_at: operation.action === 'restore' ? null : operation.recorded_at,
+            void_reason:
+              operation.action === 'restore'
+                ? null
+                : (operation.reason ?? (operation.action === 'correct' ? 'Corrected' : null)),
+          })
+      }
+      if (operation.obligation) await db.obligations.add(operation.obligation)
+      assertLedgerBounds(await db.entries.toArray())
+      if (operation.cancel_obligation_id)
+        await db.obligations.update(operation.cancel_obligation_id, {
+          voided_at: operation.recorded_at,
+        })
+      if (operation.obligations) {
+        for (const item of operation.obligations) {
+          const old = await db.obligations.get(item.id)
+          if (old && canonicalJson(old) !== canonicalJson(item))
+            throw new ActionError('financial_conflict')
+          await db.obligations.put(item)
+        }
+      }
+      if (operation.audit) {
+        for (const item of operation.audit) {
+          const old = await db.audit.get(item.id)
+          if (old && canonicalJson(old) !== canonicalJson(item))
+            throw new ActionError('financial_conflict')
+        }
+        await db.audit.bulkPut(operation.audit)
+      }
+      await db.audit.add({
+        id: operation.id,
+        operation_id: operation.id,
+        group_id:
+          operation.rows[0]?.group_id ?? groupId ?? operation.obligation?.origin_group_id ?? null,
+        action: operation.action,
+        recorded_at: operation.recorded_at,
+        details: {
+          ...(operation.check
+            ? { ...operation.check, expected_rows: undefined }
+            : { reason: operation.reason ?? null }),
+          ...(operation.budget_event ? { budget: operation.budget_event } : {}),
+          ...(operation.goal_events?.length ? { goals: operation.goal_events } : {}),
+        },
+      })
+      await db.financialJournal.add({
+        id: operation.id,
+        status: 'pending',
+        operation,
+        before,
+        beforeObligations,
+        beforeAudit: beforeAudit.filter((item): item is LedgerAudit => !!item),
+        dependencies,
+      })
+      await db.outbox.add({
+        created_at: operation.recorded_at,
+        attempts: 0,
+        last_error: null,
+        payload: { op: 'financial', operation },
+      })
+    },
   )
-  await db.entries.bulkPut(
-    rows.map((r) => {
-      const next: EntryRow = {
-        ...r,
-        occurred_at: normalizeIso(r.occurred_at),
-        voided_at: r.voided_at === null ? null : normalizeIso(r.voided_at),
+  notifyOutboxChanged('enqueue')
+}
+
+export async function acceptFinancialOperation(id: string): Promise<void> {
+  await (await localDb()).financialJournal.update(id, { status: 'accepted' })
+}
+
+export async function rejectFinancialOperation(id: string): Promise<void> {
+  const db = await localDb()
+  await db.transaction(
+    'rw',
+    [db.entries, db.obligations, db.audit, db.financialJournal, db.meta],
+    async () => {
+      const all = await db.financialJournal.where('status').equals('pending').toArray()
+      const ordered: FinancialJournal[] = [],
+        seen = new Set<string>()
+      const visit = (key: string) => {
+        if (seen.has(key)) return
+        seen.add(key)
+        for (const item of all.filter((item) => item.dependencies?.includes(key))) visit(item.id)
+        const item = all.find((item) => item.id === key)
+        if (item) ordered.push(item)
       }
-      if (!('money_type' in r)) {
-        const local = existing.get(r.id)?.money_type
-        if (local !== undefined) next.money_type = local
+      visit(id)
+      for (const journal of ordered) {
+        await db.entries.bulkDelete(journal.operation.rows.map((row) => row.id))
+        await db.entries.bulkPut(journal.before)
+        if (journal.operation.obligation)
+          await db.obligations.delete(journal.operation.obligation.id)
+        // Import conflicts are preflighted against a complete bundle. Existing
+        // imported ids are never overwritten; only new records are rolled back.
+        if (journal.operation.obligations)
+          await db.obligations.bulkDelete(journal.operation.obligations.map((item) => item.id))
+        if (journal.operation.audit)
+          await db.audit.bulkDelete(journal.operation.audit.map((item) => item.id))
+        await db.obligations.bulkPut(journal.beforeObligations ?? [])
+        await db.audit.bulkPut(journal.beforeAudit ?? [])
+        await db.audit.delete(journal.id)
+        await db.financialJournal.update(journal.id, { status: 'conflict' })
       }
-      return next
-    }),
+      if (ordered.length) await db.meta.delete('entriesCursor')
+    },
+  )
+}
+
+export async function mirrorFinancialState(
+  obligations: Obligation[],
+  audit: LedgerAudit[],
+): Promise<void> {
+  const db = await localDb()
+  // Append-only server records; pending local records must survive a pull.
+  await db.transaction('rw', db.obligations, db.audit, db.financialJournal, async () => {
+    const pending = await db.financialJournal.where('status').equals('pending').toArray()
+    const held = new Set(
+      pending
+        .flatMap((item) => [
+          item.operation.obligation?.id,
+          item.operation.cancel_obligation_id,
+          ...(item.operation.obligations ?? []).map((item) => item.id),
+        ])
+        .filter(Boolean),
+    )
+    await db.obligations.bulkPut(obligations.filter((item) => !held.has(item.id)))
+    await db.audit.bulkPut(audit)
+  })
+}
+
+/** Publish a pulled financial snapshot and its cursor together. A failed audit
+ * fetch must never expose newly received cash before its future-month hold. */
+export async function mirrorLedgerPull(params: {
+  rows: EntryRow[]
+  cursor: string | null
+  financial?: { obligations: Obligation[]; audit: LedgerAudit[] }
+  envelopes: EnvelopeRow[]
+  categories: CategoryRow[]
+}): Promise<boolean> {
+  const db = await localDb()
+  return db.transaction(
+    'rw',
+    [
+      db.entries,
+      db.audit,
+      db.obligations,
+      db.financialJournal,
+      db.meta,
+      db.envelopes,
+      db.categories,
+    ],
+    async () => {
+      const envReplaced = await mirrorReplaceEnvelopes(params.envelopes)
+      const catReplaced = await mirrorReplaceCategories(params.categories)
+      await mirrorApplyPulledEntries(params.rows)
+      if (params.financial) {
+        await mirrorFinancialState(params.financial.obligations, params.financial.audit)
+        validateBudgetHistory(
+          await db.audit.toArray(),
+          await db.entries.toArray(),
+          new Set((await db.envelopes.toArray()).map((e) => e.id)),
+        )
+        validateGoalHistory(
+          await db.audit.toArray(),
+          await db.entries.toArray(),
+          new Set((await db.envelopes.toArray()).map((e) => e.id)),
+        )
+      }
+      if (params.cursor !== null) await setCursor(params.cursor)
+      return (
+        params.rows.length > 0 ||
+        !!params.financial ||
+        (envReplaced && params.envelopes.length > 0) ||
+        (catReplaced && params.categories.length > 0)
+      )
+    },
   )
 }
 

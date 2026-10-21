@@ -50,7 +50,13 @@ describe('pushInsertEntries', () => {
     upsertMock.mockReset()
   })
 
-  it('retries without money_type when the schema is missing that column', async () => {
+  it('preserves structured codes as a cause for safe UI classification', async () => {
+    const error = { code: '23514', message: 'private SQL details' }
+    upsertMock.mockResolvedValueOnce({ data: null, error })
+    await expect(pushInsertEntries([])).rejects.toMatchObject({ cause: error })
+  })
+
+  it('keeps tagged money queued rather than stripping its account on an old schema', async () => {
     const rows = [
       {
         id: 'entry-1',
@@ -75,22 +81,12 @@ describe('pushInsertEntries', () => {
       })
       .mockResolvedValueOnce({ data: null, error: null })
 
-    await expect(pushInsertEntries(rows)).resolves.toBeUndefined()
+    await expect(pushInsertEntries(rows)).rejects.toMatchObject({
+      actionFailure: 'financial_upgrade',
+    })
 
-    expect(upsertMock).toHaveBeenCalledTimes(2)
+    expect(upsertMock).toHaveBeenCalledTimes(1)
     expect(upsertMock.mock.calls[0][0]).toEqual([rows[0]])
-    expect(upsertMock.mock.calls[1][0]).toEqual([
-      {
-        id: 'entry-1',
-        group_id: 'group-1',
-        kind: 'income',
-        envelope_id: 'env-1',
-        category_id: null,
-        amount_centavos: 1000,
-        note: 'salary',
-        occurred_at: '2026-01-01T00:00:00.000Z',
-      },
-    ])
   })
 })
 

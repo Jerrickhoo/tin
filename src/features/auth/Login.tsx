@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate } from 'react-router'
 import { supabase } from '../../db/supabase'
 import { AuthShell, buttonClass, fieldClass } from './AuthShell'
 import { useSession } from './useSession'
+import { authErrorMessage } from '../../lib/errors'
 
 export function Login() {
   const { session, loading } = useSession()
@@ -18,10 +19,15 @@ export function Login() {
     e.preventDefault()
     setBusy(true)
     setError(null)
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    setBusy(false)
-    if (error) setError(error.message)
-    else navigate('/', { replace: true })
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) throw error
+      navigate('/', { replace: true })
+    } catch (error) {
+      setError(authErrorMessage(error, 'sign in'))
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -40,6 +46,7 @@ export function Login() {
       <form onSubmit={onSubmit} className="flex flex-col gap-3">
         <input
           type="email"
+          aria-label="Email"
           required
           autoComplete="email"
           placeholder="you@email.com"
@@ -49,6 +56,7 @@ export function Login() {
         />
         <input
           type="password"
+          aria-label="Password"
           required
           autoComplete="current-password"
           placeholder="Password"
@@ -56,7 +64,11 @@ export function Login() {
           onChange={(e) => setPassword(e.target.value)}
           className={fieldClass}
         />
-        {error && <p className="text-sm text-neg">{error}</p>}
+        {error && (
+          <p role="alert" className="text-sm text-neg">
+            {error}
+          </p>
+        )}
         <button type="submit" disabled={busy} className={buttonClass}>
           {busy ? 'Logging in…' : 'Log in'}
         </button>

@@ -20,7 +20,8 @@ function createMissingSupabaseClient() {
           return new Proxy(
             {},
             {
-              get() {
+              get(_target, method) {
+                if (method === 'onAuthStateChange') return throwMissingConfig
                 return async () => {
                   throwMissingConfig()
                 }
@@ -42,4 +43,8 @@ function createMissingSupabaseClient() {
 }
 
 export const supabase =
-  url?.trim() && anonKey?.trim() ? createClient(url, anonKey) : createMissingSupabaseClient()
+  url?.trim() && anonKey?.trim()
+    ? createClient(url, anonKey, {
+        global: { headers: { 'X-Client-Info': 'tin-ledger/2', 'X-Tin-Goals': '1' } },
+      })
+    : createMissingSupabaseClient()

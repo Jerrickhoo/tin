@@ -7,9 +7,20 @@ import { supabase } from './supabase'
 import type { EntryRow } from '../lib/groups'
 import type { NewEntryRow } from './outbox'
 import type { CategoryRow, EnvelopeRow, PulledCheckIn, StreakSaveRow } from './dexie'
+import {
+  acceptFinancialOperation,
+  localDb,
+  rejectFinancialOperation,
+  setFinancialCapability,
+} from './dexie'
+import { ActionError } from '../lib/errors'
+import type { FinancialOperation } from '../lib/financial-operation'
+import { parseFinancialMetadata, type LedgerAudit, type Obligation } from '../lib/financial'
+import { parseObligations, parseAudit } from '../lib/restore'
 
 const ENTRY_COLUMNS =
-  'id, group_id, kind, envelope_id, category_id, amount_centavos, note, occurred_at, voided_at, void_reason, money_type'
+  'id, group_id, kind, envelope_id, category_id, amount_centavos, note, occurred_at, voided_at, void_reason, money_type, financial'
+const ENTRY_COLUMNS_WITHOUT_FINANCIAL = ENTRY_COLUMNS.replace(', financial', '')
 
 /**
  * The same column list without `money_type`, for a database that predates
@@ -55,29 +66,30 @@ function isMissingEntriesMoneyTypeColumn(
   )
 }
 
-function sanitizeEntryPayload(rows: readonly NewEntryRow[]): NewEntryRow[] {
-  return rows.map((row) => {
-    const sanitized = { ...row }
-    delete sanitized.money_type
-    return sanitized as NewEntryRow
-  })
-}
-
 export async function pushInsertEntries(rows: readonly NewEntryRow[]): Promise<void> {
+  if (rows.some((row) => row.financial)) throw new ActionError('financial_upgrade')
   // upsert on the client-generated primary key: a retry after a lost response
   // collapses into the already-landed rows instead of double-counting money
   const { error } = await supabase.from('entries').upsert([...rows], { ignoreDuplicates: true })
   if (!error) return
 
   if (isMissingEntriesMoneyTypeColumn(error)) {
-    const { error: retryError } = await supabase
-      .from('entries')
-      .upsert(sanitizeEntryPayload(rows), { ignoreDuplicates: true })
+    if (rows.some((row) => row.money_type != null))
+      throw new ActionError('financial_upgrade', { cause: error })
+    const { error: retryError } = await supabase.from('entries').upsert(
+      rows.map((row) => {
+        const copy = { ...row }
+        delete copy.money_type
+        delete copy.financial
+        return copy
+      }),
+      { ignoreDuplicates: true },
+    )
     if (!retryError) return
-    throw new Error(retryError.message)
+    throw new Error(retryError.message, { cause: retryError })
   }
 
-  throw new Error(error.message)
+  throw new Error(error.message, { cause: error })
 }
 
 export async function pushVoidGroup(
@@ -92,7 +104,7 @@ export async function pushVoidGroup(
     .update({ voided_at: voidedAt, void_reason: reason })
     .eq('group_id', groupId)
     .is('voided_at', null)
-  if (error) throw new Error(error.message)
+  if (error) throw new Error(error.message, { cause: error })
 }
 
 /**
@@ -114,7 +126,7 @@ export async function pushUnvoidGroup(groupId: string): Promise<void> {
     .update({ voided_at: null, void_reason: null })
     .eq('group_id', groupId)
     .not('voided_at', 'is', null)
-  if (error) throw new Error(error.message)
+  if (error) throw new Error(error.message, { cause: error })
 }
 
 export interface PulledEntriesPage {
@@ -145,15 +157,27 @@ export async function pullEntriesPage(
   }
 
   let { data, error } = await run(ENTRY_COLUMNS)
+  let hasFinancial = true
+  if (
+    error &&
+    !/money_type/i.test(error.message ?? '') &&
+    (error.code === '42703' ||
+      error.code === 'PGRST204' ||
+      /financial.*column|column.*financial/i.test(error.message ?? ''))
+  ) {
+    hasFinancial = false
+    ;({ data, error } = await run(ENTRY_COLUMNS_WITHOUT_FINANCIAL))
+  }
   // A database without migration 005 applied. Retrying without the column keeps
   // the ledger syncing; `hasMoneyType` then tells the mirror not to read the
   // absent field as "the server says untagged".
   let hasMoneyType = true
   if (error && isMissingEntriesMoneyTypeColumn(error)) {
     hasMoneyType = false
+    hasFinancial = false
     ;({ data, error } = await run(ENTRY_COLUMNS_WITHOUT_MONEY_TYPE))
   }
-  if (error) throw new Error(error.message)
+  if (error) throw new Error(error.message, { cause: error })
 
   const raw = (data ?? []) as unknown as (EntryRow & { updated_at: string })[]
   const rows: EntryRow[] = raw.map((r) => ({
@@ -171,6 +195,9 @@ export async function pullEntriesPage(
     // does not. The mirror distinguishes the two: null overwrites a local tag
     // because the server genuinely says untagged, undefined leaves it alone.
     ...(hasMoneyType ? { money_type: r.money_type ?? null } : {}),
+    ...(hasFinancial
+      ? { financial: r.financial == null ? null : parseFinancialMetadata(r.financial) }
+      : {}),
   }))
   const updatedAts = raw.map((r) => r.updated_at)
   const lastRaw = raw[raw.length - 1]
@@ -181,15 +208,75 @@ export async function pullEntriesPage(
   }
 }
 
+export async function probeFinancialCapability(): Promise<boolean> {
+  const { data, error } = await supabase.rpc('financial_capabilities')
+  if (error && !['PGRST202', '42883'].includes(error.code ?? ''))
+    throw new Error(error.message, { cause: error })
+  const supported = !error && data === 1
+  await setFinancialCapability(supported)
+  return supported
+}
+
+export async function pushFinancialOperation(operation: FinancialOperation): Promise<void> {
+  const journal = await (await localDb()).financialJournal.get(operation.id)
+  if (journal?.status === 'conflict') throw new ActionError('financial_conflict')
+  const { error } = await supabase.rpc('apply_financial_operation', { p_operation: operation })
+  if (!error) {
+    await acceptFinancialOperation(operation.id)
+    return
+  }
+  if (['PGRST202', '42883', '42703'].includes(error.code ?? ''))
+    throw new ActionError('financial_upgrade', { cause: error })
+  if (/^(?:22|23)/.test(error.code ?? '') || error.code === 'P0001') {
+    await rejectFinancialOperation(operation.id)
+    throw new ActionError('financial_conflict', { cause: error })
+  }
+  throw new Error(error.message, { cause: error })
+}
+
+export async function pullFinancialState(): Promise<{
+  obligations: Obligation[]
+  audit: LedgerAudit[]
+}> {
+  const [claims, events] = await Promise.all([
+    pullFinancialTable('obligations'),
+    pullFinancialTable('ledger_audit'),
+  ])
+  return {
+    obligations: parseObligations(claims),
+    audit: parseAudit(events),
+  }
+}
+
+/** Supabase caps each response; complete histories must cross that boundary. */
+async function pullFinancialTable(table: 'obligations' | 'ledger_audit'): Promise<unknown[]> {
+  const rows: unknown[] = []
+  let after: string | null = null
+  for (;;) {
+    let query = supabase.from(table).select('*').order('id', { ascending: true }).limit(1000)
+    if (after) query = query.gt('id', after)
+    const { data, error } = await query
+    if (error) throw new Error(error.message, { cause: error })
+    const page = data ?? []
+    if (page.length === 0) return rows
+    rows.push(...page)
+    const next = page.at(-1)?.id
+    if (typeof next !== 'string' || next === after)
+      throw new Error('Invalid financial history cursor')
+    after = next
+    // Continue until an empty page, even if the server caps below 1000.
+  }
+}
+
 export async function pullEnvelopes(): Promise<EnvelopeRow[]> {
   const { data, error } = await supabase.from('envelopes').select('*').order('sort_order')
-  if (error) throw new Error(error.message)
+  if (error) throw new Error(error.message, { cause: error })
   return (data ?? []) as EnvelopeRow[]
 }
 
 export async function pullCategories(): Promise<CategoryRow[]> {
   const { data, error } = await supabase.from('categories').select('*').order('name')
-  if (error) throw new Error(error.message)
+  if (error) throw new Error(error.message, { cause: error })
   return (data ?? []) as CategoryRow[]
 }
 
@@ -218,7 +305,7 @@ export async function pullStreakSaves(): Promise<StreakSaveRow[]> {
   const { data, error } = await supabase.from('streak_saves').select('day_key').order('day_key')
   if (error) {
     if (isMissingTable(error.code)) return []
-    throw new Error(error.message)
+    throw new Error(error.message, { cause: error })
   }
   return (data ?? []) as StreakSaveRow[]
 }
@@ -228,7 +315,7 @@ export async function pullCheckIns(): Promise<PulledCheckIn[]> {
   const { data, error } = await supabase.from('checkin_days').select('day_key').order('day_key')
   if (error) {
     if (isMissingTable(error.code)) return []
-    throw new Error(error.message)
+    throw new Error(error.message, { cause: error })
   }
   return (data ?? []) as PulledCheckIn[]
 }
@@ -252,7 +339,7 @@ export async function pushCheckIns(dayKeys: readonly string[]): Promise<boolean>
   )
   if (error) {
     if (isMissingTable(error.code)) return false
-    throw new Error(error.message)
+    throw new Error(error.message, { cause: error })
   }
   return true
 }

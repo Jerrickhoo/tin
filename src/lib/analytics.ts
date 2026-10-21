@@ -7,6 +7,7 @@
 
 import { manilaDayKey } from './dates'
 import type { EntryRow } from './groups'
+import { intentOf, projectFinancial, sumCentavos } from './financial'
 
 /**
  * The rows of a month that fall on or before a given day of that month.
@@ -68,7 +69,9 @@ export interface EnvelopeFlow {
 export interface MonthSummary {
   incomeCentavos: number
   spendingCentavos: number // positive number
-  netCentavos: number // income - spending (adjustments excluded)
+  returnedCentavos: number
+  netSpendingCentavos: number
+  netCentavos: number // income - net spending (principal/adjustments excluded)
   adjustmentNetCentavos: number
   perEnvelope: Map<string, EnvelopeFlow>
   /** expenses only, by category — the "where did it go" list */
@@ -88,11 +91,14 @@ export interface MonthSummary {
 }
 
 export function summarizeMonth(rows: readonly EntryRow[]): MonthSummary {
+  const projection = projectFinancial(rows)
   const summary: MonthSummary = {
-    incomeCentavos: 0,
-    spendingCentavos: 0,
-    netCentavos: 0,
-    adjustmentNetCentavos: 0,
+    incomeCentavos: projection.incomeCentavos,
+    spendingCentavos: projection.grossSpendingCentavos,
+    returnedCentavos: projection.returnedCentavos,
+    netSpendingCentavos: projection.netSpendingCentavos,
+    netCentavos: sumCentavos([projection.incomeCentavos, -projection.netSpendingCentavos]),
+    adjustmentNetCentavos: projection.adjustmentCentavos,
     perEnvelope: new Map(),
     perCategory: new Map(),
     uncategorizedCentavos: 0,
@@ -106,40 +112,31 @@ export function summarizeMonth(rows: readonly EntryRow[]): MonthSummary {
       inflowCentavos: 0,
       outflowCentavos: 0,
     }
-    if (row.amount_centavos >= 0) flow.inflowCentavos += row.amount_centavos
-    else flow.outflowCentavos += -row.amount_centavos
+    if (row.amount_centavos >= 0)
+      flow.inflowCentavos = sumCentavos([flow.inflowCentavos, row.amount_centavos])
+    else flow.outflowCentavos = sumCentavos([flow.outflowCentavos, -row.amount_centavos])
     summary.perEnvelope.set(row.envelope_id, flow)
 
-    switch (row.kind) {
-      case 'income':
-        summary.incomeCentavos += row.amount_centavos
-        break
-      case 'expense': {
+    switch (intentOf(row)) {
+      case 'purchase': {
         const spent = -row.amount_centavos
-        summary.spendingCentavos += spent
         if (row.category_id !== null) {
           summary.perCategory.set(
             row.category_id,
-            (summary.perCategory.get(row.category_id) ?? 0) + spent,
+            sumCentavos([summary.perCategory.get(row.category_id) ?? 0, spent]),
           )
         } else {
-          summary.uncategorizedCentavos += spent
+          summary.uncategorizedCentavos = sumCentavos([summary.uncategorizedCentavos, spent])
         }
         summary.spendingByEnvelope.set(
           row.envelope_id,
-          (summary.spendingByEnvelope.get(row.envelope_id) ?? 0) + spent,
+          sumCentavos([summary.spendingByEnvelope.get(row.envelope_id) ?? 0, spent]),
         )
         break
       }
-      case 'transfer':
-        break // envelope flows above; never in the top line
-      case 'adjustment':
-        summary.adjustmentNetCentavos += row.amount_centavos
-        break
     }
   }
 
-  summary.netCentavos = summary.incomeCentavos - summary.spendingCentavos
   return summary
 }
 
@@ -157,13 +154,13 @@ export function summarizeMonth(rows: readonly EntryRow[]): MonthSummary {
 function sharesBpOf(parts: readonly number[], total: number): number[] {
   if (total <= 0 || parts.length === 0) return parts.map(() => 0)
 
-  const floors = parts.map((p) => Math.floor((p * 10000) / total))
-  const rems = parts.map((p) => (p * 10000) % total)
+  const floors = parts.map((p) => Number((BigInt(p) * 10000n) / BigInt(total)))
+  const rems = parts.map((p) => (BigInt(p) * 10000n) % BigInt(total))
   let leftover = 10000 - floors.reduce((a, b) => a + b, 0)
 
   const ranked = parts
     .map((_, i) => i)
-    .sort((a, b) => (rems[a] === rems[b] ? a - b : rems[b] - rems[a]))
+    .sort((a, b) => (rems[a] === rems[b] ? a - b : rems[b] > rems[a] ? 1 : -1))
   for (const i of ranked) {
     if (leftover <= 0) break
     floors[i] += 1
@@ -308,7 +305,7 @@ export interface MonthPace {
   daysInMonth: number
   perDayCentavos: number
   /** straight-line spend if the current rate holds to month end */
-  projectedCentavos: number
+  projectedCentavos: number | null
   /** false once the month is over — a projection for a finished month is noise */
   isPartial: boolean
   /**
@@ -347,11 +344,12 @@ export function monthPace(
 ): MonthPace {
   const elapsed = Math.max(1, Math.min(daysElapsed, daysInMonth))
   const perDay = Math.round(spendingCentavos / elapsed)
+  const projected = perDay * daysInMonth
   return {
     daysElapsed: elapsed,
     daysInMonth,
     perDayCentavos: perDay,
-    projectedCentavos: perDay * daysInMonth,
+    projectedCentavos: Number.isSafeInteger(projected) ? projected : null,
     isPartial: elapsed < daysInMonth,
     // Only a partial month can be early. A complete month is never projected at
     // all, and a 3-day February would otherwise report itself as untrustworthy

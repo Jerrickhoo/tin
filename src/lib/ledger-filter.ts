@@ -16,6 +16,7 @@
 
 import { manilaDayKey } from './dates'
 import type { EntryKind, LedgerGroup } from './groups'
+import { projectFinancial, INTENT_LABELS, intentOf } from './financial'
 
 export interface LedgerQuery {
   /** free text: notes, category names, envelope names, and amounts */
@@ -77,6 +78,7 @@ function matchesText(group: LedgerGroup, needle: string, names: FilterNames): bo
   const amount = amountNeedle(needle)
 
   for (const leg of group.legs) {
+    if (normalize(INTENT_LABELS[intentOf(leg)]).includes(needle)) return true
     if (leg.note && normalize(leg.note).includes(needle)) return true
     if (leg.category_id) {
       const name = names.categoryNames.get(leg.category_id)
@@ -158,6 +160,9 @@ export interface ResultTotals {
   spentCentavos: number
   /** positive centavos that arrived */
   receivedCentavos: number
+  returnedCentavos: number
+  netSpendingCentavos: number
+  adjustmentCentavos: number
 }
 
 /**
@@ -171,16 +176,15 @@ export interface ResultTotals {
  * Transfers move money without it leaving, so they land in neither total.
  */
 export function totalsFor(groups: readonly LedgerGroup[]): ResultTotals {
-  let spent = 0
-  let received = 0
-  for (const group of groups) {
-    if (group.voided) continue
-    if (group.kind === 'expense') spent += Math.abs(group.totalCentavos)
-    else if (group.kind === 'income') received += group.totalCentavos
-    else if (group.kind === 'adjustment') {
-      if (group.totalCentavos < 0) spent += Math.abs(group.totalCentavos)
-      else received += group.totalCentavos
-    }
+  const projection = projectFinancial(
+    groups.filter((group) => !group.voided).flatMap((group) => group.legs),
+  )
+  return {
+    groups: groups.length,
+    spentCentavos: projection.grossSpendingCentavos,
+    receivedCentavos: projection.incomeCentavos,
+    returnedCentavos: projection.returnedCentavos,
+    netSpendingCentavos: projection.netSpendingCentavos,
+    adjustmentCentavos: projection.adjustmentCentavos,
   }
-  return { groups: groups.length, spentCentavos: spent, receivedCentavos: received }
 }

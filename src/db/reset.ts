@@ -13,6 +13,7 @@
 // policy at all — see that migration for why that is worth preserving.
 
 import { supabase } from './supabase'
+import { ActionError } from '../lib/errors'
 import { clearLocalDataForReset } from './dexie'
 import { isOffline, resumeSync, suspendSync, syncNow } from './sync'
 import { ensureSeeded } from './seed'
@@ -69,11 +70,8 @@ export async function resetAccount(userId: string): Promise<ResetSummary> {
   try {
     const { data, error } = await supabase.rpc('reset_account')
     if (error) {
-      throw new Error(
-        isMissingFunction(error)
-          ? 'This app is newer than its database — migration 006 has not been applied yet. Nothing was deleted.'
-          : error.message,
-      )
+      if (isMissingFunction(error)) throw new ActionError('reset_schema', { cause: error })
+      throw error
     }
 
     const counts = (data ?? {}) as Record<string, unknown>
@@ -84,16 +82,14 @@ export async function resetAccount(userId: string): Promise<ResetSummary> {
       envelopes: asNumber(counts.envelopes),
       checkins: asNumber(counts.checkins),
       streakSaves: asNumber(counts.streak_saves),
+      obligations: asNumber(counts.obligations),
+      audit: asNumber(counts.ledger_audit),
     }
 
     try {
       await clearLocalDataForReset(userId)
     } catch (err) {
-      throw new Error(
-        `Your account was cleared on the server, but this device's copy would not clear ` +
-          `(${err instanceof Error ? err.message : String(err)}). Log out and back in to finish it.`,
-        { cause: err },
-      )
+      throw new ActionError('reset_local', { cause: err })
     }
     clearUserScopedLocalKeys()
     // Home caches the money-type targets in state and only re-reads on this
@@ -112,11 +108,7 @@ export async function resetAccount(userId: string): Promise<ResetSummary> {
       // failed reset — that would send someone looking for data that is gone.
       // Naming the reload matters: AppShell seeds once per session boot and
       // this session has already booted, so nothing retries on its own.
-      throw new Error(
-        `Everything was deleted, but the starter envelopes could not be created ` +
-          `(${err instanceof Error ? err.message : String(err)}). Reload Tin and it will try again.`,
-        { cause: err },
-      )
+      throw new ActionError('reset_seed', { cause: err })
     }
 
     // AWAITED, not fired off. The starter envelopes exist on the server at this

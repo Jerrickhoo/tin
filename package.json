@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "check": "node scripts/check-app.mjs",
+    "check:guards": "node --test scripts/p2-staging.test.mjs scripts/check-app.test.mjs",
+    "check:release-schema": "node scripts/check-release-schema.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
@@ -14,6 +17,12 @@
     "check:contrast": "node scripts/check-contrast.mjs",
     "check:tokens": "node scripts/check-token-collisions.mjs",
     "probe:rls": "node supabase/tests/rls-probe.ts",
+    "p2:staging:check": "node scripts/p2-staging.mjs",
+    "p2:staging:guard-test": "node --test scripts/p2-staging.test.mjs",
+    "p2:staging:prepare": "node scripts/probe-p2-staging.mjs prepare",
+    "p2:staging:verify": "node scripts/probe-p2-staging.mjs verify",
+    "p2:staging:integrations": "node scripts/probe-p2-staging.mjs integrations",
+    "p2:staging:serve": "node scripts/serve-p2-staging.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -23,7 +32,7 @@
     "dexie": "^4.4.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-router": "^8.2.0"
+    "react-router": "8.3.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

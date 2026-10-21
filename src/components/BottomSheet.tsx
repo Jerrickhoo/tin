@@ -14,11 +14,15 @@ import { useSheetDrag } from './useSheetDrag'
 export function BottomSheet({
   open,
   onClose,
+  label = 'Details',
   children,
+  returnFocusTo,
 }: {
   open: boolean
   onClose: () => void
+  label?: string
   children: ReactNode
+  returnFocusTo?: HTMLElement | null
 }) {
   // The phone half of the same idea: back is what "cancel" means on Android and
   // on an iOS swipe, and it used to navigate off the screen with the sheet still
@@ -30,13 +34,55 @@ export function BottomSheet({
   const panelRef = useRef<HTMLDivElement>(null)
   const drag = useSheetDrag(panelRef, onClose)
 
+  useEffect(() => {
+    if (!open) return
+    const panel = panelRef.current
+    if (!panel) return
+    const previous =
+      returnFocusTo ??
+      (document.activeElement instanceof HTMLElement ? document.activeElement : null)
+    // Preserve an input's own autofocus, otherwise move into the modal.
+    if (!panel.contains(document.activeElement)) panel.focus({ preventScroll: true })
+    return () => {
+      if (previous?.isConnected && previous !== document.body)
+        previous.focus({ preventScroll: true })
+    }
+  }, [open, returnFocusTo])
+
   // Escape closes the sheet. It used to be dismissible only by tapping the
   // scrim — fine on a phone, a dead end on the laptop half of "phone and
   // laptop, same three envelopes".
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        onClose()
+        return
+      }
+      if (e.key !== 'Tab') return
+      const panel = panelRef.current
+      if (!panel) return
+      const controls = [
+        ...panel.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex], [contenteditable="true"]',
+        ),
+      ].filter(
+        (element) =>
+          element.tabIndex >= 0 &&
+          !element.matches(':disabled') &&
+          !element.closest('[hidden]') &&
+          element.getClientRects().length > 0,
+      )
+      const first = controls[0]
+      const last = controls.at(-1)
+      const active = document.activeElement
+      if (!first) {
+        e.preventDefault()
+        panel.focus()
+      } else if (!panel.contains(active) || (e.shiftKey ? active === first : active === last)) {
+        e.preventDefault()
+        ;(e.shiftKey ? last : first)?.focus()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -66,7 +112,9 @@ export function BottomSheet({
       <div
         ref={panelRef}
         role="dialog"
+        aria-label={label}
         aria-modal="true"
+        tabIndex={-1}
         className="sheet-in sheet-surface absolute inset-x-0 bottom-0 mx-auto max-h-[88dvh] w-full max-w-sm overflow-y-auto rounded-t-[1.75rem] border-t border-line/80 p-5 pb-[max(2rem,env(safe-area-inset-bottom))] md:relative md:inset-auto md:max-h-[85dvh] md:rounded-[1.5rem] md:border md:p-6 md:pb-6 md:shadow-2xl md:shadow-black/60"
       >
         {/* The drag handle is a touch affordance; it means nothing to a cursor,

@@ -90,7 +90,7 @@ describe('IndexedDB upgrade v1 → v3', () => {
   it('leaves the database at the current version', async () => {
     const db = new Dexie('tin-local')
     await db.open()
-    expect(db.verno).toBe(3)
+    expect(db.verno).toBe(4)
     db.close()
   })
 

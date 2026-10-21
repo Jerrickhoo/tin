@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
 import { supabase } from '../../db/supabase'
 import { AuthShell, buttonClass, fieldClass } from './AuthShell'
+import { authErrorMessage } from '../../lib/errors'
 
 export function ResetRequest() {
   const [email, setEmail] = useState('')
@@ -13,12 +14,17 @@ export function ResetRequest() {
     e.preventDefault()
     setBusy(true)
     setError(null)
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/update-password`,
-    })
-    setBusy(false)
-    if (error) setError(error.message)
-    else setSent(true)
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/update-password`,
+      })
+      if (error) throw error
+      setSent(true)
+    } catch (error) {
+      setError(authErrorMessage(error, 'send the reset link'))
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -41,6 +47,7 @@ export function ResetRequest() {
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
           <input
             type="email"
+            aria-label="Email"
             required
             autoComplete="email"
             placeholder="you@email.com"
@@ -48,7 +55,11 @@ export function ResetRequest() {
             onChange={(e) => setEmail(e.target.value)}
             className={fieldClass}
           />
-          {error && <p className="text-sm text-neg">{error}</p>}
+          {error && (
+            <p role="alert" className="text-sm text-neg">
+              {error}
+            </p>
+          )}
           <button type="submit" disabled={busy} className={buttonClass}>
             {busy ? 'Sending…' : 'Send reset link'}
           </button>

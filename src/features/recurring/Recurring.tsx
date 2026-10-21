@@ -1,3 +1,4 @@
+import { errorMessage } from '../../lib/errors'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { useLedger, useToast } from '../../app-context'
@@ -52,9 +53,7 @@ export function Recurring() {
         setLoadError(
           isOffline()
             ? "You're offline — recurring templates live on the server, so this screen needs a connection. Nothing already scheduled is affected."
-            : err instanceof Error
-              ? err.message
-              : String(err),
+            : errorMessage(err, 'load recurring templates'),
         )
       }
     })()
@@ -73,7 +72,7 @@ export function Recurring() {
       bump()
       toast.show(okMessage)
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : String(err), 'error')
+      toast.show(errorMessage(err, 'update the template'), 'error')
     }
   }
 
@@ -270,7 +269,7 @@ function TemplateSheet({
         onSaved(`Template saved — first post on its next ${ordinal(dayNum)}`)
       }
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err))
+      onError(errorMessage(err, 'save the template'))
     } finally {
       setBusy(false)
     }

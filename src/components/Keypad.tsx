@@ -119,10 +119,11 @@ export function Keypad({
               // top of the sheet and over the keys.
               onContextMenu={holdable ? (e) => e.preventDefault() : undefined}
               onClick={() => {
-                if (held.current) {
+                if (key === 'back' && held.current) {
                   held.current = false
                   return
                 }
+                held.current = false
                 onKey(key)
               }}
             >

@@ -3,6 +3,7 @@ import { supabase } from '../../db/supabase'
 import { AuthShell, buttonClass, fieldClass } from './AuthShell'
 import { aalGateState, verifyLoginChallenge } from './mfa'
 import { useSession } from './useSession'
+import { authErrorMessage } from '../../lib/errors'
 
 type Gate = 'checking' | 'ok' | 'challenge'
 
@@ -64,7 +65,7 @@ function MfaChallenge({ onVerified }: { onVerified: () => void }) {
       await verifyLoginChallenge(code.trim())
       onVerified()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(authErrorMessage(err, 'verify the authenticator code'))
       setCode('')
     } finally {
       setBusy(false)
@@ -97,7 +98,11 @@ function MfaChallenge({ onVerified }: { onVerified: () => void }) {
           onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
           className={`${fieldClass} text-center text-2xl tracking-[0.4em] tabular-nums`}
         />
-        {error && <p className="text-sm text-neg">{error}</p>}
+        {error && (
+          <p role="alert" className="text-sm text-neg">
+            {error}
+          </p>
+        )}
         <button type="submit" disabled={busy || code.length < 6} className={buttonClass}>
           {busy ? 'Verifying…' : 'Verify'}
         </button>

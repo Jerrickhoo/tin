@@ -16,7 +16,10 @@ const emailB = env('PROBE_B_EMAIL') ?? 'probe-b@tin.test'
 const passwordA = requireEnv('PROBE_A_PASSWORD')
 const passwordB = requireEnv('PROBE_B_PASSWORD')
 
-const opts = { auth: { persistSession: false, autoRefreshToken: false } }
+const opts = {
+  auth: { persistSession: false, autoRefreshToken: false },
+  global: { headers: { 'X-Client-Info': 'tin-ledger/2' } },
+}
 const anon = createClient(url, anonKey, opts)
 const asA = createClient(url, anonKey, opts)
 const asB = createClient(url, anonKey, opts)

@@ -1,5 +1,6 @@
+import { errorMessage, persistedErrorMessage } from '../../lib/errors'
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { Link, useNavigate } from 'react-router'
+import { Link, useLocation, useNavigate } from 'react-router'
 import { useLedger, useToast } from '../../app-context'
 import { supabase } from '../../db/supabase'
 import { wipeLocalCaches } from '../../db/cacheWipe'
@@ -14,15 +15,13 @@ import {
 import type { OutboxOp } from '../../db/outbox'
 import { getSyncSnapshot, kickSync, subscribeSync } from '../../db/sync'
 import {
-  fetchAllCategoriesForExport,
-  fetchAllEntriesForExport,
   fetchAllEntriesNewestFirst,
-  fetchAllEnvelopesForExport,
   fetchEnvelopes,
   hasOpeningBalances,
   type Envelope,
 } from '../../db/entries'
 import { OpeningBalancesSheet } from '../entries/OpeningBalancesSheet'
+import { readBackupSnapshot } from '../../db/backup'
 import { applyRestore, planRestoreFromBundle } from '../../db/restore'
 import { resetAccount } from '../../db/reset'
 import {
@@ -31,11 +30,15 @@ import {
   RESET_CONFIRM_PHRASE,
 } from '../../lib/account-reset'
 import { entriesToCsv, entriesToJson } from '../../lib/export'
+import { financialRecords } from '../../db/financial'
+import { useWeekStart, useReportingClock } from '../../lib/reporting-clock'
+import { saveWeekStart } from '../../db/week-preference'
+import { ReconciliationSheet } from '../entries/ReconciliationSheet'
 import { isBlocked, parseBundle, type RestorePlan } from '../../lib/restore'
-import { manilaDayKey } from '../../lib/dates'
+import { manilaDayKey, daysBetweenKeys } from '../../lib/dates'
+import { BALANCE_REMINDER_KEY } from '../../lib/local-keys'
 import { formatPHP } from '../../lib/money'
 import { exportReminderStatus, getLastExport, recordExport } from '../../lib/exportReminder'
-import { getTexture, setTexture, type Texture } from '../../lib/texture'
 import {
   clampMoneyAmountToMax,
   emptyMoneyTypeTotals,
@@ -51,6 +54,8 @@ import { AMOUNT_PLACEHOLDER, centavosToAmountText, parseAmountToCentavos } from 
 import { useAmountField } from '../../components/useAmountField'
 import { useSession } from '../auth/useSession'
 import { MfaSection } from './MfaSection'
+import { AppearanceSection } from './AppearanceSection'
+import { PatchNotesCard } from '../updates/PatchNotesCard'
 
 function downloadFile(name: string, content: string, type: string) {
   const url = URL.createObjectURL(new Blob([content], { type }))
@@ -80,6 +85,12 @@ function downloadFile(name: string, content: string, type: string) {
  */
 const describeOp = (op: OutboxOp): string => {
   switch (op.op) {
+    case 'financial':
+      if (op.operation.goal_events?.length)
+        return `goal activity (${op.operation.goal_events.map((e) => e.type).join(', ')})${op.operation.rows.length ? ' with actual money movement' : ' (reservations only)'}`
+      if (op.operation.budget_event)
+        return `a budget ${op.operation.budget_event.type} for ${op.operation.budget_event.month}${op.operation.rows.length ? ' with a received income entry' : ' (no money movement)'}`
+      return `a financial ${op.operation.action} (${op.operation.rows.length} ledger rows)`
     case 'void_group':
       return 'a void'
     case 'unvoid_group':
@@ -104,14 +115,16 @@ const describeOp = (op: OutboxOp): string => {
 function SettingsGroup({
   title,
   hint,
+  id,
   children,
 }: {
   title: string
   hint?: string
+  id?: string
   children: ReactNode
 }) {
   return (
-    <section className="flex flex-col gap-3">
+    <section id={id} className="flex scroll-mt-20 flex-col gap-3">
       <div className="flex items-center gap-3">
         <h2 className="text-[0.65rem] font-semibold tracking-[0.24em] text-ink-mute uppercase">
           {title}
@@ -231,6 +244,7 @@ function OpeningBalancesCard() {
  * nothing is stuck, which is almost always.
  */
 function StuckWrites() {
+  const { bump } = useLedger()
   const snap = useSyncExternalStore(subscribeSync, getSyncSnapshot, getSyncSnapshot)
   const toast = useToast()
   const [row, setRow] = useState<OutboxRow | null>(null)
@@ -255,12 +269,13 @@ function StuckWrites() {
   async function discard(seq: number) {
     try {
       await discardOutboxRow(seq)
+      bump()
       setRow(null)
       setConfirming(false)
       toast.show('Discarded — the queue can move again')
       kickSync()
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : String(err), 'error')
+      toast.show(errorMessage(err, 'discard the queued change'), 'error')
     }
   }
 
@@ -274,12 +289,13 @@ function StuckWrites() {
       </p>
       {row.last_error && (
         <pre className="mt-2 overflow-x-auto rounded-lg border border-line bg-base p-2 text-xs text-ink-mute">
-          {row.last_error}
+          {persistedErrorMessage(row.last_error)}
         </pre>
       )}
       <p className="mt-2 text-xs text-ink-mute">
         Queued {new Date(row.created_at).toLocaleString()}. Discarding removes it from this device
-        for good — the server never accepted it, so it is not in your ledger anywhere else.
+        queue. A financial draft is retained in History and its tentative balance is rolled back.
+        Sync checks the server after discarding.
       </p>
       <div className="mt-3 flex gap-2">
         <button
@@ -307,38 +323,6 @@ function StuckWrites() {
           </button>
         )}
       </div>
-    </section>
-  )
-}
-
-/**
- * The one display preference in the app.
- *
- * Device-local, so no toast and no save button: it applies on the tap and the
- * result is the whole confirmation. Anything more ceremonious would imply it
- * travels with the account, which it deliberately does not (lib/texture.ts).
- */
-function AppearanceSection() {
-  const [texture, setTextureState] = useState<Texture>(getTexture)
-
-  function choose(next: Texture) {
-    setTexture(next)
-    setTextureState(next)
-  }
-
-  return (
-    <section className="card p-4">
-      <h3 className="font-display text-[0.6875rem] leading-relaxed">Appearance</h3>
-      <p className="mt-1 mb-3 text-sm text-ink-soft">Turn the texture off for a flatter look.</p>
-      <label className="flex cursor-pointer items-center justify-between gap-3">
-        <span className="text-sm">Reduce texture</span>
-        <input
-          type="checkbox"
-          checked={texture === 'reduced'}
-          onChange={(e) => choose(e.target.checked ? 'reduced' : 'full')}
-          className="size-5 shrink-0 accent-[var(--color-accent)]"
-        />
-      </label>
     </section>
   )
 }
@@ -449,8 +433,18 @@ function MoneyTargetInput({
  * this whole panel wrote to a key nothing read.
  */
 function MoneySummarySection() {
+  const now = useReportingClock()
+  const [checking, setChecking] = useState(false)
   const toast = useToast()
   const { version } = useLedger()
+  const [lastChecks, setLastChecks] = useState<Record<string, string>>({})
+  const [remind, setRemind] = useState(() => {
+    try {
+      return localStorage.getItem(BALANCE_REMINDER_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
   const [snapshot, setSnapshot] = useState<MoneyTypeSnapshot>(readMoneyTypeSnapshot)
   const [live, setLive] = useState<MoneyTypeTotals>(emptyMoneyTypeTotals)
   const [inputValues, setInputValues] = useState<Record<'online' | 'reallife', string>>(() => {
@@ -465,14 +459,31 @@ function MoneySummarySection() {
     let active = true
     ;(async () => {
       try {
-        const rows = await fetchAllEntriesNewestFirst()
+        const [rows, financial] = await Promise.all([
+          fetchAllEntriesNewestFirst(),
+          financialRecords(),
+        ])
         if (!active) return
         // ONE source for every figure in this panel. It used to take the per-
         // bucket numbers from the entry rows and the total from `fetchBalances`,
         // and those two disagreed by construction — the summariser counted voided
         // rows and the balances view did not — so "you are ₱X over your target"
         // could be arithmetic on two different ledgers.
-        setLive(summarizeMoneyTypeTotals(rows))
+        setLive(
+          summarizeMoneyTypeTotals(
+            rows.filter((r) => Date.parse(r.occurred_at) <= Math.max(now.getTime(), Date.now())),
+          ),
+        )
+        const checks: Record<string, string> = {}
+        for (const event of financial.audit)
+          if (
+            event.action === 'reconcile' &&
+            typeof event.details.account === 'string' &&
+            typeof event.details.as_of === 'string' &&
+            (!checks[event.details.account] || event.details.as_of > checks[event.details.account])
+          )
+            checks[event.details.account] = event.details.as_of
+        setLastChecks(checks)
       } catch {
         if (active) setLive(emptyMoneyTypeTotals())
       }
@@ -481,7 +492,7 @@ function MoneySummarySection() {
     return () => {
       active = false
     }
-  }, [version])
+  }, [version, now])
 
   const liveTotal = live.online + live.reallife + live.untagged
 
@@ -502,7 +513,7 @@ function MoneySummarySection() {
   function save() {
     writeMoneyTypeSnapshot(snapshot)
     window.dispatchEvent(new Event(MONEY_TYPE_UPDATED_EVENT))
-    toast.show('Saved — Home is showing these targets now')
+    toast.show('Legacy targets saved for reference; ledger balances are unchanged')
   }
 
   // Untagged is live-only and has no input: it is the residual the ledger
@@ -514,9 +525,44 @@ function MoneySummarySection() {
   return (
     <section className="card p-4">
       <h3 className="font-display text-[0.6875rem] leading-relaxed">Current money</h3>
+      <button
+        type="button"
+        onClick={() => setChecking(true)}
+        className="press mt-3 rounded border border-line p-3 text-accent"
+      >
+        Check balance
+      </button>
+      {checking && <ReconciliationSheet onClose={() => setChecking(false)} />}
+      <p className="mt-2 text-xs text-ink-mute">
+        Last checked: Cash{' '}
+        {lastChecks.reallife ? manilaDayKey(new Date(lastChecks.reallife)) : 'never'} · Online{' '}
+        {lastChecks.online ? manilaDayKey(new Date(lastChecks.online)) : 'never'}
+      </p>
+      <label className="mt-2 block text-xs">
+        <input
+          type="checkbox"
+          checked={remind}
+          onChange={(event) => {
+            setRemind(event.target.checked)
+            try {
+              localStorage.setItem(BALANCE_REMINDER_KEY, event.target.checked ? '1' : '0')
+            } catch {
+              /* session only */
+            }
+          }}
+        />{' '}
+        Show an in-app reminder after 30 days
+      </label>
+      {remind &&
+        ['online', 'reallife'].some(
+          (key) =>
+            !lastChecks[key] ||
+            daysBetweenKeys(manilaDayKey(new Date(lastChecks[key])), manilaDayKey(now)) >= 30,
+        ) && <p className="mt-2 text-xs text-accent">An account is due for a balance check.</p>}
       <p className="mt-1 mb-3 text-sm text-ink-soft">
-        Tell Home how your balance is split between online and cash. Leave a bucket blank to let it
-        follow the ledger instead.
+        Home shows the ledger balances. Use Check balance to review an observation and record a
+        missing transaction, account classification or explicit adjustment. Saved targets below are
+        legacy references only; they never create money.
       </p>
       <div className="mb-3 rounded-2xl border border-line/70 bg-base/50 p-3">
         <p className="text-[0.65rem] font-semibold uppercase tracking-[0.24em] text-ink-mute">
@@ -594,7 +640,7 @@ function RestoreSection() {
       setFileName(file.name)
     } catch (err) {
       reset()
-      toast.show(err instanceof Error ? err.message : String(err), 'error')
+      toast.show(errorMessage(err, 'read the backup'), 'error')
     } finally {
       setBusy(null)
     }
@@ -608,7 +654,7 @@ function RestoreSection() {
       reset()
       toast.show(`Restored ${result.rows} entries — syncing them up now`)
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : String(err), 'error')
+      toast.show(errorMessage(err, 'restore the backup'), 'error')
     } finally {
       setBusy(null)
     }
@@ -620,9 +666,10 @@ function RestoreSection() {
     <section className="card p-4">
       <h3 className="font-display text-[0.6875rem] leading-relaxed">Restore from a backup</h3>
       <p className="mt-1 mb-3 text-sm text-ink-soft">
-        Read a <code className="text-ink">tin-export-….json</code> back in. Entries only —
-        envelopes, categories and your 70/20/10 split are matched by name, never overwritten.
-        Re-reading the same file changes nothing, so it is safe to retry.
+        Read a <code className="text-ink">tin-export-….json</code> back in. Entries, linked
+        financial records, budget plans and goals — envelopes, categories and your 70/20/10 split
+        are matched by name, never overwritten. Re-reading the same file changes nothing, so it is
+        safe to retry.
       </p>
 
       {plan === null ? (
@@ -787,7 +834,7 @@ function DangerZone({
       // nothing left for.
       void navigate('/')
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : String(err), 'error')
+      toast.show(errorMessage(err, 'reset the account'), 'error')
     } finally {
       setBusy(false)
     }
@@ -799,8 +846,9 @@ function DangerZone({
     <section className="card border-neg/40 p-4">
       <h3 className="font-display text-[0.6875rem] leading-relaxed text-neg">Erase everything</h3>
       <p className="mt-1 text-sm text-ink-soft">
-        Delete every entry, envelope, category and recurring template on this account and start over
-        as if it were new. This cannot be undone — not by Tin, and not by anyone else.
+        Delete every entry, envelope, category, recurring template, budget plan and goal on this
+        account and start over as if it were new. This cannot be undone — not by Tin, and not by
+        anyone else.
       </p>
 
       {!open ? (
@@ -829,7 +877,15 @@ function DangerZone({
                 your streak, {counts ? `${counts.checkIns} check-in days` : 'check-in days'} and any
                 repair saves
               </li>
-              <li>the saved online/cash targets and your last-backup date</li>
+              <li>
+                {counts
+                  ? `${counts.obligations} repayment records and ${counts.audit} audit events`
+                  : 'repayment records and financial audit events'}
+              </li>
+              <li>
+                the saved online/cash targets, week preference, balance reminders and your
+                last-backup date
+              </li>
             </ul>
           </div>
 
@@ -928,6 +984,12 @@ function DangerZone({
 }
 
 export function Settings() {
+  const { hash } = useLocation()
+  useEffect(() => {
+    if (hash === '#appearance')
+      document.getElementById('appearance')?.scrollIntoView({ block: 'start' })
+  }, [hash])
+  const weekStart = useWeekStart()
   const { session } = useSession()
   const toast = useToast()
   const [busy, setBusy] = useState<'json' | 'csv' | null>(null)
@@ -937,16 +999,12 @@ export function Settings() {
   async function exportAs(kind: 'json' | 'csv') {
     setBusy(kind)
     try {
-      const [entries, envelopes, categories] = await Promise.all([
-        fetchAllEntriesForExport(),
-        fetchAllEnvelopesForExport(),
-        fetchAllCategoriesForExport(),
-      ])
+      const { entries, envelopes, categories, obligations, audit } = await readBackupSnapshot()
       const day = manilaDayKey(new Date())
       if (kind === 'json') {
         downloadFile(
           `tin-export-${day}.json`,
-          entriesToJson(entries, envelopes, categories),
+          entriesToJson(entries, envelopes, categories, { obligations, audit }),
           'application/json',
         )
       } else {
@@ -954,13 +1012,17 @@ export function Settings() {
           envelopeNames: new Map(envelopes.map((e) => [e.id as string, e.name as string])),
           categoryNames: new Map(categories.map((c) => [c.id as string, c.name as string])),
         }
-        downloadFile(`tin-export-${day}.csv`, entriesToCsv(entries, maps, manilaDayKey), 'text/csv')
+        downloadFile(
+          `tin-export-${day}.csv`,
+          entriesToCsv(entries, maps, manilaDayKey, audit),
+          'text/csv',
+        )
       }
       recordExport()
       setLastExport(getLastExport())
       toast.show(`Exported ${entries.length} entries — your data outlives any backend`)
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : String(err), 'error')
+      toast.show(errorMessage(err, 'export the backup'), 'error')
     } finally {
       setBusy(null)
     }
@@ -982,10 +1044,7 @@ export function Settings() {
     } catch (err) {
       // 7.4 audit: a failed wipe/sign-out must not fail silently — a half-wiped
       // session on a shared laptop is exactly what 6.6 exists to prevent
-      toast.show(
-        `Logout didn't finish cleanly: ${err instanceof Error ? err.message : String(err)}`,
-        'error',
-      )
+      toast.show(`Logout didn't finish cleanly: ${errorMessage(err, 'sign out')}`, 'error')
     }
   }
 
@@ -1010,12 +1069,39 @@ export function Settings() {
           things last. Setup is the reason Settings gets opened; the danger zone
           is the reason it gets opened once. */}
       <SettingsGroup title="Setup" hint="The parts of Tin you shape to your money.">
+        <label className="card block p-4 text-sm">
+          Week starts on
+          <select
+            aria-label="Week starts on"
+            value={weekStart}
+            onChange={(event) => {
+              void saveWeekStart(event.target.value as 'monday' | 'sunday')
+                .then(() => kickSync())
+                .catch((error) => toast.show(errorMessage(error, 'save week preference'), 'error'))
+            }}
+            className="ml-3 rounded border border-line bg-base p-2"
+          >
+            <option value="monday">Monday</option>
+            <option value="sunday">Sunday</option>
+          </select>
+          <span className="mt-2 block text-xs text-ink-mute">
+            Reporting and date entry use Manila time. This choice works offline and syncs with your
+            profile.
+          </span>
+        </label>
         <div className="grid gap-4 md:grid-cols-2">
           <NavCard to="/envelopes" title="Envelopes & categories">
             Change the 70/20/10 split, rename envelopes, add or archive categories. Past entries are
             never re-allocated.
           </NavCard>
           <OpeningBalancesCard />
+          <NavCard to="/budget" title="Budget planning">
+            Assign received income to future months, plan expected allowance, and choose spending
+            days per envelope.
+          </NavCard>
+          <NavCard to="/goals" title="Goals & allocations">
+            Reserve money within an envelope, split new income, and review monthly allocations.
+          </NavCard>
           <NavCard to="/recurring" title="Recurring">
             Rent, allowance, subscriptions — they log themselves on app open.
           </NavCard>
@@ -1075,8 +1161,12 @@ export function Settings() {
         <RestoreSection />
       </SettingsGroup>
 
-      <SettingsGroup title="Appearance">
+      <SettingsGroup title="Appearance" id="appearance">
         <AppearanceSection />
+      </SettingsGroup>
+
+      <SettingsGroup title="Updates">
+        <PatchNotesCard />
       </SettingsGroup>
 
       <SettingsGroup title="Account">

@@ -1,3 +1,4 @@
+import { errorMessage } from '../lib/errors'
 // Recurring templates + the catch-up poster (ROADMAP Phase 5). Posting IDs are
 // UUIDv5 of (template, due date, leg) — two devices catching up the same due
 // date produce byte-identical ids and the upsert collapses them. Random IDs
@@ -270,7 +271,7 @@ export async function runCatchUp(): Promise<CatchUpResult> {
         } catch (err) {
           // one broken split used to throw straight out of runCatchUp and take
           // every other template — including healthy expense ones — with it
-          blocked = `"${label}" is stuck — ${err instanceof Error ? err.message : String(err)}`
+          blocked = `"${label}" is stuck — ${errorMessage(err, 'post the scheduled entry')}`
           break
         }
         const parts = splitByLargestRemainder(
@@ -301,7 +302,7 @@ export async function runCatchUp(): Promise<CatchUpResult> {
       try {
         await insertPostedRows(rows)
       } catch (err) {
-        blocked = `"${label}" couldn't be posted — ${err instanceof Error ? err.message : String(err)}`
+        blocked = `"${label}" couldn't be posted — ${errorMessage(err, 'post the scheduled entry')}`
         break
       }
       lastPosted = due

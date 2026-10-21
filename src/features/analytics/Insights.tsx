@@ -1,5 +1,7 @@
+import { errorMessage } from '../../lib/errors'
+import { useReportingClock } from '../../lib/reporting-clock'
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
-import { useNavigate } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { useLedger, useToast } from '../../app-context'
 import {
   earliestEntryAt,
@@ -43,7 +45,10 @@ import { formatPHP } from '../../lib/money'
 // works in a dead spot too.
 async function fetchMonthEntries(monthKey: string): Promise<EntryRow[]> {
   const { start, end } = manilaMonthRangeUtc(monthKey)
-  return fetchEntriesBetween(start.toISOString(), end.toISOString())
+  const asOf = Math.min(end.getTime(), Date.now() + 1)
+  return asOf <= start.getTime()
+    ? []
+    : fetchEntriesBetween(start.toISOString(), new Date(asOf).toISOString())
 }
 
 /** Half a year — long enough for a habit to show, short enough to fit a phone. */
@@ -74,8 +79,11 @@ export function Insights() {
   const { version } = useLedger()
   const toast = useToast()
   const navigate = useNavigate()
-  const currentMonth = manilaMonthKey(new Date())
-  const [monthKey, setMonthKey] = useState(currentMonth)
+  const now = useReportingClock()
+  const currentMonth = manilaMonthKey(now)
+  const [chosenMonth, setChosenMonth] = useState<string | null>(null)
+  const setMonthKey = (key: string) => setChosenMonth(key === currentMonth ? null : key)
+  const monthKey = chosenMonth ?? currentMonth
   // The previous month is fetched alongside the current one purely to power the
   // comparison panel. It is a Dexie range read, so the second window costs no
   // network — and without it every number on this screen is a value with
@@ -105,7 +113,7 @@ export function Insights() {
         setCategories(cats)
         setEarliestMonth(earliest === null ? null : manilaMonthKey(new Date(earliest)))
       } catch (err) {
-        if (active) toast.show(err instanceof Error ? err.message : String(err), 'error')
+        if (active) toast.show(errorMessage(err, 'load Insights'), 'error')
       }
     })()
     return () => {
@@ -132,7 +140,7 @@ export function Insights() {
         if (!active) return
         setStreak(computeStreak(recent, saves, checkIns))
       } catch (err) {
-        if (active) toast.show(err instanceof Error ? err.message : String(err), 'error')
+        if (active) toast.show(errorMessage(err, 'load activity'), 'error')
       }
     })()
     return () => {
@@ -164,7 +172,7 @@ export function Insights() {
         if (!active) return
         setTrend(spendTrend(months, envelopeIds))
       } catch (err) {
-        if (active) toast.show(err instanceof Error ? err.message : String(err), 'error')
+        if (active) toast.show(errorMessage(err, 'load monthly totals'), 'error')
       }
     })()
     return () => {
@@ -180,7 +188,7 @@ export function Insights() {
   const rows = fresh ? loaded.rows : null
 
   const isCurrentMonth = monthKey === currentMonth
-  const dayOfMonth = Number(manilaDayKey(new Date()).slice(8, 10))
+  const dayOfMonth = Number(manilaDayKey(now).slice(8, 10))
 
   const summary = useMemo(() => summarizeMonth(rows ?? []), [rows])
 
@@ -266,8 +274,11 @@ export function Insights() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-5 py-7 md:max-w-4xl md:px-8 md:py-10">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-display text-[1rem] text-ink">Insights</h1>
+        <Link to={`/budget?month=${monthKey}`} className="text-sm text-accent underline">
+          Future budget planning →
+        </Link>
         <div className="flex items-center gap-0.5 border border-line/70 bg-surface/60 p-0.5">
           <button
             type="button"
@@ -304,6 +315,9 @@ export function Insights() {
           </button>
         </div>
       </div>
+      <p className="text-xs text-ink-mute">
+        Actual activity · grouped by when money moved. Future assignments are in Budget planning.
+      </p>
 
       {pickerOpen && (
         <div className="card flex max-h-64 flex-wrap gap-1.5 overflow-y-auto p-3">
@@ -378,14 +392,16 @@ export function Insights() {
                 {summary.netCentavos >= 0 ? '+' : ''}
                 {formatPHP(summary.netCentavos)}
               </p>
-              <p className="mt-1.5 text-xs text-ink-mute">transfers excluded — they net to zero</p>
+              <p className="mt-1.5 text-xs text-ink-mute">
+                income less net spending; transfers, loan principal and adjustments excluded
+              </p>
 
               {/* Pace, right under the net: the two together answer "how am I
                   doing, and where does this end up". Only the live month gets
                   a projection — extrapolating a finished month is noise. */}
               {summary.spendingCentavos > 0 && (
                 <p className="mt-3 text-xs text-ink-soft tabular-nums">
-                  <span className="text-ink-mute">spending </span>
+                  <span className="text-ink-mute">gross spending </span>
                   {formatPHP(pace.perDayCentavos)}
                   <span className="text-ink-mute">/day</span>
                   {/* The projection waits out the first days of the month. A
@@ -397,7 +413,9 @@ export function Insights() {
                     <>
                       <span className="mx-1.5 text-ink-mute opacity-50">·</span>
                       <span className="text-ink-mute">on track for </span>
-                      {formatPHP(pace.projectedCentavos)}
+                      {pace.projectedCentavos === null
+                        ? 'more than the supported display range'
+                        : formatPHP(pace.projectedCentavos)}
                     </>
                   )}
                   {pace.isPartial && pace.isEarly && (
@@ -420,12 +438,16 @@ export function Insights() {
                   amountText={`+${formatPHP(summary.incomeCentavos)}`}
                 />
                 <BarRow
-                  label="Spending"
+                  label="Gross spending"
                   value={summary.spendingCentavos}
                   max={maxTopLine}
                   fill="var(--color-neg)"
                   amountText={`−${formatPHP(summary.spendingCentavos)}`}
                 />
+                <p className="text-xs tabular-nums">
+                  Returned {formatPHP(summary.returnedCentavos)} · Net spending{' '}
+                  {formatPHP(summary.netSpendingCentavos)}
+                </p>
               </div>
 
               {summary.adjustmentNetCentavos !== 0 && (
@@ -441,7 +463,11 @@ export function Insights() {
               reads as a single view instead of a scroll. */}
           <div className="grid gap-4 md:grid-cols-2">
             {summary.spendingCentavos > 0 && (
-              <Panel title="Where it went" hint="share of all spending" className="md:col-span-2">
+              <Panel
+                title="Where it went"
+                hint="share of gross purchases; returns are reported above on receipt day"
+                className="md:col-span-2"
+              >
                 <WhereItWent
                   summary={summary}
                   categoriesById={categoriesById}
@@ -1172,9 +1198,11 @@ function Panel({
 }) {
   return (
     <section className={`card px-4 py-4 ${className}`}>
-      <div className="mb-3.5 flex items-baseline justify-between gap-2">
-        <h2 className="font-display text-[0.6875rem] leading-relaxed">{title}</h2>
-        {hint && <span className="shrink-0 text-[0.6875rem] text-ink-mute">{hint}</span>}
+      <div className="mb-3.5 flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-2">
+        <h2 className="shrink-0 font-display text-[0.6875rem] leading-relaxed">{title}</h2>
+        {hint && (
+          <span className="min-w-0 text-[0.6875rem] text-ink-mute sm:text-right">{hint}</span>
+        )}
       </div>
       {children}
     </section>

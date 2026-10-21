@@ -15,6 +15,9 @@ import { Settings } from './features/settings/Settings'
 import { Envelopes } from './features/settings/Envelopes'
 import { SplitPreview } from './features/entries/SplitPreview'
 import { AppShell } from './AppShell'
+import { PatchNotes } from './features/updates/PatchNotes'
+import { Budget } from './features/budget/Budget'
+import { Goals } from './features/goals/Goals'
 
 export function AppRouter() {
   return (
@@ -37,6 +40,9 @@ export function AppRouter() {
             <Route path="/import" element={<ImportStatement />} />
             <Route path="/envelopes" element={<Envelopes />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/patch-notes" element={<PatchNotes />} />
+            <Route path="/budget" element={<Budget />} />
+            <Route path="/goals" element={<Goals />} />
           </Route>
           <Route path="/split" element={<SplitPreview />} />
           <Route path="/login" element={<Login />} />

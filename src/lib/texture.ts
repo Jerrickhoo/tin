@@ -21,9 +21,15 @@ const REDUCED = 'reduced'
 const FULL = 'full'
 
 export type Texture = typeof REDUCED | typeof FULL
+const CHANGED_EVENT = 'tin:texture-changed'
+let activeTexture: Texture | undefined
 
 /** Stored preference, or `full` when unset or storage is unavailable. */
 export function getTexture(): Texture {
+  return activeTexture ?? readTexture()
+}
+
+function readTexture(): Texture {
   try {
     return localStorage.getItem(STORAGE_KEY) === REDUCED ? REDUCED : FULL
   } catch {
@@ -39,6 +45,7 @@ export function getTexture(): Texture {
  * could drift apart.
  */
 export function applyTexture(texture: Texture): void {
+  activeTexture = texture
   if (typeof document === 'undefined') return
   if (texture === REDUCED) document.documentElement.dataset.texture = REDUCED
   else delete document.documentElement.dataset.texture
@@ -52,6 +59,18 @@ export function setTexture(texture: Texture): void {
     /* private mode — the choice holds for this session and is forgotten */
   }
   applyTexture(texture)
+  window.dispatchEvent(new Event(CHANGED_EVENT))
+}
+
+export function subscribeTexture(onChange: () => void): () => void {
+  window.addEventListener(CHANGED_EVENT, onChange)
+  return () => window.removeEventListener(CHANGED_EVENT, onChange)
+}
+
+function onStorage(event: StorageEvent): void {
+  if (event.key !== STORAGE_KEY && event.key !== null) return
+  applyTexture(readTexture())
+  window.dispatchEvent(new Event(CHANGED_EVENT))
 }
 
 /**
@@ -64,5 +83,6 @@ export function setTexture(texture: Texture): void {
  * which blocks those in production while working fine in dev.
  */
 export function initTexture(): void {
-  applyTexture(getTexture())
+  applyTexture(readTexture())
+  window.addEventListener('storage', onStorage)
 }

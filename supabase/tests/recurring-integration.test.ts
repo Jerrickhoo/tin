@@ -77,7 +77,16 @@ describe.skipIf(!password)('recurring catch-up against the live project', () => 
       .eq('id', probe!.id)
     expect(rewind.error).toBeNull()
     const third = await recurringDb.runCatchUp()
-    expect(third.descriptions.some((d) => d.includes('recurring-integration probe'))).toBe(true)
+    // A known group is skipped before constructing any new legs, and should
+    // not be announced as newly posted. Its due date is still consumed so a
+    // failed cursor update cannot keep the template stuck on the same day.
+    expect(third.postedCount).toBe(0)
+    expect(third.postedGroupIds).toEqual([])
+    expect(third.descriptions).toEqual([])
+    expect(third.warnings).toEqual([])
+    expect((await recurringDb.fetchTemplates()).find((t) => t.id === probe!.id)?.next_run_on).toBe(
+      nextRunAfter(today, todayDay),
+    )
     const afterThird = await entriesDb.fetchBalances()
     expect(afterThird.get(needsId)).toBe(afterFirst.get(needsId)) // no double-post
 

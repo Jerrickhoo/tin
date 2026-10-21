@@ -159,3 +159,23 @@ export function manilaMonthRangeUtc(monthKey: string): UtcRange {
     end: new Date(Date.UTC(year, month, 1) - MANILA_UTC_OFFSET_MS),
   }
 }
+
+export type WeekStart = 'monday' | 'sunday'
+
+export function manilaWeekStart(dayKey: string, start: WeekStart = 'monday'): string {
+  const weekday = new Date(`${dayKey}T12:00:00Z`).getUTCDay()
+  return shiftDayKey(dayKey, -((weekday - (start === 'monday' ? 1 : 0) + 7) % 7))
+}
+
+/** HTML date/time fields are explicitly Manila wall time, never device time. */
+export function toManilaInput(instant: Date): string {
+  return new Date(instant.getTime() + MANILA_UTC_OFFSET_MS).toISOString().slice(0, 16)
+}
+
+export function fromManilaInput(value: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?)?$/.test(value)) return null
+  const wall = value.includes('T') ? value : `${value}T12:00`
+  const at = new Date(`${wall}+08:00`)
+  if (Number.isNaN(at.getTime()) || toManilaInput(at) !== wall.slice(0, 16)) return null
+  return at.toISOString()
+}

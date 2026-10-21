@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate } from 'react-router'
 import { supabase } from '../../db/supabase'
 import { AuthShell, buttonClass, fieldClass } from './AuthShell'
 import { useSession } from './useSession'
+import { authErrorMessage } from '../../lib/errors'
 
 export function Signup() {
   const { session, loading } = useSession()
@@ -19,15 +20,16 @@ export function Signup() {
     e.preventDefault()
     setBusy(true)
     setError(null)
-    const { data, error } = await supabase.auth.signUp({ email, password })
-    setBusy(false)
-    if (error) {
-      setError(error.message)
-    } else if (data.session) {
-      navigate('/', { replace: true })
-    } else {
-      // email confirmation is on: no session until the link is clicked
-      setNotice('Almost there — check your email and click the confirmation link, then log in.')
+    try {
+      const { data, error } = await supabase.auth.signUp({ email, password })
+      if (error) throw error
+      if (data.session) navigate('/', { replace: true })
+      else
+        setNotice('Almost there — check your email and click the confirmation link, then log in.')
+    } catch (error) {
+      setError(authErrorMessage(error, 'create your account'))
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -49,6 +51,7 @@ export function Signup() {
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
           <input
             type="email"
+            aria-label="Email"
             required
             autoComplete="email"
             placeholder="you@email.com"
@@ -58,6 +61,7 @@ export function Signup() {
           />
           <input
             type="password"
+            aria-label="Password"
             required
             minLength={8}
             autoComplete="new-password"
@@ -66,7 +70,11 @@ export function Signup() {
             onChange={(e) => setPassword(e.target.value)}
             className={fieldClass}
           />
-          {error && <p className="text-sm text-neg">{error}</p>}
+          {error && (
+            <p role="alert" className="text-sm text-neg">
+              {error}
+            </p>
+          )}
           <button type="submit" disabled={busy} className={buttonClass}>
             {busy ? 'Creating…' : 'Create account'}
           </button>

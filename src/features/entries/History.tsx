@@ -1,5 +1,7 @@
+import { errorMessage, ActionError } from '../../lib/errors'
+import { receiptMonth } from '../../lib/budget'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useLocation } from 'react-router'
+import { Link, useLocation } from 'react-router'
 import { useAddSheet, useLedger, useToast } from '../../app-context'
 import {
   fetchAllEntriesNewestFirst,
@@ -14,10 +16,23 @@ import {
   type Envelope,
 } from '../../db/entries'
 import { manilaDayKey, monthLabel, shiftDayKey } from '../../lib/dates'
-import { groupEntries, type EntryKind, type EntryRow, type LedgerGroup } from '../../lib/groups'
+import { groupChains, type EntryKind, type EntryRow, type LedgerGroup } from '../../lib/groups'
+import { useReportingClock, useWeekStart } from '../../lib/reporting-clock'
+import { manilaWeekStart, type WeekStart } from '../../lib/dates'
 import { filterGroups, isQueryActive, totalsFor, type LedgerQuery } from '../../lib/ledger-filter'
 import { formatPHP } from '../../lib/money'
 import { getMoneyTypeLabel, groupMoneyType, summarizeMoneyTypeTotals } from '../../lib/money-type'
+import {
+  INTENT_LABELS,
+  intentOf,
+  projectFinancial,
+  sumCentavos,
+  type Obligation,
+  type LedgerAudit,
+} from '../../lib/financial'
+import { financialRecords, cancelObligation } from '../../db/financial'
+import type { FinancialJournal } from '../../db/dexie'
+import { FinancialSheet, type FinancialSheetRequest } from './FinancialSheet'
 
 const manilaTime = new Intl.DateTimeFormat('en-PH', {
   timeZone: 'Asia/Manila',
@@ -58,7 +73,17 @@ function toggle<T>(list: readonly T[], value: T): T[] {
  * only ever differ by including entries dated tomorrow — which are real, and
  * belong in "this month".
  */
-const DATE_PRESETS: { label: string; range: (today: string) => { from: string; to: string } }[] = [
+const DATE_PRESETS: {
+  label: string
+  range: (today: string, weekStart?: WeekStart) => { from: string; to: string }
+}[] = [
+  {
+    label: 'This week',
+    range: (today, weekStart = 'monday') => ({
+      from: manilaWeekStart(today, weekStart),
+      to: today,
+    }),
+  },
   { label: '7 days', range: (today) => ({ from: shiftDayKey(today, -6), to: today }) },
   { label: '30 days', range: (today) => ({ from: shiftDayKey(today, -29), to: today }) },
   { label: 'This month', range: (today) => ({ from: `${today.slice(0, 7)}-01`, to: today }) },
@@ -97,9 +122,15 @@ function incomingIds(state: unknown, key: 'categoryIds' | 'envelopeIds'): string
 }
 
 export function History() {
+  const reportingNow = useReportingClock(),
+    weekStart = useWeekStart()
   const { version, bump } = useLedger()
   const toast = useToast()
   const addSheet = useAddSheet()
+  const [loading, setLoading] = useState(true)
+  const [sourceSearching, setSourceSearching] = useState<boolean | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [retry, setRetry] = useState(0)
   const [rows, setRows] = useState<EntryRow[] | null>(null)
   const [hasMore, setHasMore] = useState(false)
   const [pageRows, setPageRows] = useState(HISTORY_PAGE_ROWS)
@@ -116,6 +147,9 @@ export function History() {
   // do. A lazy initialiser, not an effect: an effect would paint the unfiltered
   // list first and then jump, and the jump is the whole thing you came to read.
   const location = useLocation()
+  const requestedReceipt = new URLSearchParams(location.search).get('receipt')
+  const receipt =
+    requestedReceipt && /^[a-f0-9-]{36}$/.test(requestedReceipt) ? requestedReceipt : null
   const [categoryIds, setCategoryIds] = useState<string[]>(() =>
     incomingIds(location.state, 'categoryIds'),
   )
@@ -126,55 +160,81 @@ export function History() {
     incomingIds(location.state, 'envelopeIds'),
   )
   const [kinds, setKinds] = useState<EntryKind[]>([])
-  const [from, setFrom] = useState<string | null>(null)
-  const [to, setTo] = useState<string | null>(null)
-  // Opened when a filter arrived with the navigation. The result bar states the
-  // totals, but a filtered ledger whose filter is folded away is a screen that
-  // looks like it is missing entries — and the control that would explain it is
-  // the one thing not on screen.
-  const [filtersOpen, setFiltersOpen] = useState(
-    () =>
-      incomingIds(location.state, 'categoryIds').length > 0 ||
-      incomingIds(location.state, 'envelopeIds').length > 0,
+  const [customFrom, saveFrom] = useState<string | null>(null)
+  const [customTo, saveTo] = useState<string | null>(null)
+  const [relativePreset, setRelativePreset] = useState<string | null>(() =>
+    location.state?.period === 'this-week' ? 'This week' : null,
   )
+  const today = manilaDayKey(reportingNow)
+  const relativeRange = DATE_PRESETS.find((item) => item.label === relativePreset)?.range(
+    today,
+    weekStart,
+  )
+  const from = relativeRange?.from ?? customFrom,
+    to = relativeRange?.to ?? customTo
+  const setFrom = (value: string | null) => {
+    setRelativePreset(null)
+    saveFrom(value)
+  }
+  const setTo = (value: string | null) => {
+    setRelativePreset(null)
+    saveTo(value)
+  }
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [financialSheet, setFinancialSheet] = useState<FinancialSheetRequest | null>(null)
+  const [obligations, setObligations] = useState<Obligation[]>([])
+  const [conflicts, setConflicts] = useState<FinancialJournal[]>([])
+  const [audit, setAudit] = useState<LedgerAudit[]>([])
+  const [outstanding, setOutstanding] = useState<Record<string, number>>({})
 
-  const query = useMemo<LedgerQuery>(
-    () => ({ text, categoryIds, envelopeIds, kinds, from, to }),
-    [text, categoryIds, envelopeIds, kinds, from, to],
-  )
+  const query: LedgerQuery = { text, categoryIds, envelopeIds, kinds, from, to }
   // A date bound counts, which is what makes the whole ledger get read rather
   // than the loaded page: "last month" over the newest 200 rows would answer a
   // question about last month with whatever happened to be in memory.
-  const searching = isQueryActive(query)
+  const searching = isQueryActive(query) || !!receipt
 
   useEffect(() => {
     let active = true
     ;(async () => {
       try {
+        setLoading(true)
+        setLoadError(null)
         // A search reads the WHOLE ledger, not the loaded page. Filtering only
         // what happens to be on screen would answer "3 results" to a question
         // whose real answer is forty, and look identical to a complete search.
-        const [page, envs, cats] = await Promise.all([
+        const [page, envs, cats, financial] = await Promise.all([
           searching
             ? fetchAllEntriesNewestFirst().then((rows) => ({ rows, hasMore: false }))
             : fetchEntryPage(pageRows),
           fetchEnvelopes(),
           fetchCategoriesIncludingArchived(),
+          financialRecords(),
         ])
         if (!active) return
         setRows(page.rows)
+        setSourceSearching(searching)
         setHasMore(page.hasMore)
         setEnvelopes(new Map(envs.map((e) => [e.id, e])))
         setCategories(new Map(cats.map((c) => [c.id, c])))
+        setObligations(financial.obligations)
+        setConflicts(financial.conflicts)
+        setAudit(financial.audit)
+        setOutstanding(financial.outstanding ?? {})
       } catch (err) {
-        if (active) toast.show(err instanceof Error ? err.message : String(err), 'error')
+        if (active) {
+          const message = errorMessage(err, 'load History')
+          setLoadError(message)
+          toast.show(message, 'error')
+        }
+      } finally {
+        if (active) setLoading(false)
       }
     })()
     return () => {
       active = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version, pageRows, searching])
+  }, [version, pageRows, searching, retry])
 
   const names = useMemo(
     () => ({
@@ -184,9 +244,18 @@ export function History() {
     [categories, envelopes],
   )
 
+  const matchedChains = groupChains(rows ?? []).filter(
+    (chain) =>
+      (!receipt || (chain.head.legs[0].financial?.chain_id ?? chain.head.groupId) === receipt) &&
+      filterGroups([chain.head, ...chain.previous], query, names).length > 0,
+  )
   const matched = useMemo(
-    () => filterGroups(groupEntries(rows ?? []), query, names),
-    [rows, query, names],
+    () => matchedChains.flatMap((chain) => [chain.head, ...chain.previous]),
+    [matchedChains],
+  )
+  const previousByHead = useMemo(
+    () => new Map(matchedChains.map((chain) => [chain.head.groupId, chain.previous])),
+    [matchedChains],
   )
   const totals = useMemo(() => totalsFor(matched), [matched])
   // Over the MATCHED groups, not the whole ledger. These render inside the same
@@ -202,7 +271,7 @@ export function History() {
 
   const days = useMemo(() => {
     const byDay = new Map<string, LedgerGroup[]>()
-    for (const g of matched) {
+    for (const { head: g } of matchedChains) {
       const key = manilaDayKey(new Date(g.occurredAt))
       const list = byDay.get(key)
       if (list) list.push(g)
@@ -215,16 +284,13 @@ export function History() {
     // reading ("what did Food cost me that day") and is why the result bar
     // above states the totals outright rather than leaving them to be summed.
     return [...byDay.entries()].map(([key, list]) => {
-      const net = list.reduce(
-        (sum, g) =>
-          g.voided || g.kind === 'transfer' || g.kind === 'adjustment'
-            ? sum
-            : sum + g.totalCentavos,
-        0,
+      const projection = projectFinancial(
+        list.filter((group) => !group.voided).flatMap((group) => group.legs),
       )
+      const net = sumCentavos([projection.incomeCentavos, -projection.netSpendingCentavos])
       return { key, groups: list, net }
     })
-  }, [matched])
+  }, [matchedChains])
 
   /**
    * Which day sections open a new month, and whether to say so at all.
@@ -287,7 +353,7 @@ export function History() {
       bump()
       toast.show('Void undone — the entry is back in your balances')
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : String(err), 'error')
+      toast.show(errorMessage(err, 'restore the entry'), 'error')
     }
   }
 
@@ -300,17 +366,28 @@ export function History() {
         run: () => void onUnvoid(group.groupId),
       })
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : String(err), 'error')
+      toast.show(errorMessage(err, 'void the entry'), 'error')
     }
   }
 
-  // Fix (ROADMAP 3.6) = void the whole group + reopen the form prefilled
-  async function onFix(group: LedgerGroup) {
+  // Opening a correction draft never changes money.
+  async function onFix(group: LedgerGroup, predecessor = group.legs) {
     try {
-      await voidGroup(group.groupId, 'fixed — re-entered')
-      bump()
-    } catch (err) {
-      toast.show(err instanceof Error ? err.message : String(err), 'error')
+      const all = await fetchAllEntriesNewestFirst()
+      if (
+        all.some((row) => row.financial?.origin_group_id === predecessor[0]?.group_id) ||
+        obligations.some(
+          (item) => item.origin_group_id === predecessor[0]?.group_id && !item.voided_at,
+        )
+      ) {
+        toast.show(
+          errorMessage(new ActionError('financial_linked'), 'start the correction'),
+          'error',
+        )
+        return
+      }
+    } catch (error) {
+      toast.show(errorMessage(error, 'start the correction'), 'error')
       return
     }
     const note = group.note ?? undefined
@@ -323,6 +400,7 @@ export function History() {
     if (group.kind === 'expense') {
       addSheet.open({
         mode: 'expense',
+        predecessor,
         amountCentavos: -group.totalCentavos,
         // An expense is one leg, so this is THE category. Income and transfer
         // legs carry none by schema, which is why only this branch has it.
@@ -334,6 +412,7 @@ export function History() {
     } else if (group.kind === 'income') {
       addSheet.open({
         mode: 'income',
+        predecessor,
         amountCentavos: group.totalCentavos,
         note,
         occurredAt: group.occurredAt,
@@ -344,6 +423,11 @@ export function History() {
       const to = group.legs.find((l) => l.amount_centavos > 0)
       addSheet.open({
         mode: 'transfer',
+        predecessor,
+        transferPurpose:
+          group.legs[0].financial?.intent === 'account_transfer' ? 'accounts' : 'envelopes',
+        fromAccount: from?.money_type ?? undefined,
+        toAccount: to?.money_type ?? undefined,
         amountCentavos: group.totalCentavos,
         fromEnvelopeId: from?.envelope_id,
         toEnvelopeId: to?.envelope_id,
@@ -358,9 +442,8 @@ export function History() {
   // `to` separately would badge "Filter · 2" for a single tap on "7 days".
   const filterCount =
     categoryIds.length + envelopeIds.length + kinds.length + (from !== null || to !== null ? 1 : 0)
-  const today = manilaDayKey(new Date())
   const activePreset = DATE_PRESETS.find((preset) => {
-    const range = preset.range(today)
+    const range = preset.range(today, weekStart)
     return range.from === from && range.to === to
   })
 
@@ -372,6 +455,170 @@ export function History() {
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-5 px-5 py-7 md:max-w-2xl md:px-8 md:py-10">
       <h1 className="font-display text-[1rem] text-ink">History</h1>
+      <p className="text-sm text-ink-soft">
+        Actual activity · dates show when money moved.{' '}
+        <Link className="text-accent underline" to="/budget">
+          Budget assignments →
+        </Link>
+      </p>
+      {receipt && (
+        <p className="text-sm">
+          Showing one linked receipt.{' '}
+          <Link to="/history" className="text-accent underline">
+            All actual activity
+          </Link>
+        </p>
+      )}
+      <button
+        type="button"
+        onClick={() => setFinancialSheet({ mode: 'principal' })}
+        className="press self-start rounded-xl border border-line px-3 py-2 text-sm text-accent"
+      >
+        Lend / borrow / opening debt
+      </button>
+      <button
+        type="button"
+        onClick={() => setFinancialSheet({ mode: 'refund' })}
+        className="press self-start rounded-xl border border-line px-3 py-2 text-sm text-accent"
+      >
+        Record merchant refund
+      </button>
+      {conflicts.map((item) => (
+        <section key={item.id} role="alert" className="card border-neg p-3 text-sm">
+          <p>
+            Financial draft needs review. Its tentative local changes were rolled back and the
+            ledger is refreshed from the server. The complete draft is kept here. Resolve or discard
+            its queue item in Settings before retrying.
+          </p>
+          {item.operation.rows.map((row) => (
+            <p key={row.id}>
+              {INTENT_LABELS[intentOf(row)]} · {formatPHP(row.amount_centavos)} ·{' '}
+              {row.money_type ? getMoneyTypeLabel(row.money_type) : 'Not tagged'} ·{' '}
+              {manilaDate.format(new Date(row.occurred_at))}
+              {row.note ? ` · ${row.note}` : ''}
+            </p>
+          ))}
+          {item.operation.budget_event && (
+            <div className="mt-2 space-y-1">
+              <p>
+                Saved budget draft: {item.operation.budget_event.type} ·{' '}
+                {monthLabel(item.operation.budget_event.month)}
+              </p>
+              <p>
+                {item.operation.budget_event.type === 'schedule'
+                  ? `Weekdays: ${item.operation.budget_event.weekdays?.join(', ') ?? 'calendar days'} · remaining override: ${item.operation.budget_event.remaining_days ?? 'none'} · excluded: ${item.operation.budget_event.excluded.join(', ') || 'none'} · extra: ${item.operation.budget_event.extra.join(', ') || 'none'}`
+                  : item.operation.budget_event.type === 'expected'
+                    ? `${item.operation.budget_event.note || 'Allowance'} · ${formatPHP(item.operation.budget_event.amount_centavos)} · ${item.operation.budget_event.state}`
+                    : `Receipt chain ${item.operation.budget_event.receipt_chain_id}`}
+              </p>
+              <a
+                className="text-accent underline"
+                href={`/budget?month=${item.operation.budget_event.month}`}
+              >
+                Review current budget before trying again →
+              </a>
+            </div>
+          )}
+          {item.operation.action === 'correct' && (
+            <button
+              type="button"
+              onClick={() => {
+                const draft = groupChains(item.operation.rows)[0]?.head,
+                  chainId =
+                    item.operation.predecessor?.[0]?.financial?.chain_id ??
+                    item.operation.predecessor?.[0]?.group_id
+                const active = groupChains(rows ?? []).find(
+                  (chain) =>
+                    (chain.head.legs[0].financial?.chain_id ?? chain.head.groupId) === chainId &&
+                    !chain.head.voided,
+                )?.head
+                if (draft && active) void onFix(draft, active.legs)
+                else
+                  toast.show(
+                    'There is no active version to correct. The saved draft remains available.',
+                    'error',
+                  )
+              }}
+              className="press mt-2 rounded border border-line p-2"
+            >
+              Review saved correction draft
+            </button>
+          )}
+        </section>
+      ))}
+      {!!obligations.length && (
+        <details className="card p-3">
+          <summary className="cursor-pointer text-sm">
+            Repayment records ({obligations.length})
+          </summary>
+          <p className="mt-2 text-xs text-ink-mute">
+            Open a record to see its current remaining amount and record a partial or full payment.
+            Due dates never mark it paid.
+          </p>
+          {obligations
+            .filter((item) => !item.voided_at)
+            .map((item) => (
+              <div key={item.id} className="mt-2 border-t border-line pt-2 text-sm">
+                <span>
+                  {item.type === 'payable_principal'
+                    ? 'I owe'
+                    : item.type === 'receivable_principal'
+                      ? 'Owed to me'
+                      : 'Purchase reimbursement'}{' '}
+                  · {item.person ?? 'Unnamed'} · {formatPHP(outstanding[item.id] ?? 0)} left ·{' '}
+                  {item.due_on ? `due ${item.due_on}` : 'No due date'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setFinancialSheet({ mode: 'settle', obligation: item })}
+                  disabled={outstanding[item.id] === 0}
+                  className="press ml-2 rounded border border-line px-2 py-1 text-accent"
+                >
+                  Record repayment
+                </button>
+                {(item.type === 'expense_reimbursement' || !item.origin_group_id) && (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-xs">
+                      Cancel this non-cash claim or opening record
+                    </summary>
+                    <p className="mt-2 text-xs">
+                      No cash entry is reversed. Active payments must be voided first.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void cancelObligation(item.id)
+                          .then(() => {
+                            bump()
+                            toast.show('Record canceled; no money moved')
+                          })
+                          .catch((error) =>
+                            toast.show(errorMessage(error, 'cancel the claim'), 'error'),
+                          )
+                      }
+                      className="press mt-2 rounded border border-line p-2 text-neg"
+                    >
+                      Confirm cancellation
+                    </button>
+                  </details>
+                )}
+              </div>
+            ))}
+        </details>
+      )}
+      {obligations.some((item) => item.voided_at) && (
+        <details className="card p-3 text-xs text-ink-mute">
+          <summary className="cursor-pointer">Canceled repayment records</summary>
+          {obligations
+            .filter((item) => item.voided_at)
+            .map((item) => (
+              <p key={item.id} className="mt-2">
+                Canceled {item.type.replaceAll('_', ' ')} · {item.person ?? 'Unnamed'} · Original{' '}
+                {formatPHP(item.amount_centavos)} · {manilaDate.format(new Date(item.voided_at!))}
+              </p>
+            ))}
+        </details>
+      )}
 
       <div className="flex flex-col gap-2">
         <div className="flex gap-2">
@@ -444,9 +691,10 @@ export function History() {
                           setTo(null)
                           return
                         }
-                        const range = preset.range(today)
+                        const range = preset.range(today, weekStart)
                         setFrom(range.from)
                         setTo(range.to)
+                        setRelativePreset(preset.label)
                       }}
                     >
                       {preset.label}
@@ -525,60 +773,110 @@ export function History() {
           </div>
         )}
 
-        {(searching || Object.values(moneyTotals).some((value) => value !== 0)) && rows && (
-          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 px-0.5 text-xs">
-            <p className="text-ink-soft tabular-nums">
-              {totals.groups === 0
-                ? 'No matches'
-                : `${totals.groups} ${totals.groups === 1 ? 'entry' : 'entries'}`}
-              {moneyTotals.online !== 0 && (
-                <>
-                  <span className="mx-1.5 text-ink-mute opacity-50">·</span>
-                  <span className="text-accent">
-                    {getMoneyTypeLabel('online')} {formatPHP(moneyTotals.online)}
-                  </span>
-                </>
+        {searching && (
+          <div className="flex items-center gap-2">
+            <div
+              className="flex min-w-0 flex-1 gap-2 overflow-x-auto py-1"
+              role="group"
+              aria-label="Active filters"
+            >
+              {text.trim() !== '' && (
+                <RemoveFilter label={`Search: ${text}`} onRemove={() => setText('')} />
               )}
-              {moneyTotals.reallife !== 0 && (
-                <>
-                  <span className="mx-1.5 text-ink-mute opacity-50">·</span>
-                  <span className="text-ink-soft">
-                    {getMoneyTypeLabel('reallife')} {formatPHP(moneyTotals.reallife)}
-                  </span>
-                </>
+              {kinds.map((kind) => (
+                <RemoveFilter
+                  key={kind}
+                  label={KIND_LABELS.find((item) => item.kind === kind)!.label}
+                  onRemove={() => setKinds((items) => items.filter((item) => item !== kind))}
+                />
+              ))}
+              {envelopeIds.map((id) => (
+                <RemoveFilter
+                  key={id}
+                  label={`Envelope: ${envelopes.get(id)?.name ?? 'Unavailable envelope'}`}
+                  onRemove={() => setEnvelopeIds((items) => items.filter((item) => item !== id))}
+                />
+              ))}
+              {categoryIds.map((id) => (
+                <RemoveFilter
+                  key={id}
+                  label={`Category: ${categories.get(id)?.name ?? 'Unavailable category'}`}
+                  onRemove={() => setCategoryIds((items) => items.filter((item) => item !== id))}
+                />
+              ))}
+              {(from || to) && (
+                <RemoveFilter
+                  label={`${from ?? 'Beginning'} to ${to ?? 'latest'}`}
+                  onRemove={() => {
+                    setFrom(null)
+                    setTo(null)
+                  }}
+                />
               )}
-              {/* Stated rather than left out, and for the same reason Home shows
-                  it: two chips that silently exclude untagged rows are two chips
-                  that do not add up to the entries counted beside them. */}
-              {moneyTotals.untagged !== 0 && (
-                <>
-                  <span className="mx-1.5 text-ink-mute opacity-50">·</span>
-                  <span className="text-ink-mute">Untagged {formatPHP(moneyTotals.untagged)}</span>
-                </>
-              )}
-              {totals.spentCentavos > 0 && (
-                <>
-                  <span className="mx-1.5 text-ink-mute opacity-50">·</span>
-                  <span className="text-neg">−{formatPHP(totals.spentCentavos)}</span>
-                </>
-              )}
-              {totals.receivedCentavos > 0 && (
-                <>
-                  <span className="mx-1.5 text-ink-mute opacity-50">·</span>
-                  <span className="text-pos">+{formatPHP(totals.receivedCentavos)}</span>
-                </>
-              )}
-            </p>
-            <button type="button" onClick={clearFilters} className="press text-accent">
+            </div>
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="press min-h-11 shrink-0 px-2 text-sm text-accent"
+            >
               Clear
             </button>
           </div>
         )}
+
+        {rows && !loading && !loadError && sourceSearching === searching && (
+          <section
+            aria-label="Results"
+            className="rounded-xl border border-line px-3 py-2 text-xs text-ink-soft"
+          >
+            <h2 className="font-semibold text-ink">Results</h2>
+            <p className="mt-1">
+              {searching
+                ? 'All matching entries in the local ledger'
+                : hasMore
+                  ? 'Loaded entries only — load older for more'
+                  : 'All entries in the local ledger'}
+            </p>
+            <p>
+              Period: {from ?? 'Beginning'} to {to ?? 'latest'} · Manila dates
+            </p>
+            <p className="mt-1 tabular-nums">
+              {totals.groups} {totals.groups === 1 ? 'record' : 'records'} (including voided) ·
+              Gross spending {formatPHP(totals.spentCentavos)} · Returned{' '}
+              {formatPHP(totals.returnedCentavos)} · Net spending{' '}
+              {formatPHP(totals.netSpendingCentavos)} · Income {formatPHP(totals.receivedCentavos)}
+            </p>
+            <p>
+              Adjustments {formatPHP(totals.adjustmentCentavos)} shown separately. Voided records,
+              transfers and loan principal do not count as spending or income.
+            </p>
+            <p className="mt-1 tabular-nums">
+              Account net movement: Online {formatPHP(moneyTotals.online)} · Cash{' '}
+              {formatPHP(moneyTotals.reallife)} · Not tagged {formatPHP(moneyTotals.untagged)}
+            </p>
+          </section>
+        )}
       </div>
 
-      {!rows && <p className="text-ink-mute">Reading the ledger…</p>}
+      {loading && (
+        <p role="status" className="text-ink-mute">
+          Reading the ledger…
+        </p>
+      )}
+      {loadError && (
+        <div role="alert" className="card p-4 text-sm text-neg">
+          <p>{loadError}</p>
+          <button
+            type="button"
+            onClick={() => setRetry((n) => n + 1)}
+            className="press mt-2 min-h-11 text-accent"
+          >
+            Retry History
+          </button>
+        </div>
+      )}
 
-      {rows && rows.length === 0 && !searching && (
+      {rows && !loading && !loadError && rows.length === 0 && !searching && (
         <div className="card px-5 py-8 text-center">
           <p className="font-display text-xs leading-relaxed">Nothing here yet</p>
           <p className="mt-1.5 text-sm text-ink-soft">
@@ -588,7 +886,7 @@ export function History() {
         </div>
       )}
 
-      {rows && searching && matched.length === 0 && (
+      {rows && !loading && !loadError && searching && matched.length === 0 && (
         <div className="card px-5 py-8 text-center">
           <p className="font-display text-xs leading-relaxed">Nothing matched</p>
           <p className="mt-1.5 text-sm text-ink-soft">
@@ -639,16 +937,49 @@ export function History() {
           </div>
           <div className="flex flex-col gap-2">
             {groups.map((group) => (
-              <GroupCard
-                key={group.groupId}
-                group={group}
-                envelopes={envelopes}
-                categories={categories}
-                expanded={expandedId === group.groupId}
-                onToggle={() => setExpandedId(expandedId === group.groupId ? null : group.groupId)}
-                onVoid={onVoid}
-                onFix={onFix}
-              />
+              <div key={group.groupId}>
+                {group.kind === 'income' && intentOf(group.legs[0]) === 'ordinary_income' && (
+                  <p className="mb-1 text-xs text-ink-mute">
+                    Received {manilaDayKey(new Date(group.occurredAt))} Manila · Budget{' '}
+                    {receiptMonth(group.legs[0], audit)}
+                  </p>
+                )}
+                <GroupCard
+                  group={group}
+                  envelopes={envelopes}
+                  categories={categories}
+                  expanded={expandedId === group.groupId}
+                  onToggle={() =>
+                    setExpandedId(expandedId === group.groupId ? null : group.groupId)
+                  }
+                  onVoid={onVoid}
+                  onFix={onFix}
+                  onRestore={onUnvoid}
+                  onFinancial={setFinancialSheet}
+                  audit={audit.filter((event) => event.group_id === group.groupId)}
+                />
+                {!!previousByHead.get(group.groupId)?.length && (
+                  <details className="ml-3 border-l border-line p-2">
+                    <summary className="cursor-pointer text-xs text-ink-mute">
+                      Previous versions ({previousByHead.get(group.groupId)!.length})
+                    </summary>
+                    {previousByHead.get(group.groupId)!.map((prior) => (
+                      <GroupCard
+                        key={prior.groupId}
+                        group={prior}
+                        envelopes={envelopes}
+                        categories={categories}
+                        expanded={true}
+                        onToggle={() => {}}
+                        onVoid={() => {}}
+                        onFix={() => {}}
+                        onRestore={() => {}}
+                        auditOnly
+                      />
+                    ))}
+                  </details>
+                )}
+              </div>
             ))}
           </div>
         </section>
@@ -657,7 +988,7 @@ export function History() {
       {/* The wall that used to be silent. Without this the newest 200 rows were
           the whole of History and nothing said so — about four months of daily
           use before the ledger's past simply stopped rendering. */}
-      {rows && !searching && hasMore && (
+      {rows && !loading && !loadError && !searching && hasMore && (
         <button
           type="button"
           onClick={() => setPageRows((n) => n + HISTORY_PAGE_ROWS)}
@@ -669,7 +1000,23 @@ export function History() {
       {rows && !searching && !hasMore && rows.length > HISTORY_PAGE_ROWS && (
         <p className="pb-2 text-center text-xs text-ink-mute">That's the whole ledger.</p>
       )}
+      {financialSheet && (
+        <FinancialSheet request={financialSheet} onClose={() => setFinancialSheet(null)} />
+      )}
     </main>
+  )
+}
+
+function RemoveFilter({ label, onRemove }: { label: string; onRemove: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={`Remove ${label}`}
+      onClick={onRemove}
+      className="press min-h-11 max-w-56 shrink-0 rounded-xl border border-accent/50 px-3 text-sm text-accent"
+    >
+      <span className="block truncate">{label} ×</span>
+    </button>
   )
 }
 
@@ -714,6 +1061,10 @@ function GroupCard({
   onToggle,
   onVoid,
   onFix,
+  onRestore,
+  auditOnly = false,
+  onFinancial,
+  audit = [],
 }: {
   group: LedgerGroup
   envelopes: Map<string, Envelope>
@@ -722,14 +1073,20 @@ function GroupCard({
   onToggle: () => void
   onVoid: (group: LedgerGroup, reason: string) => void
   onFix: (group: LedgerGroup) => void
+  onRestore: (groupId: string) => void
+  auditOnly?: boolean
+  onFinancial?: (request: FinancialSheetRequest) => void
+  audit?: LedgerAudit[]
 }) {
   const [reason, setReason] = useState('')
   const [voidOpen, setVoidOpen] = useState(false)
+  const [restoreOpen, setRestoreOpen] = useState(false)
 
   const leg0 = group.legs[0]
   const category = leg0.category_id ? categories.get(leg0.category_id) : undefined
   const from = group.legs.find((l) => l.amount_centavos < 0)
   const to = group.legs.find((l) => l.amount_centavos > 0)
+  const intent = intentOf(leg0)
 
   let title: string
   let subtitle: string
@@ -768,6 +1125,19 @@ function GroupCard({
     glyph = '⚖'
     tint = '#948CA9'
   }
+  if (
+    leg0.financial &&
+    ![
+      'purchase',
+      'ordinary_income',
+      'envelope_transfer',
+      'opening_balance',
+      'reconciliation',
+    ].includes(intent)
+  )
+    title = INTENT_LABELS[intent]
+  if (intent === 'account_transfer' || intent === 'account_reclassification')
+    subtitle = `${from?.money_type ? getMoneyTypeLabel(from.money_type) : 'Not tagged'} → ${to?.money_type ? getMoneyTypeLabel(to.money_type) : 'Not tagged'} · ${envelopes.get(leg0.envelope_id)?.name ?? 'Envelope'}`
 
   return (
     <div className={`card overflow-hidden ${group.voided ? 'opacity-45' : ''}`}>
@@ -777,7 +1147,7 @@ function GroupCard({
         aria-expanded={expanded}
         className="w-full px-3.5 py-3 text-left transition-colors hover:bg-raised/40"
       >
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <span
             aria-hidden
             className="flex size-9 shrink-0 items-center justify-center text-[1rem]"
@@ -787,13 +1157,16 @@ function GroupCard({
           </span>
           <div className="min-w-0 flex-1">
             <p className={`truncate font-medium ${group.voided ? 'line-through' : ''}`}>{title}</p>
+            <p className="text-xs text-ink-soft">
+              {leg0.financial ? INTENT_LABELS[intent] : group.kind} ·{' '}
+              {group.voided ? 'Voided' : 'Active'}
+            </p>
             <p className="truncate text-xs text-ink-mute">
-              {group.voided ? 'voided · ' : ''}
               {subtitle}
               {group.note && group.kind !== 'adjustment' ? ` · ${group.note}` : ''}
             </p>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex max-w-full flex-wrap items-center gap-2">
             {group.legs.some((leg) => leg.money_type === 'online') && (
               <span className="rounded-full border border-accent/35 bg-accent/10 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-accent">
                 {getMoneyTypeLabel('online')}
@@ -828,11 +1201,100 @@ function GroupCard({
           {group.voided && leg0.void_reason && (
             <p className="mt-1 text-xs text-ink-mute">void reason: {leg0.void_reason}</p>
           )}
+          {leg0.financial && (
+            <p className="mt-2 text-xs text-ink-mute">
+              Recorded {manilaDate.format(new Date(leg0.financial.recorded_at))}{' '}
+              {manilaTime.format(new Date(leg0.financial.recorded_at))} Manila ·{' '}
+              {leg0.financial.origin_group_id
+                ? 'Linked to an original movement'
+                : leg0.financial.origin_unknown
+                  ? 'Historical origin unknown'
+                  : 'Original movement'}
+            </p>
+          )}
+          {!leg0.financial && (
+            <p className="mt-2 text-xs text-ink-mute">
+              Recorded time unavailable for this legacy entry.
+            </p>
+          )}
+          {!!audit.length && (
+            <details className="mt-2 text-xs text-ink-mute">
+              <summary className="cursor-pointer">Audit events ({audit.length})</summary>
+              {[...audit]
+                .sort((a, b) => b.recorded_at.localeCompare(a.recorded_at))
+                .map((event) => (
+                  <p key={event.id} className="mt-1">
+                    {event.action} · {manilaDate.format(new Date(event.recorded_at))}{' '}
+                    {manilaTime.format(new Date(event.recorded_at))} Manila
+                    {typeof event.details.reason === 'string' ? ` · ${event.details.reason}` : ''}
+                    {Array.isArray(event.details.goals) && (
+                      <>
+                        {' '}
+                        ·{' '}
+                        <Link
+                          className="text-accent underline"
+                          to={`/goals?envelope=${leg0.envelope_id}`}
+                        >
+                          Linked goal allocation
+                        </Link>
+                      </>
+                    )}
+                  </p>
+                ))}
+            </details>
+          )}
 
-          {!group.voided && (
+          {group.voided && !auditOnly && (
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() => setRestoreOpen(!restoreOpen)}
+                className="press rounded border border-line px-3 py-2 text-accent"
+              >
+                Restore…
+              </button>
+              {restoreOpen && (
+                <div className="mt-2">
+                  <p>
+                    Restore this standalone group and apply the amounts above to its accounts and
+                    envelopes. Superseded originals and invalid linked recoveries cannot be
+                    restored.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => onRestore(group.groupId)}
+                    className="press mt-2 rounded border border-line px-3 py-2"
+                  >
+                    Confirm restore
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          {!group.voided && !auditOnly && (
             <div className="mt-3 flex flex-col gap-2">
               <div className="flex gap-2">
-                {group.kind !== 'adjustment' && (
+                {intent === 'purchase' && onFinancial && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => onFinancial({ mode: 'refund', origin: group })}
+                      className="press rounded border border-line px-2 py-1 text-accent"
+                    >
+                      Refund
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onFinancial({ mode: 'claim', origin: group })}
+                      className="press rounded border border-line px-2 py-1 text-accent"
+                    >
+                      Shared purchase claim
+                    </button>
+                  </>
+                )}
+                {['purchase', 'ordinary_income', 'envelope_transfer', 'account_transfer'].includes(
+                  intent,
+                ) && (
                   <button
                     type="button"
                     onClick={() => onFix(group)}

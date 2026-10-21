@@ -1,3 +1,4 @@
+import { errorMessage } from '../../lib/errors'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useToast } from '../../app-context'
 import {
@@ -43,7 +44,7 @@ export function MfaSection() {
       setCode('')
       setView('enrolling')
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : String(err), 'error')
+      toast.show(errorMessage(err, 'set up authentication'), 'error')
     } finally {
       setBusy(false)
     }
@@ -59,7 +60,7 @@ export function MfaSection() {
       setView('on')
       toast.show('Two-factor is on — you’ll enter a code at next login', 'ok')
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : String(err), 'error')
+      toast.show(errorMessage(err, 'verify the code'), 'error')
       setCode('')
     } finally {
       setBusy(false)
@@ -74,7 +75,7 @@ export function MfaSection() {
       setView('off')
       toast.show('Two-factor turned off', 'ok')
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : String(err), 'error')
+      toast.show(errorMessage(err, 'remove authentication'), 'error')
     } finally {
       setBusy(false)
     }

@@ -33,7 +33,12 @@ describe('lastInflowDayKey', () => {
 
   it('counts an opening balance, which is an adjustment', () => {
     const rows = [
-      row({ kind: 'adjustment', amount_centavos: 50_000, occurred_at: at('2026-07-03') }),
+      row({
+        kind: 'adjustment',
+        note: 'Opening balance',
+        amount_centavos: 50_000,
+        occurred_at: at('2026-07-03'),
+      }),
     ]
     expect(lastInflowDayKey(rows, 'needs')).toBe('2026-07-03')
   })

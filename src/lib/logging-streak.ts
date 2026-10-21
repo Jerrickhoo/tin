@@ -47,6 +47,7 @@
 
 import { daysBetweenKeys, manilaDayKey, shiftDayKey } from './dates'
 import type { EntryRow } from './groups'
+import { projectFinancial } from './financial'
 
 export interface LoggedDay {
   /** Manila day key, YYYY-MM-DD. */
@@ -389,15 +390,12 @@ export function spentInRange(
   fromDayKey: string,
   toDayKey: string,
 ): number {
-  let total = 0
-  for (const row of rows) {
-    if (row.kind !== 'expense') continue
-    if (row.voided_at !== null) continue
-    const at = new Date(row.occurred_at)
-    if (Number.isNaN(at.getTime())) continue
-    const dayKey = manilaDayKey(at)
-    if (dayKey < fromDayKey || dayKey > toDayKey) continue
-    total += Math.abs(row.amount_centavos)
-  }
-  return total
+  return projectFinancial(
+    rows.filter((row) => {
+      const at = new Date(row.occurred_at)
+      if (Number.isNaN(at.getTime())) return false
+      const dayKey = manilaDayKey(at)
+      return dayKey >= fromDayKey && dayKey <= toDayKey
+    }),
+  ).netSpendingCentavos
 }

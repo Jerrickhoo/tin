@@ -34,6 +34,7 @@ async function pressBack() {
 // keeps it out of the next test's history.
 afterEach(async () => {
   cleanup()
+  vi.restoreAllMocks()
   await new Promise((resolve) => setTimeout(resolve, 50))
 })
 
@@ -56,6 +57,92 @@ function Harness({ onClose, children }: { onClose: () => void; children?: ReactN
 }
 
 const grabHandle = () => document.querySelector('[class*="cursor-grab"]') as HTMLElement
+
+describe('BottomSheet keyboard accessibility', () => {
+  it('moves focus into the modal and restores its opener on close', () => {
+    const opener = document.createElement('button')
+    opener.textContent = 'Open details'
+    document.body.append(opener)
+    opener.focus()
+    const view = render(
+      <BottomSheet open onClose={vi.fn()} label="Review">
+        <p>Details</p>
+      </BottomSheet>,
+    )
+    expect(document.activeElement).toBe(screen.getByRole('dialog', { name: 'Review' }))
+    view.rerender(
+      <BottomSheet open={false} onClose={vi.fn()} label="Review">
+        <p>Details</p>
+      </BottomSheet>,
+    )
+    expect(document.activeElement).toBe(opener)
+    opener.remove()
+  })
+
+  it('preserves a field that already took autofocus inside the modal', () => {
+    render(
+      <BottomSheet open onClose={vi.fn()}>
+        <input aria-label="Entry amount" autoFocus />
+      </BottomSheet>,
+    )
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Entry amount' }))
+  })
+
+  it('returns from an autofocused field to an explicitly supplied opener', () => {
+    const opener = document.createElement('button')
+    document.body.append(opener)
+    opener.focus()
+    const view = render(
+      <BottomSheet open onClose={vi.fn()} returnFocusTo={opener}>
+        <input autoFocus aria-label="Amount" />
+      </BottomSheet>,
+    )
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Amount' }))
+    view.rerender(
+      <BottomSheet open={false} onClose={vi.fn()} returnFocusTo={opener}>
+        <input aria-label="Amount" />
+      </BottomSheet>,
+    )
+    expect(document.activeElement).toBe(opener)
+    opener.remove()
+  })
+
+  it('names the dialog and wraps Tab in both directions without reaching the background', () => {
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
+      {},
+    ] as unknown as DOMRectList)
+    render(
+      <>
+        <button>Background</button>
+        <BottomSheet open onClose={vi.fn()} label="Expense entry">
+          <button>First</button>
+          <button disabled>Disabled</button>
+          <button hidden>Hidden</button>
+          <button>Last</button>
+        </BottomSheet>
+      </>,
+    )
+    expect(screen.getByRole('dialog', { name: 'Expense entry' })).toBeTruthy()
+    screen.getByRole('button', { name: 'Last' }).focus()
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab' })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'First' }))
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Last' }))
+    screen.getByRole('button', { name: 'Background' }).focus()
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab' })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'First' }))
+  })
+
+  it('keeps focus on a dialog without any enabled controls', () => {
+    render(
+      <BottomSheet open onClose={vi.fn()}>
+        <p>Loading details</p>
+      </BottomSheet>,
+    )
+    fireEvent.keyDown(window, { key: 'Tab' })
+    expect(document.activeElement).toBe(screen.getByRole('dialog'))
+  })
+})
 
 /** Press, pull down by `distance`, let go. */
 function dragHandle(distance: number) {

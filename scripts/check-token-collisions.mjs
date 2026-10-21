@@ -40,7 +40,7 @@ const FONT_SIZES = new Set([
   '9xl',
 ])
 
-const colorTokens = [...css.matchAll(/--color-([\w-]+):/g)].map((m) => m[1])
+const colorTokens = [...new Set([...css.matchAll(/--color-([\w-]+):/g)].map((m) => m[1]))]
 const shadowed = colorTokens.filter((t) => FONT_SIZES.has(t))
 
 console.log('\n  token / utility collisions\n')

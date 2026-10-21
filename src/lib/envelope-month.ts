@@ -36,6 +36,7 @@
 
 import { daysBetweenKeys, daysRemainingInMonth, manilaDayKey, shiftDayKey } from './dates'
 import type { EntryRow } from './groups'
+import { intentOf, projectFinancial, sumCentavos } from './financial'
 
 /**
  * How far back `hasSpending` looks for evidence that an envelope gets spent
@@ -84,13 +85,13 @@ export interface EnvelopePace {
 /**
  * The moment this envelope last received NEW money, as a Manila day key.
  *
- * Income and positive adjustments only. Transfers deliberately do not count:
+ * Ordinary income and explicitly recognized opening balances only. Transfers deliberately do not count:
  * money crossing between envelopes has not entered the tin, and letting a
  * transfer re-anchor would mean covering an overdraft from Wants handed Needs
  * a fresh 100% meter — laundering a blown budget by shuffling. A transfer still
  * raises `setAside` through the balance, which is the truthful part of it.
  *
- * Opening balances anchor, because they are `adjustment` rows and because that
+ * Opening balances anchor because that
  * genuinely is the moment the run starts on a new ledger.
  *
  * Null when the window holds no inflow at all — the caller falls back to the
@@ -101,7 +102,13 @@ export function lastInflowDayKey(rows: readonly EntryRow[], envelopeId: string):
   for (const row of rows) {
     if (row.envelope_id !== envelopeId) continue
     if (row.voided_at !== null) continue
-    if (row.kind !== 'income' && row.kind !== 'adjustment') continue
+    const intent = intentOf(row)
+    if (
+      intent !== 'ordinary_income' &&
+      intent !== 'opening_balance' &&
+      !(row.kind === 'adjustment' && !row.financial && row.note === 'Opening balance')
+    )
+      continue
     // A negative adjustment is a correction downward, not a top-up.
     if (row.amount_centavos <= 0) continue
     if (latest === null || row.occurred_at > latest) latest = row.occurred_at
@@ -160,7 +167,8 @@ export function envelopePace(
   for (const row of rows) {
     if (row.envelope_id !== envelopeId) continue
     if (row.voided_at !== null) continue
-    if (row.kind !== 'expense') continue
+    const intent = intentOf(row)
+    if (!['purchase', 'merchant_refund', 'expense_reimbursement'].includes(intent)) continue
     const at = new Date(row.occurred_at)
     if (Number.isNaN(at.getTime())) continue
     const dayKey = manilaDayKey(at)
@@ -168,12 +176,16 @@ export function envelopePace(
     // measured from the top-up so it agrees with the tick. `hasSpending` is a
     // question about the envelope's character rather than its current run, so
     // it reaches back past the anchor — see SPENDING_LOOKBACK_DAYS.
-    if (dayKey >= spendingSince) hasSpending = true
+    if (dayKey >= spendingSince && dayKey <= todayKey && intent === 'purchase') hasSpending = true
     if (dayKey < anchorDayKey) continue
-    usedCentavos += Math.abs(row.amount_centavos)
+    if (dayKey > todayKey) continue
+    usedCentavos = sumCentavos([usedCentavos, projectFinancial([row]).netSpendingCentavos])
   }
 
-  const setAsideCentavos = balanceCentavos + usedCentavos
+  // A receipt-day return can exceed purchases in this run. Keep the meter
+  // bounded while retaining signed net spending in reports.
+  usedCentavos = Math.max(0, usedCentavos)
+  const setAsideCentavos = sumCentavos([balanceCentavos, usedCentavos])
   if (balanceCentavos < 0 || setAsideCentavos <= 0) {
     return {
       setAsideCentavos: 0,

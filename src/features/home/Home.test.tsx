@@ -42,7 +42,7 @@ describe('buildEnvelopeCardFacts', () => {
       {
         key: 'low-balance',
         text: 'Low balance — only ₱30.00 left',
-        className: 'whitespace-nowrap text-amber-600',
+        className: 'whitespace-nowrap text-warn',
       },
     ])
   })

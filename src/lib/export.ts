@@ -2,6 +2,9 @@
 // Pure — no React, no IO. The download plumbing lives in the Settings screen.
 
 import type { EntryRow } from './groups'
+import { INTENT_LABELS, intentOf, type Obligation, type LedgerAudit } from './financial'
+import { getMoneyBucketLabel } from './money-type'
+import { assignedMonths, receiptMonth } from './budget'
 
 export interface NameMaps {
   envelopeNames: Map<string, string>
@@ -37,14 +40,25 @@ const CSV_COLUMNS = [
   'void_reason',
   'group_id',
   'entry_id',
+  'money_type',
+  'movement',
+  'operation_id',
+  'recorded_at',
+  'origin_group_id',
+  'corrects_group_id',
+  'chain_id',
+  'obligation_id',
+  'budget_month',
 ] as const
 
 export function entriesToCsv(
   rows: readonly EntryRow[],
   maps: NameMaps,
   manilaDayKey: (d: Date) => string,
+  audit: readonly LedgerAudit[] = [],
 ): string {
   const lines = [CSV_COLUMNS.join(',')]
+  const months = assignedMonths(audit)
   for (const row of rows) {
     const cells: Record<(typeof CSV_COLUMNS)[number], string> = {
       occurred_at_utc: row.occurred_at,
@@ -61,6 +75,15 @@ export function entriesToCsv(
       void_reason: guardCell(row.void_reason ?? ''),
       group_id: row.group_id,
       entry_id: row.id,
+      money_type: getMoneyBucketLabel(row.money_type ?? 'untagged'),
+      movement: INTENT_LABELS[intentOf(row)],
+      operation_id: row.financial?.operation_id ?? '',
+      recorded_at: row.financial?.recorded_at ?? '',
+      origin_group_id: row.financial?.origin_group_id ?? '',
+      corrects_group_id: row.financial?.corrects_group_id ?? '',
+      chain_id: row.financial?.chain_id ?? '',
+      obligation_id: row.financial?.obligation_id ?? '',
+      budget_month: intentOf(row) === 'ordinary_income' ? receiptMonth(row, audit, months) : '',
     }
     lines.push(CSV_COLUMNS.map((c) => csvEscape(cells[c])).join(','))
   }
@@ -70,24 +93,33 @@ export function entriesToCsv(
 export interface ExportBundle {
   exported_at: string
   app: 'tin'
-  format_version: 1
+  format_version: 2 | 3 | 4
   envelopes: unknown[]
   categories: unknown[]
   entries: readonly EntryRow[]
+  obligations: readonly Obligation[]
+  audit: readonly LedgerAudit[]
 }
 
 export function entriesToJson(
   entries: readonly EntryRow[],
   envelopes: unknown[],
   categories: unknown[],
+  extra: { obligations?: readonly Obligation[]; audit?: readonly LedgerAudit[] } = {},
 ): string {
   const bundle: ExportBundle = {
     exported_at: new Date().toISOString(),
     app: 'tin',
-    format_version: 1,
+    format_version: extra.audit?.some((a) => a.details.goals)
+      ? 4
+      : extra.audit?.some((a) => a.details.budget)
+        ? 3
+        : 2,
     envelopes,
     categories,
     entries,
+    obligations: extra.obligations ?? [],
+    audit: extra.audit ?? [],
   }
   return JSON.stringify(bundle, null, 2)
 }

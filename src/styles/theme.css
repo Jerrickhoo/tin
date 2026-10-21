@@ -141,6 +141,7 @@
   --color-on-accent: #1e1030;
   --color-pos: #a8e6cf;
   --color-neg: #ff9aa2;
+  --color-warn: #f1cb83;
 
   --color-needs: #c9a7ff;
   --color-savings: #a8e6cf;
@@ -189,6 +190,239 @@
   /* One pixel unit. Border widths, shadow offsets and the scanline period are
      all derived from this so the whole UI stays on a single grid. */
   --px-unit: 2px;
+}
+
+/* Scoped to any data-theme element so the picker previews use the real palette. */
+:root,
+[data-theme] {
+  color-scheme: dark;
+  --pixel-shadow: rgb(0 0 0 / 0.55);
+}
+
+[data-theme='plum'] {
+  --color-base: #17131f;
+  --color-surface: #221b2e;
+  --color-raised: #2d2440;
+  --color-line: #3d3354;
+  --color-ink: #f2e9f7;
+  --color-ink-soft: #c4b3d6;
+  --color-ink-mute: #a294b8;
+  --color-accent: #c9a7ff;
+  --color-on-accent: #1e1030;
+  --color-pos: #a8e6cf;
+  --color-neg: #ff9aa2;
+  --color-needs: #c9a7ff;
+  --color-savings: #a8e6cf;
+  --color-wants: #ffb3d9;
+}
+
+[data-theme='ocean'] {
+  --color-base: #101923;
+  --color-surface: #172635;
+  --color-raised: #203348;
+  --color-line: #354b62;
+  --color-ink: #e9f3fc;
+  --color-ink-soft: #b4cde1;
+  --color-ink-mute: #9cb4cb;
+  --color-accent: #96cfff;
+  --color-on-accent: #102335;
+  --color-pos: #a8e6cf;
+  --color-neg: #ffadb5;
+  --color-needs: #c9a7ff;
+  --color-savings: #a8e6cf;
+  --color-wants: #ffb3d9;
+}
+
+[data-theme='forest'] {
+  --color-base: #111c18;
+  --color-surface: #1a2a23;
+  --color-raised: #243a30;
+  --color-line: #3b5145;
+  --color-ink: #edf7ed;
+  --color-ink-soft: #c0d8c5;
+  --color-ink-mute: #a1bda9;
+  --color-accent: #a8d5a2;
+  --color-on-accent: #132617;
+  --color-pos: #afe4cb;
+  --color-neg: #ffb0b4;
+  --color-needs: #c9a7ff;
+  --color-savings: #a8e6cf;
+  --color-wants: #ffb3d9;
+}
+
+[data-theme='rose'] {
+  --color-base: #21151c;
+  --color-surface: #30202a;
+  --color-raised: #412c38;
+  --color-line: #5c4050;
+  --color-ink: #fbeaf1;
+  --color-ink-soft: #e0bdce;
+  --color-ink-mute: #c9a4b7;
+  --color-accent: #f3b2cf;
+  --color-on-accent: #321222;
+  --color-pos: #b0e1cc;
+  --color-neg: #ffb4a9;
+  --color-needs: #c9a7ff;
+  --color-savings: #a8e6cf;
+  --color-wants: #ffb3d9;
+}
+
+[data-theme='amber'] {
+  --color-base: #211a11;
+  --color-surface: #2e2418;
+  --color-raised: #403221;
+  --color-line: #594831;
+  --color-ink: #fcf0dc;
+  --color-ink-soft: #dfc9a6;
+  --color-ink-mute: #c4ad8a;
+  --color-accent: #f1cb83;
+  --color-on-accent: #30200c;
+  --color-pos: #b7dfb0;
+  --color-neg: #ffb0a2;
+  --color-needs: #c9a7ff;
+  --color-savings: #a8e6cf;
+  --color-wants: #ffb3d9;
+}
+
+[data-theme='daylight'] {
+  color-scheme: light;
+  --pixel-shadow: rgb(41 39 53 / 0.12);
+  --color-base: #f7f4ed;
+  --color-surface: #fffdf8;
+  --color-raised: #eee8dc;
+  --color-line: #c8bead;
+  --color-ink: #292735;
+  --color-ink-soft: #514c5c;
+  --color-ink-mute: #68616c;
+  --color-accent: #65439b;
+  --color-on-accent: #fffdf8;
+  --color-pos: #246444;
+  --color-neg: #a43549;
+  --color-warn: #8a4b11;
+  --color-needs: #65439b;
+  --color-savings: #246444;
+  --color-wants: #9b3971;
+}
+
+[data-theme='neo-pop'] {
+  color-scheme: light;
+  --color-base: #fff7e5;
+  --color-surface: #ffffff;
+  --color-raised: #ffeab9;
+  --color-line: #201c2c;
+  --color-ink: #201c2c;
+  --color-ink-soft: #444054;
+  --color-ink-mute: #62596b;
+  --color-accent: #5a32a8;
+  --color-on-accent: #ffffff;
+  --color-pos: #176039;
+  --color-neg: #ae254a;
+  --color-warn: #7a3d08;
+  --color-needs: #5a32a8;
+  --color-savings: #176039;
+  --color-wants: #ae254a;
+  --color-highlight: #ffe263;
+  --pop-yellow: var(--color-highlight);
+  --pop-pink: #ff91bd;
+  --pop-cyan: #7fe7e0;
+  --pixel-shadow: var(--color-line);
+  --add-background: var(--color-accent);
+  --font-sans: 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Arial Black', 'Segoe UI', system-ui, sans-serif;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 650;
+  --font-weight-bold: 800;
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-2xl: 12px;
+  --radius-3xl: 16px;
+  --radius-4xl: 20px;
+}
+
+/* Tiny app layouts let people compare backgrounds, cards, and accents together. */
+.theme-preview {
+  display: flex;
+  height: 4.5rem;
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  background: var(--color-base);
+}
+.theme-preview-rail {
+  display: flex;
+  width: 22%;
+  flex-direction: column;
+  gap: 6px;
+  border-right: 1px solid var(--color-line);
+  background: var(--color-surface);
+  padding: 10px 5px;
+}
+.theme-preview-rail span {
+  height: 3px;
+  background: var(--color-line);
+}
+.theme-preview-rail span:first-child {
+  background: var(--color-accent);
+}
+.theme-preview-content {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px;
+}
+.theme-preview-heading {
+  width: 40%;
+  height: 3px;
+  background: var(--color-ink-soft);
+}
+.theme-preview-card {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--color-line);
+  background: var(--color-surface);
+  padding: 5px;
+}
+.theme-preview-card span {
+  width: 40%;
+  height: 4px;
+  background: var(--color-accent);
+}
+.theme-preview-card span:last-child {
+  width: 20%;
+  background: var(--color-pos);
+}
+.theme-preview-button {
+  width: 35%;
+  height: 6px;
+  background: var(--color-accent);
+}
+
+[data-theme='neo-pop'].theme-preview {
+  border: 2px solid var(--color-line);
+  border-radius: 6px;
+  background: var(--pop-yellow);
+  box-shadow: 2px 2px 0 var(--color-line);
+}
+[data-theme='neo-pop'].theme-preview .theme-preview-rail {
+  border-right: 2px solid var(--color-line);
+  background: var(--pop-pink);
+}
+[data-theme='neo-pop'].theme-preview .theme-preview-card {
+  border: 2px solid var(--color-line);
+  border-radius: 3px;
+  background: var(--pop-cyan);
+  box-shadow: 2px 2px 0 var(--color-line);
+}
+[data-theme='neo-pop'].theme-preview .theme-preview-button {
+  border-radius: 2px;
+  box-shadow: 2px 2px 0 var(--color-line);
 }
 
 body {
@@ -274,8 +508,16 @@ body::after {
    what keeps it from looking like a smooth glow in a blocky UI. */
 body::before {
   background:
-    radial-gradient(30rem 22rem at 14% -6%, rgb(201 167 255 / 0.11), transparent 70%),
-    radial-gradient(22rem 18rem at 97% 4%, rgb(255 179 217 / 0.06), transparent 66%);
+    radial-gradient(
+      30rem 22rem at 14% -6%,
+      color-mix(in srgb, var(--color-accent) 11%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      22rem 18rem at 97% 4%,
+      color-mix(in srgb, var(--color-wants) 6%, transparent),
+      transparent 66%
+    );
 }
 
 /* Scanlines, alone now.
@@ -301,8 +543,16 @@ body::after {
 }
 :root[data-texture='reduced'] body::before {
   background:
-    radial-gradient(30rem 22rem at 14% -6%, rgb(201 167 255 / 0.05), transparent 70%),
-    radial-gradient(22rem 18rem at 97% 4%, rgb(255 179 217 / 0.03), transparent 66%);
+    radial-gradient(
+      30rem 22rem at 14% -6%,
+      color-mix(in srgb, var(--color-accent) 5%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      22rem 18rem at 97% 4%,
+      color-mix(in srgb, var(--color-wants) 3%, transparent),
+      transparent 66%
+    );
 }
 
 #root {
@@ -319,10 +569,11 @@ body::after {
    ============================================================ */
 
 .card {
+  min-width: 0;
   position: relative;
   border: var(--px-unit) solid var(--color-line);
   background-color: var(--color-surface);
-  box-shadow: var(--px-unit) var(--px-unit) 0 0 rgb(0 0 0 / 0.55);
+  box-shadow: var(--px-unit) var(--px-unit) 0 0 var(--pixel-shadow);
 }
 
 /* the same material, one step brighter — sheets and modals */
@@ -395,7 +646,7 @@ body::after {
   position: relative;
   height: 0.75rem;
   overflow: hidden;
-  background-color: rgb(0 0 0 / 0.45);
+  background-color: color-mix(in srgb, var(--color-ink) 12%, var(--color-base));
   border: var(--px-unit) solid var(--color-line);
 }
 
@@ -413,7 +664,11 @@ body::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: repeating-linear-gradient(to right, transparent 0 6px, rgb(23 19 31 / 0.85) 6px 8px);
+  background: repeating-linear-gradient(
+    to right,
+    transparent 0 6px,
+    color-mix(in srgb, var(--color-base) 85%, transparent) 6px 8px
+  );
 }
 
 /* Target ticks. Same mark, two meanings, and they are kept as separate names
@@ -572,4 +827,95 @@ input[type='search']::-webkit-search-cancel-button,
 input[type='search']::-webkit-search-decoration {
   -webkit-appearance: none;
   appearance: none;
+}
+
+/* Neo Pop is a complete optional style; every treatment stays scoped to it. */
+:root[data-theme='neo-pop'] body {
+  -webkit-font-smoothing: antialiased;
+  font-smooth: always;
+  text-rendering: optimizeLegibility;
+}
+:root[data-theme='neo-pop'] body::before {
+  background: radial-gradient(circle, rgb(32 28 44 / 0.16) 1px, transparent 1px) 0 0 / 18px 18px;
+}
+:root[data-theme='neo-pop'] body::after {
+  background: none;
+}
+:root[data-theme='neo-pop'][data-texture='reduced'] body::before {
+  background: none;
+}
+:root[data-theme='neo-pop'] .font-display {
+  font-size: max(0.875rem, 1em);
+  font-weight: 900;
+  letter-spacing: -0.025em;
+}
+:root[data-theme='neo-pop'] h1.font-display {
+  font-size: clamp(1.6rem, 4vw, 2rem);
+  line-height: 1.15;
+}
+:root[data-theme='neo-pop'] .card {
+  border-width: 3px;
+  border-radius: 12px;
+  box-shadow: 5px 5px 0 var(--color-line);
+}
+:root[data-theme='neo-pop'] .balance-hero {
+  background-color: var(--color-highlight);
+}
+:root[data-theme='neo-pop'] .sheet-surface {
+  border: 3px solid var(--color-line);
+  border-radius: 16px;
+  box-shadow: 8px 8px 0 var(--color-line);
+}
+:root[data-theme='neo-pop'] .pixel-corners {
+  clip-path: none;
+}
+:root[data-theme='neo-pop'] .blink {
+  animation: none;
+}
+:root[data-theme='neo-pop'] nav {
+  border-width: 0;
+}
+:root[data-theme='neo-pop'] .app-nav-mobile {
+  border-top: 3px solid var(--color-line);
+}
+:root[data-theme='neo-pop'] .app-nav-desktop {
+  border-right: 3px solid var(--color-line);
+}
+:root[data-theme='neo-pop'] nav a[aria-current='page'] {
+  border-radius: 8px;
+  background: var(--pop-yellow);
+  color: var(--color-ink);
+}
+:root[data-theme='neo-pop'] .app-add-button,
+:root[data-theme='neo-pop'] .press.bg-accent {
+  border: 2px solid var(--color-line);
+  border-radius: 8px;
+  box-shadow: 4px 4px 0 var(--color-line);
+}
+:root[data-theme='neo-pop'] .press:active {
+  box-shadow: none;
+}
+:root[data-theme='neo-pop'] .meter {
+  height: 0.875rem;
+  border: 2px solid var(--color-line);
+  border-radius: 4px;
+}
+:root[data-theme='neo-pop'] .meter-fill::after {
+  display: none;
+}
+:root[data-theme='neo-pop'] .theme-option-frame {
+  border-radius: 8px;
+}
+:root[data-theme='neo-pop']
+  :is(input:not([type='radio']):not([type='checkbox']), select, textarea) {
+  border-color: var(--color-line);
+}
+@media (hover: hover) {
+  :root[data-theme='neo-pop'] .card-interactive:hover {
+    border-color: var(--color-line);
+    box-shadow: 7px 7px 0 var(--color-line);
+  }
+  :root[data-theme='neo-pop'] .press:hover {
+    filter: brightness(1.04);
+  }
 }

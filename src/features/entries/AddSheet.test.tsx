@@ -10,6 +10,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { AddSheet } from './AddSheet'
+import { useState } from 'react'
+import { ToastContext } from '../../app-context'
 
 const ENVELOPES = [
   {
@@ -36,11 +38,20 @@ const CATEGORIES = [
 
 // vi.hoisted, because vi.mock's factory is lifted above every import and cannot
 // close over an ordinary const declared below it.
-const { addExpense, addTransfer, ensureCategory, fetchCategories } = vi.hoisted(() => ({
+const {
+  addExpense,
+  addTransfer,
+  addAccountTransfer,
+  ensureCategory,
+  fetchCategories,
+  fetchRecent,
+} = vi.hoisted(() => ({
   addExpense: vi.fn(),
   addTransfer: vi.fn(),
+  addAccountTransfer: vi.fn<(params: unknown) => Promise<string>>(async () => 'account-group'),
   ensureCategory: vi.fn(),
   fetchCategories: vi.fn(),
+  fetchRecent: vi.fn(),
 }))
 
 vi.mock('../../db/entries', () => ({
@@ -48,10 +59,12 @@ vi.mock('../../db/entries', () => ({
   addIncome: vi.fn(async () => 'group-2'),
   addTransfer,
   fetchCategories,
-  fetchEntriesBetween: vi.fn(async () => []),
+  fetchEntriesBetween: fetchRecent,
   fetchEnvelopes: vi.fn(async () => ENVELOPES),
+  fetchAllEntriesNewestFirst: vi.fn(async () => []),
   voidGroup: vi.fn(async () => {}),
 }))
+vi.mock('../../db/financial', () => ({ addAccountTransfer }))
 
 vi.mock('../../db/config', () => ({ ensureCategory }))
 
@@ -110,6 +123,8 @@ beforeEach(() => {
   stubPointer(false)
   fetchCategories.mockReset()
   fetchCategories.mockResolvedValue(CATEGORIES)
+  fetchRecent.mockReset()
+  fetchRecent.mockResolvedValue([])
   addExpense.mockReset()
   addExpense.mockResolvedValue('group-1')
   addTransfer.mockReset()
@@ -133,6 +148,29 @@ afterEach(async () => {
   await new Promise((resolve) => setTimeout(resolve, 20))
 })
 
+it('requires explicit envelope ownership for account transfers, previews negative sources, and swaps direction', async () => {
+  await openSheet()
+  tapKey('transfer')
+  fireEvent.change(screen.getByLabelText('Amount in pesos'), { target: { value: '300' } })
+  fireEvent.change(screen.getByLabelText('Transfer purpose'), { target: { value: 'accounts' } })
+  expect(
+    (screen.getByRole('button', { name: 'Move between accounts' }) as HTMLButtonElement).disabled,
+  ).toBe(true)
+  tapKey('Needs')
+  await screen.findByText(/This leaves a negative source balance/)
+  tapKey('Swap accounts')
+  expect((screen.getByLabelText('From account') as HTMLSelectElement).value).toBe('reallife')
+  expect((screen.getByLabelText('To account') as HTMLSelectElement).value).toBe('online')
+  tapKey('Move between accounts')
+  await waitFor(() => expect(addAccountTransfer).toHaveBeenCalledOnce())
+  expect(addAccountTransfer.mock.calls[0][0]).toMatchObject({
+    envelopeId: 'env-needs',
+    amountCentavos: 30000,
+    from: 'reallife',
+    to: 'online',
+  })
+})
+
 /** Open the sheet and wait for its envelopes and categories to land. */
 async function openSheet() {
   render(<AddSheet open onClose={() => {}} />)
@@ -141,6 +179,159 @@ async function openSheet() {
 }
 
 const tapKey = (name: string) => fireEvent.click(screen.getByRole('button', { name }))
+
+function SaveFailureHarness({ onClose }: { onClose: () => void }) {
+  const [message, setMessage] = useState('')
+  return (
+    <ToastContext.Provider value={{ show: setMessage }}>
+      <AddSheet open onClose={onClose} />
+      <div role="alert">{message}</div>
+    </ToastContext.Provider>
+  )
+}
+
+it('shows a safe structured-error toast, preserves the draft, and allows a successful retry', async () => {
+  const onClose = vi.fn()
+  addExpense.mockRejectedValueOnce({
+    code: '23514',
+    message: 'SQL secret-token private-note',
+    details: 'private-person',
+  })
+  render(<SaveFailureHarness onClose={onClose} />)
+  await screen.findByRole('button', { name: 'Food' })
+  fireEvent.change(screen.getByLabelText('Amount in pesos'), { target: { value: '120+45' } })
+  fireEvent.change(screen.getByLabelText('Note'), { target: { value: 'shared lunch' } })
+  const originalDate = (screen.getByLabelText('Manila date') as HTMLInputElement).value
+  tapKey('Cash')
+  tapKey('Food')
+  await waitFor(() =>
+    expect(screen.getByRole('alert').textContent).toBe(
+      'Could not save the entry. Check your input and try again.',
+    ),
+  )
+  expect((screen.getByLabelText('Amount in pesos') as HTMLInputElement).value).toBe('120+45')
+  expect((screen.getByLabelText('Note') as HTMLInputElement).value).toBe('shared lunch')
+  expect((screen.getByLabelText('Manila date') as HTMLInputElement).value).toBe(originalDate)
+  expect(onClose).not.toHaveBeenCalled()
+  expect((screen.getByRole('button', { name: 'Food' }) as HTMLButtonElement).disabled).toBe(false)
+  tapKey('Food')
+  await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
+  expect(addExpense).toHaveBeenCalledTimes(2)
+  expect(addExpense.mock.calls[1][0]).toMatchObject({
+    moneyType: 'reallife',
+    note: 'shared lunch',
+    amountCentavos: 16500,
+  })
+})
+
+describe('visible entry details', () => {
+  it.each(['expense', 'income', 'transfer'])(
+    'shows optional note and date before save controls in %s mode',
+    async (mode) => {
+      await openSheet()
+      tapKey(mode)
+      const note = screen.getByLabelText('Note') as HTMLInputElement
+      const date = screen.getByLabelText('Manila date') as HTMLInputElement
+      expect(note.value).toBe('')
+      expect(date.value).not.toBe('')
+      expect(screen.queryByRole('button', { name: /Note & date/ })).toBeNull()
+      const save = screen.getByRole('button', {
+        name: mode === 'expense' ? 'Food' : mode === 'income' ? /Add income/ : 'Move money',
+      })
+      expect(date.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    },
+  )
+
+  it('preserves a prefilled instant and note, permits backdating, and blocks a blank date', async () => {
+    const at = new Date('2026-07-24T04:15:00Z')
+    render(
+      <AddSheet
+        open
+        onClose={() => {}}
+        prefill={{
+          mode: 'expense',
+          amountCentavos: 5000,
+          note: 'lunch',
+          occurredAt: at.toISOString(),
+        }}
+      />,
+    )
+    await screen.findByRole('button', { name: 'Food' })
+    expect((screen.getByLabelText('Note') as HTMLInputElement).value).toBe('lunch')
+    const date = screen.getByLabelText('Date and time') as HTMLInputElement
+    expect(new Date(date.value + '+08:00').toISOString()).toBe(at.toISOString())
+    tapKey('Cash')
+    fireEvent.change(date, { target: { value: '' } })
+    expect(screen.getByRole('alert').textContent).toContain('Pick a date')
+    expect((screen.getByRole('button', { name: 'Food' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(date, { target: { value: '2026-07-22T12:00' } })
+    fireEvent.change(screen.getByLabelText('Note'), { target: { value: '' } })
+    tapKey('Food')
+    await waitFor(() => expect(addExpense).toHaveBeenCalledOnce())
+    expect(addExpense.mock.calls[0][0]).toMatchObject({
+      note: '',
+      occurredAt: '2026-07-22T04:00:00.000Z',
+    })
+  })
+
+  it.each([true, false])(
+    'places quick amounts after the amount tools and before details (coarse=%s)',
+    async (coarse) => {
+      stubPointer(coarse)
+      fetchRecent.mockResolvedValue(
+        Array.from({ length: 4 }, (_, i) => ({
+          id: `r${i}`,
+          group_id: `g${i}`,
+          kind: 'expense',
+          amount_centavos: -5000,
+          category_id: 'cat-food',
+          envelope_id: 'env-needs',
+          note: null,
+          occurred_at: new Date().toISOString(),
+          voided_at: null,
+          void_reason: null,
+        })),
+      )
+      const amount = await openSheet()
+      const quick = await screen.findByRole('group', { name: 'Frequent amounts' })
+      const tools = coarse ? screen.getByRole('group', { name: 'Amount keypad' }) : amount
+      expect(tools.compareDocumentPosition(quick) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(
+        quick.compareDocumentPosition(screen.getByLabelText('Note')) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy()
+      tapKey('₱50.00')
+      expect(amount.value).toBe('50')
+      expect(screen.queryByRole('group', { name: 'Frequent amounts' })).toBeNull()
+      if (coarse) {
+        tapKey('Use keyboard')
+        expect(amount.getAttribute('inputmode')).toBe('decimal')
+      }
+    },
+  )
+
+  it('keeps forty categories searchable in stable order and offers Other for no matches', async () => {
+    fetchCategories.mockResolvedValue(
+      Array.from({ length: 40 }, (_, i) => ({
+        ...CATEGORIES[0],
+        id: `cat-${i}`,
+        name: `Category ${String(i).padStart(2, '0')}`,
+      })),
+    )
+    render(<AddSheet open onClose={() => {}} />)
+    const filter = await screen.findByLabelText('Filter categories')
+    fireEvent.change(filter, { target: { value: 'Category 1' } })
+    const names = screen
+      .getAllByRole('button', { name: /^Category 1/ })
+      .map((button) => button.textContent)
+    expect(names).toHaveLength(10)
+    expect(names).toEqual([...names].sort())
+    fireEvent.change(filter, { target: { value: 'New purchase' } })
+    expect(screen.getByText(/Nothing matches/)).toBeTruthy()
+    tapKey('Other')
+    expect((screen.getByLabelText('What was it?') as HTMLInputElement).value).toBe('New purchase')
+  })
+})
 
 /** What the browser does on a keystroke: splice text in at the caret. */
 function typeAt(input: HTMLInputElement, text: string, at: number) {

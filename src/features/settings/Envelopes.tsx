@@ -1,3 +1,4 @@
+import { errorMessage } from '../../lib/errors'
 // Envelopes, split percentages and categories (ROADMAP §0: "Editable
 // percentages — Yes, in Settings"; categories "rename/add/archive freely").
 //
@@ -52,7 +53,7 @@ export function Envelopes() {
         setEnvelopes(envs)
         setCategories(cats)
       } catch (err) {
-        if (active) toast.show(err instanceof Error ? err.message : String(err), 'error')
+        if (active) toast.show(errorMessage(err, 'load envelopes'), 'error')
       }
     })()
     return () => {
@@ -64,6 +65,9 @@ export function Envelopes() {
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-6 py-8 md:max-w-2xl md:px-8 md:py-10">
       <h1 className="font-display text-[1rem] text-ink">Envelopes</h1>
+      <Link className="inline-block min-h-11 py-3 text-sm text-accent underline" to="/goals">
+        Goals & monthly allocations →
+      </Link>
 
       {!envelopes && <p className="text-ink-mute">Loading…</p>}
 
@@ -144,7 +148,7 @@ function SplitSection({
       )
       onSaved('Split updated — applies to income from now on')
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err))
+      onError(errorMessage(err, 'update envelope shares'))
     } finally {
       setBusy(false)
     }
@@ -263,7 +267,7 @@ function RenameEnvelopeSheet({
       await renameEnvelope(envelope.id, name)
       onSaved('Envelope renamed')
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err))
+      onError(errorMessage(err, 'save the envelope'))
     } finally {
       setBusy(false)
     }
@@ -320,7 +324,7 @@ function CategoriesSection({
       await setCategoryArchived(category.id, false)
       onSaved(`${category.name} is back`)
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err))
+      onError(errorMessage(err, 'restore the category'))
     }
   }
 
@@ -461,7 +465,7 @@ function CategorySheet({
         onSaved(`${name.trim()} added to ${envelope?.name}`)
       }
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err))
+      onError(errorMessage(err, 'save the category'))
     } finally {
       setBusy(false)
     }
@@ -474,7 +478,7 @@ function CategorySheet({
       await setCategoryArchived(category.id, true)
       onSaved(`${category.name} archived — its history stays`)
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err))
+      onError(errorMessage(err, 'archive the category'))
     } finally {
       setBusy(false)
     }

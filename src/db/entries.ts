@@ -13,6 +13,11 @@ import type { EntryRow } from '../lib/groups'
 import type { MoneyType } from '../lib/money-type'
 import { applyLocalInsert, applyLocalUnvoidGroup, applyLocalVoidGroup, localDb } from './dexie'
 import type { NewEntryRow } from './outbox'
+import { financialCapability } from './dexie'
+import { commitFinancial, financialMetadata, changeFinancialStatus } from './financial'
+import { assertPositiveCentavos, intentOf, type MovementIntent } from '../lib/financial'
+import { assignmentFor } from './budget'
+import type { ExpectedEvent } from '../lib/budget'
 
 /**
  * The note that marks an opening-balance adjustment.
@@ -150,7 +155,15 @@ export async function fetchEntryPage(limit = HISTORY_PAGE_ROWS): Promise<EntryPa
   const db = await localDb()
   const window = await db.entries.orderBy('[occurred_at+id]').reverse().limit(limit).toArray()
   if (window.length === 0) return { rows: [], hasMore: false }
-  const groupIds = [...new Set(window.map((r) => r.group_id))]
+  const chainIds = new Set(window.map((row) => row.financial?.chain_id ?? row.group_id))
+  const ledger = await db.entries.toArray()
+  const groupIds = [
+    ...new Set(
+      ledger
+        .filter((row) => chainIds.has(row.financial?.chain_id ?? row.group_id))
+        .map((row) => row.group_id),
+    ),
+  ]
   const [complete, total] = await Promise.all([
     db.entries.where('group_id').anyOf(groupIds).toArray(),
     db.entries.count(),
@@ -257,7 +270,53 @@ export async function earliestEntryAt(): Promise<string | null> {
 
 const nowIso = () => new Date().toISOString()
 
-async function insertRows(rows: NewEntryRow[]): Promise<void> {
+async function insertRows(
+  rows: NewEntryRow[],
+  predecessor?: EntryRow[],
+  intent?: MovementIntent,
+  budget?: { month?: string; expected?: ExpectedEvent },
+): Promise<void> {
+  if (predecessor || budget?.month || budget?.expected || (await financialCapability())) {
+    if (!rows.length) return
+    const id = crypto.randomUUID(),
+      at = nowIso()
+    const classified: EntryRow[] = rows.map((row) => ({
+      ...row,
+      voided_at: null,
+      void_reason: null,
+      financial: financialMetadata(
+        intent ?? intentOf(row),
+        id,
+        at,
+        row.group_id,
+        predecessor
+          ? {
+              corrects_group_id: predecessor[0].group_id,
+              chain_id: predecessor[0].financial?.chain_id ?? predecessor[0].group_id,
+            }
+          : {},
+      ),
+    }))
+    await commitFinancial({
+      id,
+      action: predecessor ? 'correct' : 'post',
+      recorded_at: at,
+      rows: classified,
+      ...(predecessor ? { predecessor } : {}),
+      ...(budget?.expected
+        ? {
+            budget_event: {
+              ...budget.expected,
+              state: 'received' as const,
+              receipt_chain_id: rows[0].group_id,
+            },
+          }
+        : budget?.month
+          ? { budget_event: await assignmentFor(classified[0].financial!.chain_id, budget.month) }
+          : {}),
+    })
+    return
+  }
   await applyLocalInsert(rows)
 }
 
@@ -265,7 +324,14 @@ async function insertRows(rows: NewEntryRow[]): Promise<void> {
  *  EVERY write goes to Dexie + an outbox row). Deterministic ids make the
  *  eventual server upsert — and the mirror insert — collapse duplicates. */
 export async function insertPostedRows(rows: NewEntryRow[]): Promise<void> {
-  await insertRows(rows)
+  if (await financialCapability()) {
+    const db = await localDb(),
+      groupIds = [...new Set(rows.map((row) => row.group_id))]
+    const existing = new Set(
+      (await db.entries.where('group_id').anyOf(groupIds).toArray()).map((row) => row.group_id),
+    )
+    await insertRows(rows.filter((row) => !existing.has(row.group_id)))
+  } else await insertRows(rows)
 }
 
 /**
@@ -286,33 +352,39 @@ export async function postedGroupExists(groupId: string): Promise<boolean> {
 }
 
 export async function addExpense(params: {
+  predecessor?: EntryRow[]
   amountCentavos: number
   category: Category
   note?: string
   occurredAt?: string
   moneyType?: MoneyType | null
 }): Promise<string> {
-  if (!Number.isSafeInteger(params.amountCentavos) || params.amountCentavos <= 0) {
-    throw new RangeError('expense amount must be positive centavos')
-  }
+  assertPositiveCentavos(params.amountCentavos)
   const groupId = crypto.randomUUID()
-  await insertRows([
-    {
-      id: crypto.randomUUID(),
-      group_id: groupId,
-      kind: 'expense',
-      envelope_id: params.category.envelope_id, // category implies envelope
-      category_id: params.category.id,
-      amount_centavos: -params.amountCentavos,
-      note: params.note?.trim() || null,
-      occurred_at: params.occurredAt ?? nowIso(),
-      money_type: params.moneyType ?? null,
-    },
-  ])
+  await insertRows(
+    [
+      {
+        id: crypto.randomUUID(),
+        group_id: groupId,
+        kind: 'expense',
+        envelope_id: params.category.envelope_id, // category implies envelope
+        category_id: params.category.id,
+        amount_centavos: -params.amountCentavos,
+        note: params.note?.trim() || null,
+        occurred_at: params.occurredAt ?? nowIso(),
+        money_type: params.moneyType ?? null,
+      },
+    ],
+    params.predecessor,
+  )
   return groupId
 }
 
 export async function addIncome(params: {
+  budgetMonth?: string
+  expectedPlan?: ExpectedEvent
+  predecessor?: EntryRow[]
+  preserveAllocation?: boolean
   totalCentavos: number
   envelopes: Envelope[]
   note?: string
@@ -320,13 +392,51 @@ export async function addIncome(params: {
   moneyType?: MoneyType | null
   targetEnvelopeId?: string
 }): Promise<string> {
-  if (!Number.isSafeInteger(params.totalCentavos) || params.totalCentavos <= 0) {
-    throw new RangeError('income must be positive centavos')
-  }
+  assertPositiveCentavos(params.totalCentavos)
 
   const groupId = crypto.randomUUID()
   const occurredAt = params.occurredAt ?? nowIso()
   const note = params.note?.trim() || null
+  if (params.predecessor && params.preserveAllocation !== false) {
+    const original = params.predecessor
+    const total = original.reduce((sum, row) => sum + BigInt(row.amount_centavos), 0n)
+    const parts = original.map((row) =>
+      Number((BigInt(params.totalCentavos) * BigInt(row.amount_centavos)) / total),
+    )
+    const ranked = original
+      .map((row, i) => ({
+        i,
+        remainder: (BigInt(params.totalCentavos) * BigInt(row.amount_centavos)) % total,
+      }))
+      .sort((a, b) =>
+        a.remainder === b.remainder ? a.i - b.i : a.remainder > b.remainder ? -1 : 1,
+      )
+    let left = params.totalCentavos - parts.reduce((a, b) => a + b, 0)
+    for (const { i } of ranked) {
+      if (left <= 0) break
+      parts[i]++
+      left--
+    }
+    await insertRows(
+      original
+        .map((row, i) => ({
+          id: crypto.randomUUID(),
+          group_id: groupId,
+          kind: 'income' as const,
+          envelope_id: row.envelope_id,
+          category_id: null,
+          amount_centavos: parts[i],
+          note,
+          occurred_at: occurredAt,
+          money_type: params.moneyType ?? row.money_type ?? null,
+        }))
+        .filter((row) => row.amount_centavos > 0),
+      params.predecessor,
+      undefined,
+      { month: params.budgetMonth, expected: params.expectedPlan },
+    )
+    return groupId
+  }
 
   if (params.targetEnvelopeId !== undefined) {
     const targetEnvelope = params.envelopes.find((env) => env.id === params.targetEnvelopeId)
@@ -334,19 +444,24 @@ export async function addIncome(params: {
       throw new Error('income target envelope not found')
     }
 
-    await insertRows([
-      {
-        id: crypto.randomUUID(),
-        group_id: groupId,
-        kind: 'income' as const,
-        envelope_id: targetEnvelope.id,
-        category_id: null,
-        amount_centavos: params.totalCentavos,
-        note,
-        occurred_at: occurredAt,
-        money_type: params.moneyType ?? null,
-      },
-    ])
+    await insertRows(
+      [
+        {
+          id: crypto.randomUUID(),
+          group_id: groupId,
+          kind: 'income' as const,
+          envelope_id: targetEnvelope.id,
+          category_id: null,
+          amount_centavos: params.totalCentavos,
+          note,
+          occurred_at: occurredAt,
+          money_type: params.moneyType ?? null,
+        },
+      ],
+      params.predecessor,
+      undefined,
+      { month: params.budgetMonth, expected: params.expectedPlan },
+    )
     return groupId
   }
 
@@ -369,11 +484,15 @@ export async function addIncome(params: {
     }))
     // a 0% envelope gets no leg — amount_centavos <> 0 is a DB check
     .filter((r) => r.amount_centavos > 0)
-  await insertRows(rows)
+  await insertRows(rows, params.predecessor, undefined, {
+    month: params.budgetMonth,
+    expected: params.expectedPlan,
+  })
   return groupId
 }
 
 export async function addTransfer(params: {
+  predecessor?: EntryRow[]
   amountCentavos: number
   fromEnvelopeId: string
   toEnvelopeId: string
@@ -381,9 +500,7 @@ export async function addTransfer(params: {
   occurredAt?: string
   moneyType?: MoneyType | null
 }): Promise<string> {
-  if (!Number.isSafeInteger(params.amountCentavos) || params.amountCentavos <= 0) {
-    throw new RangeError('transfer amount must be positive centavos')
-  }
+  assertPositiveCentavos(params.amountCentavos)
   if (params.fromEnvelopeId === params.toEnvelopeId) {
     throw new RangeError('transfer needs two different envelopes')
   }
@@ -397,30 +514,33 @@ export async function addTransfer(params: {
   // bucket with money that had no matching debit anywhere, so every transfer
   // inflated the money-type totals past the balance they were meant to explain.
   const moneyType = params.moneyType ?? null
-  await insertRows([
-    {
-      id: crypto.randomUUID(),
-      group_id: groupId,
-      kind: 'transfer',
-      envelope_id: params.fromEnvelopeId,
-      category_id: null,
-      amount_centavos: -params.amountCentavos,
-      note,
-      occurred_at: occurredAt,
-      money_type: moneyType,
-    },
-    {
-      id: crypto.randomUUID(),
-      group_id: groupId,
-      kind: 'transfer',
-      envelope_id: params.toEnvelopeId,
-      category_id: null,
-      amount_centavos: params.amountCentavos,
-      note,
-      occurred_at: occurredAt,
-      money_type: moneyType,
-    },
-  ])
+  await insertRows(
+    [
+      {
+        id: crypto.randomUUID(),
+        group_id: groupId,
+        kind: 'transfer',
+        envelope_id: params.fromEnvelopeId,
+        category_id: null,
+        amount_centavos: -params.amountCentavos,
+        note,
+        occurred_at: occurredAt,
+        money_type: moneyType,
+      },
+      {
+        id: crypto.randomUUID(),
+        group_id: groupId,
+        kind: 'transfer',
+        envelope_id: params.toEnvelopeId,
+        category_id: null,
+        amount_centavos: params.amountCentavos,
+        note,
+        occurred_at: occurredAt,
+        money_type: moneyType,
+      },
+    ],
+    params.predecessor,
+  )
   return groupId
 }
 
@@ -437,6 +557,8 @@ export async function addOpeningBalances(
   amounts: { envelopeId: string; amountCentavos: number }[],
   moneyType: MoneyType | null = null,
 ): Promise<string | null> {
+  for (const amount of amounts)
+    if (amount.amountCentavos !== 0) assertPositiveCentavos(Math.abs(amount.amountCentavos))
   const groupId = crypto.randomUUID()
   const occurredAt = nowIso()
   const rows = amounts
@@ -453,12 +575,22 @@ export async function addOpeningBalances(
       money_type: moneyType,
     }))
   if (rows.length === 0) return null
-  await insertRows(rows)
+  await insertRows(rows, undefined, 'opening_balance')
   return groupId
 }
 
 /** The ONLY mutation the ledger allows — and always the whole group. */
 export async function voidGroup(groupId: string, reason: string): Promise<void> {
+  const db = await localDb()
+  if (
+    (await financialCapability()) ||
+    (await db.entries
+      .where('group_id')
+      .equals(groupId)
+      .filter((row) => !!row.financial)
+      .count())
+  )
+    return changeFinancialStatus(groupId, 'void', reason)
   await applyLocalVoidGroup(groupId, nowIso(), reason.trim() || null)
 }
 
@@ -477,5 +609,15 @@ export async function voidGroup(groupId: string, reason: string): Promise<void> 
  * split invariant.
  */
 export async function unvoidGroup(groupId: string): Promise<void> {
+  const db = await localDb()
+  if (
+    (await financialCapability()) ||
+    (await db.entries
+      .where('group_id')
+      .equals(groupId)
+      .filter((row) => !!row.financial)
+      .count())
+  )
+    return changeFinancialStatus(groupId, 'restore')
   await applyLocalUnvoidGroup(groupId)
 }

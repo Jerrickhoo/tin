@@ -1,3 +1,4 @@
+import { errorMessage } from '../../lib/errors'
 import { useState } from 'react'
 import { useLedger, useToast } from '../../app-context'
 import { BottomSheet } from '../../components/BottomSheet'
@@ -62,7 +63,7 @@ export function OpeningBalancesSheet({
       toast.show(groupId ? 'Opening balances recorded' : 'Nothing to record — all zero')
       onClose()
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : String(err), 'error')
+      toast.show(errorMessage(err, 'save opening balances'), 'error')
     } finally {
       setBusy(false)
     }

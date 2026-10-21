@@ -1,3 +1,4 @@
+import { errorMessage } from '../../lib/errors'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useLedger, useToast, type AddPrefill } from '../../app-context'
 import { BottomSheet } from '../../components/BottomSheet'
@@ -20,6 +21,7 @@ import {
   fetchCategories,
   fetchEntriesBetween,
   fetchEnvelopes,
+  fetchAllEntriesNewestFirst,
   voidGroup,
   type Category,
   type Envelope,
@@ -39,14 +41,16 @@ import {
 import { splitByLargestRemainder } from '../../lib/split'
 import { isRequiredMoneyTypeSelected, type MoneyType } from '../../lib/money-type'
 import { MoneyTypePicker } from '../../components/MoneyTypePicker'
+import { addAccountTransfer, undoCorrection } from '../../db/financial'
+import { fromManilaInput, toManilaInput } from '../../lib/dates'
+import { sumCentavos } from '../../lib/financial'
+import type { EntryRow } from '../../lib/groups'
+import { validMonth } from '../../lib/budget'
 
 type Mode = 'expense' | 'income' | 'transfer'
 
 /** Date → value for <input type="datetime-local"> in the device's local time. */
-function toLocalInput(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
+const toLocalInput = toManilaInput
 
 /* The sheet takes on the color of the thing you're doing: money leaving is
    rose, money arriving is mint, money moving sideways is lavender. You can
@@ -77,10 +81,12 @@ export function AddSheet({
   open,
   prefill,
   onClose,
+  returnFocusTo,
 }: {
   open: boolean
   prefill?: AddPrefill
   onClose: () => void
+  returnFocusTo?: HTMLElement | null
 }) {
   // Prefill lands via useState initializers — AppShell remounts this component
   // (key bump) on every open, so state starts fresh without effect setState.
@@ -103,7 +109,9 @@ export function AddSheet({
       ? toLocalInput(new Date(prefill.occurredAt))
       : toLocalInput(new Date()),
   )
-  const [showMore, setShowMore] = useState(false)
+  const [initialInstant] = useState(() => prefill?.occurredAt ?? new Date().toISOString())
+  const [dateTouched, setDateTouched] = useState(false)
+  const [exactTime, setExactTime] = useState(!!prefill?.occurredAt)
   const [fromId, setFromId] = useState(() =>
     prefill?.mode === 'transfer' ? (prefill.fromEnvelopeId ?? '') : '',
   )
@@ -111,6 +119,30 @@ export function AddSheet({
     prefill?.mode === 'transfer' ? (prefill.toEnvelopeId ?? '') : '',
   )
   const [busy, setBusy] = useState(false)
+  const saving = useRef(false)
+  const [preserveAllocation, setPreserveAllocation] = useState(!!prefill?.predecessor)
+  const [transferPurpose, setTransferPurpose] = useState<'accounts' | 'envelopes'>(
+    prefill?.mode === 'transfer' ? (prefill.transferPurpose ?? 'envelopes') : 'envelopes',
+  )
+  const [fromAccount, setFromAccount] = useState<MoneyType>(
+    prefill?.mode === 'transfer' ? (prefill.fromAccount ?? 'online') : 'online',
+  )
+  const [toAccount, setToAccount] = useState<MoneyType>(
+    prefill?.mode === 'transfer' ? (prefill.toAccount ?? 'reallife') : 'reallife',
+  )
+  const [accountRows, setAccountRows] = useState<EntryRow[] | null>(null)
+  useEffect(() => {
+    if (mode !== 'transfer' || transferPurpose !== 'accounts') return
+    let active = true
+    fetchAllEntriesNewestFirst()
+      .then((rows) => {
+        if (active) setAccountRows(rows)
+      })
+      .catch((error) => toast.show(errorMessage(error, 'load transfer balances'), 'error'))
+    return () => {
+      active = false
+    }
+  }, [mode, transferPurpose, version, toast])
   // Asked every time, on purpose. This is the one answer on the sheet that is
   // NOT remembered between openings, and the reasoning is in lib/entry-prefs.ts:
   // it costs a tap on every entry, and defaulting it would still be wrong,
@@ -120,6 +152,7 @@ export function AddSheet({
   const moneyTypeReady = isRequiredMoneyTypeSelected(moneyType)
   const [incomeStrategy, setIncomeStrategy] = useState<'split' | 'single'>('split')
   const [incomeEnvelopeId, setIncomeEnvelopeId] = useState('')
+  const [budgetMonth, setBudgetMonth] = useState('')
   const [envelopes, setEnvelopes] = useState<Envelope[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [quickAmounts, setQuickAmounts] = useState<number[]>([])
@@ -252,20 +285,24 @@ export function AddSheet({
         const prefs = remembered
         const live = new Set(envs.map((e) => e.id))
         const restore = (id: string | null) => (id !== null && live.has(id) ? id : '')
-        setFromId((current) => (current === '' ? restore(prefs.transferFromId) : current))
+        setFromId((current) =>
+          current === '' && transferPurpose === 'envelopes'
+            ? restore(prefs.transferFromId)
+            : current,
+        )
         setToId((current) => (current === '' ? restore(prefs.transferToId) : current))
         setIncomeEnvelopeId((current) =>
           current === '' ? restore(prefs.incomeEnvelopeId) : current,
         )
       })
-      .catch((err) => toast.show(err instanceof Error ? err.message : String(err), 'error'))
+      .catch((err) => toast.show(errorMessage(err, 'load entry options'), 'error'))
     return () => {
       active = false
     }
     // `remembered` never changes after mount — it is a lazy initialiser with no
     // setter — so it is listed to satisfy the rule rather than because a change
     // in it could ever re-run this.
-  }, [open, toast, version, remembered])
+  }, [open, toast, version, remembered, transferPurpose])
 
   const selectedIncomeEnvelopeId = incomeEnvelopeId || envelopes[0]?.id || ''
 
@@ -275,6 +312,17 @@ export function AddSheet({
   // exactly the same rules it always did.
   const centavos = useMemo(() => parseAmountExpression(amount), [amount])
   const amountOk = centavos !== null && centavos > 0
+  const sourceBalance =
+    accountRows === null
+      ? null
+      : sumCentavos(
+          accountRows
+            .filter(
+              (row) =>
+                !row.voided_at && row.envelope_id === fromId && row.money_type === fromAccount,
+            )
+            .map((row) => row.amount_centavos),
+        )
   // Only ever non-null for a genuine sum, so the working shows up when there is
   // working to show and the field is left alone the rest of the time.
   const expressionTerms = useMemo(() => amountExpressionTerms(amount), [amount])
@@ -283,9 +331,9 @@ export function AddSheet({
   // whole sheet down to the error boundary mid-entry. Invalid reads as null and
   // simply blocks the save.
   const occurredAt = useMemo(() => {
-    const at = new Date(when)
-    return Number.isNaN(at.getTime()) ? null : at.toISOString()
-  }, [when])
+    if (!dateTouched) return initialInstant
+    return fromManilaInput(when)
+  }, [when, dateTouched, initialInstant])
   const whenOk = occurredAt !== null
 
   const splitParts = useMemo(() => {
@@ -373,11 +421,12 @@ export function AddSheet({
    */
   async function undo(groupId: string) {
     try {
-      await voidGroup(groupId, 'undone')
+      if (prefill?.predecessor) await undoCorrection(groupId, prefill.predecessor)
+      else await voidGroup(groupId, 'undone')
       bump()
       toast.show('Undone — the ledger remembers, balances forget')
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : String(err), 'error')
+      toast.show(errorMessage(err, 'undo the entry'), 'error')
     }
   }
 
@@ -389,6 +438,8 @@ export function AddSheet({
    * the error toast.
    */
   async function run(fn: () => Promise<string>, okMessage: string, remember?: Partial<EntryPrefs>) {
+    if (saving.current) return
+    saving.current = true
     setBusy(true)
     try {
       const groupId = await fn()
@@ -402,9 +453,10 @@ export function AddSheet({
       toast.show(okMessage, 'ok', { label: 'Undo', run: () => void undo(groupId) })
       onClose()
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : String(err), 'error')
+      toast.show(errorMessage(err, 'save the entry'), 'error')
     } finally {
       setBusy(false)
+      saving.current = false
     }
   }
 
@@ -413,7 +465,15 @@ export function AddSheet({
     if (!amountOk || occurredAt === null || busy || !moneyTypeReady) return
     const env = envById.get(category.envelope_id)
     void run(
-      () => addExpense({ amountCentavos: centavos, category, note, occurredAt, moneyType }),
+      () =>
+        addExpense({
+          amountCentavos: centavos,
+          category,
+          note,
+          occurredAt,
+          moneyType,
+          predecessor: prefill?.predecessor,
+        }),
       `−${formatPHP(centavos)} · ${category.name}${env ? ` (${env.name})` : ''}`,
     )
   }
@@ -445,7 +505,14 @@ export function AddSheet({
             emoji: otherEmoji.trim() || OTHER_CATEGORY_EMOJI,
             envelopeId: otherEnvelope,
           }))
-        return addExpense({ amountCentavos: centavos, category, note, occurredAt, moneyType })
+        return addExpense({
+          amountCentavos: centavos,
+          category,
+          note,
+          occurredAt,
+          moneyType,
+          predecessor: prefill?.predecessor,
+        })
       },
       `−${formatPHP(centavos)} · ${otherTrimmed}${envelope ? ` (${envelope.name})` : ''} · kept as a category`,
     )
@@ -453,6 +520,10 @@ export function AddSheet({
 
   function onSaveIncome() {
     if (!amountOk || occurredAt === null || busy || !moneyTypeReady) return
+    if (budgetMonth && !validMonth(budgetMonth)) {
+      toast.show('Choose a valid budget month', 'error')
+      return
+    }
 
     if (incomeStrategy === 'single') {
       const selectedEnvelope = envById.get(selectedIncomeEnvelopeId)
@@ -470,6 +541,9 @@ export function AddSheet({
             occurredAt,
             moneyType,
             targetEnvelopeId: selectedIncomeEnvelopeId,
+            predecessor: prefill?.predecessor,
+            preserveAllocation,
+            budgetMonth: budgetMonth || undefined,
           }),
         `+${formatPHP(centavos)} to ${selectedEnvelope.name}`,
         { incomeEnvelopeId: selectedIncomeEnvelopeId },
@@ -478,12 +552,47 @@ export function AddSheet({
     }
 
     void run(
-      () => addIncome({ totalCentavos: centavos, envelopes, note, occurredAt, moneyType }),
+      () =>
+        addIncome({
+          totalCentavos: centavos,
+          envelopes,
+          note,
+          occurredAt,
+          moneyType,
+          predecessor: prefill?.predecessor,
+          preserveAllocation,
+          budgetMonth: budgetMonth || undefined,
+        }),
       `+${formatPHP(centavos)} split across envelopes`,
     )
   }
 
   function onSaveTransfer() {
+    if (transferPurpose === 'accounts') {
+      if (
+        !amountOk ||
+        occurredAt === null ||
+        busy ||
+        !fromId ||
+        fromAccount === toAccount ||
+        accountRows === null
+      )
+        return
+      void run(
+        () =>
+          addAccountTransfer({
+            amountCentavos: centavos,
+            envelopeId: fromId,
+            from: fromAccount,
+            to: toAccount,
+            note,
+            occurredAt,
+            predecessor: prefill?.predecessor,
+          }),
+        `${formatPHP(centavos)} moved between accounts`,
+      )
+      return
+    }
     if (!amountOk || occurredAt === null || busy || !fromId || !toId || !moneyTypeReady) return
     void run(
       () =>
@@ -494,6 +603,7 @@ export function AddSheet({
           note,
           occurredAt,
           moneyType,
+          predecessor: prefill?.predecessor,
         }),
       `${formatPHP(centavos)} moved ${envById.get(fromId)?.name} → ${envById.get(toId)?.name}`,
       { transferFromId: fromId, transferToId: toId },
@@ -514,12 +624,18 @@ export function AddSheet({
   }
 
   return (
-    <BottomSheet open={open} onClose={onClose}>
+    <BottomSheet
+      open={open}
+      onClose={onClose}
+      label={`${mode[0].toUpperCase()}${mode.slice(1)} entry`}
+      returnFocusTo={returnFocusTo}
+    >
       <div className="mb-5 flex gap-1 rounded-2xl border border-line/70 bg-base/60 p-1">
         {(['expense', 'income', 'transfer'] as const).map((m) => (
           <button
             key={m}
             type="button"
+            disabled={!!prefill?.predecessor || busy}
             onClick={() => setMode(m)}
             className={`flex-1 rounded-xl py-2 text-sm capitalize transition-colors ${
               mode === m
@@ -531,6 +647,11 @@ export function AddSheet({
           </button>
         ))}
       </div>
+      {prefill?.predecessor && (
+        <p role="status" className="mb-3 text-sm text-ink-soft">
+          Correction draft. The original stays active until Save. Cancel leaves it unchanged.
+        </p>
+      )}
 
       {/* Amount is the hero of this sheet — no box around it, just the number
           you're typing, in the tone of the mode you're in. */}
@@ -643,26 +764,6 @@ export function AddSheet({
         </>
       )}
 
-      <div className="mt-4 border-t border-line/70 pt-3">
-        <MoneyTypePicker
-          value={moneyType}
-          onChange={setMoneyType}
-          required
-          // A transfer moves money between ENVELOPES, not between GCash and your
-          // pocket, so both of its legs are written with this same type and they
-          // cancel. Saying so here stops the field reading as "which way is this
-          // money moving?", which it is not.
-          hint={
-            mode === 'transfer'
-              ? 'Which pot this money sits in. A transfer moves it between envelopes, so it stays in the same pot.'
-              : undefined
-          }
-        />
-        {!moneyTypeReady && amountOk && (
-          <p className="mt-2 text-center text-sm text-neg">Pick Online or Cash before saving.</p>
-        )}
-      </div>
-
       {/* Amounts you actually repeat. Shown only while the field is empty:
           these are shortcuts to START an entry, and once you are typing they
           would be three buttons that throw away what you have keyed in.
@@ -687,56 +788,113 @@ export function AddSheet({
         </div>
       )}
 
-      {/* The date lives behind "Note & date", so a blank one has to explain
-          itself out here or the save button just looks broken. */}
-      {!whenOk && (
-        <p className="mt-2 text-center text-sm text-neg">
-          Set a date under “Note &amp; date” — it can’t be blank.
+      <div className="mt-4 flex flex-col gap-2">
+        <label className="text-xs text-ink-mute">
+          Note (optional)
+          <input
+            placeholder="What was it for?"
+            aria-label="Note"
+            value={note}
+            maxLength={500}
+            onChange={(e) => setNote(e.target.value)}
+            className="mt-1 w-full rounded-xl border border-line bg-base/60 px-3 py-2.5 text-sm text-ink outline-none focus:border-accent"
+          />
+        </label>
+        <label className="text-xs text-ink-mute">
+          Date (Manila; defaults to today)
+          <input
+            aria-label="Manila date"
+            type="date"
+            value={when.slice(0, 10)}
+            aria-invalid={!whenOk}
+            aria-describedby={!whenOk ? 'entry-date-error' : undefined}
+            onChange={(e) => {
+              setDateTouched(true)
+              setWhen(
+                e.target.value
+                  ? `${e.target.value}T${exactTime ? when.slice(11) || '12:00' : '12:00'}`
+                  : '',
+              )
+            }}
+            className={`mt-1 w-full min-w-0 rounded-xl border bg-base/60 px-3 py-2.5 text-sm text-ink outline-none focus:border-accent ${whenOk ? 'border-line' : 'border-neg'}`}
+          />
+        </label>
+        <label className="text-xs">
+          <input
+            type="checkbox"
+            checked={exactTime}
+            onChange={(event) => {
+              setExactTime(event.target.checked)
+              if (!event.target.checked && dateTouched && when)
+                setWhen(`${when.slice(0, 10)}T12:00`)
+            }}
+          />{' '}
+          Exact time known (Manila)
+        </label>
+        {exactTime && (
+          <label className="text-xs text-ink-mute">
+            Date & time (Manila)
+            <input
+              aria-label="Date and time"
+              type="datetime-local"
+              value={when}
+              onChange={(event) => {
+                setDateTouched(true)
+                setWhen(event.target.value)
+              }}
+              className="mt-1 block w-full rounded-xl border border-line bg-base p-2"
+            />
+          </label>
+        )}
+        <p className="text-xs text-ink-mute">
+          A chosen date without a known time uses noon in Manila. An untouched original timestamp is
+          preserved exactly.
         </p>
+        {!whenOk && (
+          <p id="entry-date-error" role="alert" className="text-sm text-neg">
+            Pick a date and time before saving.
+          </p>
+        )}
+      </div>
+
+      {!(mode === 'transfer' && transferPurpose === 'accounts') && (
+        <div className="mt-4 border-t border-line/70 pt-3">
+          <MoneyTypePicker
+            value={moneyType}
+            onChange={setMoneyType}
+            required
+            // A transfer moves money between ENVELOPES, not between GCash and your
+            // pocket, so both of its legs are written with this same type and they
+            // cancel. Saying so here stops the field reading as "which way is this
+            // money moving?", which it is not.
+            hint={
+              mode === 'transfer'
+                ? 'Which pot this money sits in. A transfer moves it between envelopes, so it stays in the same pot.'
+                : undefined
+            }
+          />
+          {!moneyTypeReady && amountOk && (
+            <p className="mt-2 text-center text-sm text-neg">Pick Online or Cash before saving.</p>
+          )}
+        </div>
       )}
 
       {mode === 'expense' && (
         <div className="mt-5">
-          {/* Notes you repeat, one tap.
-              The note field itself is optional and hidden behind a disclosure,
-              so the 2-tap path never passes through it and most entries end up
-              with no note at all — which is what left History's subtitles thin
-              and gave its new search almost nothing to match on.
-              Placed ABOVE the category grid because tapping a category SAVES:
-              anything meant to be attached to the entry has to be reachable
-              before that tap, not after it. Shown only once an amount is in, so
-              it does not compete with the quick-amount row. */}
-          {note.trim() !== '' ? (
-            <div className="mb-3 flex items-center gap-2 text-sm">
-              <span className="min-w-0 flex-1 truncate text-ink-soft">
-                <span className="text-ink-mute">note </span>
-                {note}
-              </span>
-              <button
-                type="button"
-                aria-label="Clear note"
-                onClick={() => setNote('')}
-                className="press shrink-0 rounded-lg border border-line px-2 py-1 text-xs text-ink-mute"
-              >
-                ✕
-              </button>
+          {/* Recent notes remain shortcuts before the category-tap save. */}
+          {note.trim() === '' && amountOk && noteChips.length > 0 && (
+            <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label="Recent notes">
+              {noteChips.map((chip) => (
+                <button
+                  key={chip}
+                  type="button"
+                  onClick={() => setNote(chip)}
+                  className="press min-h-9 rounded-xl border border-line bg-base/40 px-2.5 py-1.5 text-sm text-ink-soft"
+                >
+                  {chip}
+                </button>
+              ))}
             </div>
-          ) : (
-            amountOk &&
-            noteChips.length > 0 && (
-              <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label="Recent notes">
-                {noteChips.map((chip) => (
-                  <button
-                    key={chip}
-                    type="button"
-                    onClick={() => setNote(chip)}
-                    className="press min-h-9 rounded-xl border border-line bg-base/40 px-2.5 py-1.5 text-sm text-ink-soft"
-                  >
-                    {chip}
-                  </button>
-                ))}
-              </div>
-            )
           )}
           {/* A Fix is a re-entry of the same transaction, so the category it had
               is an answer the user has already given. Surfaced as one button
@@ -806,7 +964,7 @@ export function AddSheet({
                   disabled={!amountOk || !whenOk || busy || !moneyTypeReady}
                   type="button"
                   onClick={() => onCategoryTap(cat)}
-                  className={`press flex min-h-11 items-center gap-1.5 rounded-xl border px-3 py-2 text-sm transition-opacity disabled:opacity-35 ${
+                  className={`press flex min-h-11 max-w-full items-center gap-1.5 rounded-xl border px-3 py-2 text-left text-sm transition-opacity disabled:opacity-35 ${
                     wasPrefilled ? 'font-semibold' : ''
                   }`}
                   style={{
@@ -815,7 +973,7 @@ export function AddSheet({
                   }}
                 >
                   <span aria-hidden>{cat.emoji}</span>
-                  <span className="font-medium">{cat.name}</span>
+                  <span className="min-w-0 break-words font-medium">{cat.name}</span>
                 </button>
               )
             })}
@@ -923,6 +1081,34 @@ export function AddSheet({
 
       {mode === 'income' && (
         <div className="mt-5 flex flex-col gap-3">
+          <label className="text-sm text-ink-soft">
+            Budget month (optional)
+            <input
+              type="month"
+              min="2000-01"
+              max="2199-12"
+              value={budgetMonth}
+              onChange={(e) => setBudgetMonth(e.target.value)}
+              className="input mt-1 w-full"
+            />
+          </label>
+          <p className="text-xs text-ink-mute">
+            {prefill?.predecessor
+              ? 'Leave blank to preserve the existing budget assignment.'
+              : 'Leave blank to use the received month.'}{' '}
+            Future assignments appear in your accounts immediately and stay held from the current
+            budget. Expected money belongs in Budget planning until it arrives.
+          </p>
+          {prefill?.predecessor && (
+            <label className="text-sm">
+              <input
+                type="checkbox"
+                checked={preserveAllocation}
+                onChange={(event) => setPreserveAllocation(event.target.checked)}
+              />{' '}
+              Preserve original envelope allocation (including archived envelopes)
+            </label>
+          )}
           <div className="flex gap-2 rounded-xl border border-line/70 bg-base/40 p-1">
             <button
               type="button"
@@ -944,7 +1130,12 @@ export function AddSheet({
             </button>
           </div>
 
-          {incomeStrategy === 'single' ? (
+          {preserveAllocation && prefill?.predecessor ? (
+            <p className="text-sm">
+              The new amount uses the original envelope proportions. Uncheck to choose a new
+              allocation.
+            </p>
+          ) : incomeStrategy === 'single' ? (
             <EnvelopePicker
               label="Target envelope"
               envelopes={envelopes}
@@ -992,71 +1183,131 @@ export function AddSheet({
 
       {mode === 'transfer' && (
         <div className="mt-5 flex flex-col gap-3">
-          <EnvelopePicker
-            label="From"
-            envelopes={envelopes}
-            value={fromId}
-            disabledId={toId}
-            onChange={setFromId}
-          />
-          {/* Between the two pickers, where the direction it reverses is
+          <label className="text-sm">
+            Transfer purpose
+            <select
+              aria-label="Transfer purpose"
+              value={transferPurpose}
+              disabled={!!prefill?.predecessor}
+              onChange={(event) => {
+                const purpose = event.target.value as 'accounts' | 'envelopes'
+                setTransferPurpose(purpose)
+                if (purpose === 'accounts') setFromId('')
+              }}
+              className="ml-2 rounded border border-line bg-base p-2"
+            >
+              <option value="envelopes">Between envelopes</option>
+              <option value="accounts">Between accounts</option>
+            </select>
+          </label>
+          {transferPurpose === 'accounts' ? (
+            <>
+              <EnvelopePicker
+                label="Envelope ownership"
+                envelopes={envelopes}
+                value={fromId}
+                disabledId=""
+                onChange={setFromId}
+              />
+              <label>
+                From account
+                <select
+                  aria-label="From account"
+                  value={fromAccount}
+                  onChange={(event) => setFromAccount(event.target.value as MoneyType)}
+                  className="ml-2 bg-base p-2"
+                >
+                  <option value="online">Online</option>
+                  <option value="reallife">Cash</option>
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setFromAccount(toAccount)
+                  setToAccount(fromAccount)
+                }}
+                className="press rounded border border-line p-2"
+              >
+                Swap accounts
+              </button>
+              <label>
+                To account
+                <select
+                  aria-label="To account"
+                  value={toAccount}
+                  onChange={(event) => setToAccount(event.target.value as MoneyType)}
+                  className="ml-2 bg-base p-2"
+                >
+                  <option value="online">Online</option>
+                  <option value="reallife">Cash</option>
+                </select>
+              </label>
+              <p className="text-sm text-ink-soft">
+                {amountOk ? formatPHP(centavos) : 'Amount'} moves from{' '}
+                {fromAccount === 'online' ? 'Online' : 'Cash'} to{' '}
+                {toAccount === 'online' ? 'Online' : 'Cash'} within{' '}
+                {envById.get(fromId)?.name ?? 'the selected envelope'}. Envelope totals, income and
+                spending stay the same. A real move can leave the source negative.
+              </p>
+              <PrimaryButton
+                disabled={
+                  !amountOk ||
+                  !whenOk ||
+                  busy ||
+                  !fromId ||
+                  fromAccount === toAccount ||
+                  sourceBalance === null
+                }
+                onClick={onSaveTransfer}
+                label={busy ? 'Moving…' : 'Move between accounts'}
+              />
+              {sourceBalance !== null && fromId && amountOk && (
+                <p
+                  className={`text-sm tabular-nums ${sourceBalance - centavos < 0 ? 'text-neg' : 'text-ink-soft'}`}
+                >
+                  Source in this envelope: {formatPHP(sourceBalance)} →{' '}
+                  {formatPHP(sumCentavos([sourceBalance, -centavos]))}.
+                  {sourceBalance - centavos < 0 ? ' This leaves a negative source balance.' : ''}
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              <EnvelopePicker
+                label="From"
+                envelopes={envelopes}
+                value={fromId}
+                disabledId={toId}
+                onChange={setFromId}
+              />
+              {/* Between the two pickers, where the direction it reverses is
               legible. Disabled until there is a direction to reverse — a swap
               of two blanks is a control that does nothing, which is the thing
               §15.8 is about. */}
-          <button
-            type="button"
-            disabled={fromId === '' && toId === ''}
-            onClick={swapTransfer}
-            aria-label="Swap From and To"
-            className="press -my-1 self-center rounded-lg border border-line bg-base/40 px-3 py-1 text-sm text-ink-soft disabled:opacity-30"
-          >
-            ⇄
-          </button>
-          <EnvelopePicker
-            label="To"
-            envelopes={envelopes}
-            value={toId}
-            disabledId={fromId}
-            onChange={setToId}
-          />
-          <PrimaryButton
-            disabled={!amountOk || !whenOk || busy || !fromId || !toId || !moneyTypeReady}
-            onClick={onSaveTransfer}
-            label={busy ? 'Moving…' : 'Move money'}
-          />
-        </div>
-      )}
-
-      <button
-        type="button"
-        onClick={() => setShowMore(!showMore)}
-        aria-expanded={showMore}
-        className="mt-5 text-sm text-ink-mute"
-      >
-        {showMore ? 'Less ▴' : 'Note & date ▾'}
-      </button>
-      {showMore && (
-        <div className="mt-2 flex flex-col gap-2">
-          <input
-            placeholder="Note (optional — no account numbers please)"
-            aria-label="Note"
-            value={note}
-            maxLength={500}
-            onChange={(e) => setNote(e.target.value)}
-            className="w-full rounded-xl border border-line bg-base/60 px-3 py-2.5 text-sm text-ink outline-none placeholder:text-ink-mute focus:border-accent"
-          />
-          <label className="text-xs text-ink-mute">
-            When (backdating welcome — honesty beats tidiness)
-            <input
-              type="datetime-local"
-              value={when}
-              onChange={(e) => setWhen(e.target.value)}
-              className={`mt-1 w-full rounded-xl border bg-base/60 px-3 py-2.5 text-sm text-ink outline-none focus:border-accent ${
-                whenOk ? 'border-line' : 'border-neg'
-              }`}
-            />
-          </label>
-          {!whenOk && <p className="text-sm text-neg">Pick a date and time.</p>}
+              <button
+                type="button"
+                disabled={fromId === '' && toId === ''}
+                onClick={swapTransfer}
+                aria-label="Swap From and To"
+                className="press -my-1 self-center rounded-lg border border-line bg-base/40 px-3 py-1 text-sm text-ink-soft disabled:opacity-30"
+              >
+                ⇄
+              </button>
+              <EnvelopePicker
+                label="To"
+                envelopes={envelopes}
+                value={toId}
+                disabledId={fromId}
+                onChange={setToId}
+              />
+              <PrimaryButton
+                disabled={!amountOk || !whenOk || busy || !fromId || !toId || !moneyTypeReady}
+                onClick={onSaveTransfer}
+                label={busy ? 'Moving…' : 'Move money'}
+              />
+            </>
+          )}
         </div>
       )}
     </BottomSheet>
@@ -1077,8 +1328,7 @@ function PrimaryButton({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className="press mt-2 w-full rounded-xl px-4 py-3.5 font-display text-[0.6875rem] leading-relaxed text-on-accent shadow-[0_8px_20px_-8px_rgb(180_155_245/0.7)] transition-opacity disabled:opacity-40 disabled:shadow-none"
-      style={{ background: 'linear-gradient(160deg, #cdb9ff 0%, #b49bf5 55%, #9a7fe0 100%)' }}
+      className="press mt-2 w-full rounded-xl bg-accent px-4 py-3.5 font-display text-[0.6875rem] leading-relaxed text-on-accent shadow-[0_8px_20px_-8px_var(--color-accent)] transition-opacity disabled:opacity-40 disabled:shadow-none"
     >
       {label}
     </button>
@@ -1117,7 +1367,7 @@ function EnvelopePicker({
               }`}
               style={
                 selected
-                  ? { borderColor: color, backgroundColor: `${color}1f`, color: '#EAE6F2' }
+                  ? { borderColor: color, backgroundColor: `${color}1f`, color: 'var(--color-ink)' }
                   : undefined
               }
             >

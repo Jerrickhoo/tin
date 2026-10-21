@@ -25,16 +25,24 @@ export const OPENING_SKIPPED_KEY = 'tin.opening-skipped'
 /** Reduced-texture display preference (lib/texture.ts). */
 export const TEXTURE_KEY = 'tin.texture'
 
+/** Visual theme for this device (lib/theme.ts). */
+export const THEME_KEY = 'tin.theme'
+
+/** Latest patch notes opened on this device; no account or ledger data. */
+export const PATCH_NOTES_READ_KEY = 'tin.patch-notes-read'
+
 /** What the add sheet remembers between openings (lib/entry-prefs.ts). */
 export const ENTRY_PREFS_KEY = 'tin.entry-prefs'
 
 /** Keypad or the OS keyboard for amounts (lib/entry-prefs.ts). */
 export const AMOUNT_INPUT_KEY = 'tin.amount-input'
+export const WEEK_START_KEY = 'tin.week-start'
+export const BALANCE_REMINDER_KEY = 'tin.balance-reminder'
 
 /**
  * Keys that describe the PERSON, and so must not survive a logout.
  *
- * TEXTURE_KEY and AMOUNT_INPUT_KEY are deliberately absent: they describe the
+ * TEXTURE_KEY, THEME_KEY and AMOUNT_INPUT_KEY are deliberately absent: they describe the
  * device and the eyes and thumb in front of it, not the account. lib/texture.ts
  * argues that case at length, and clearing either would reset the screen for
  * whoever set it in order to protect nothing.
@@ -51,6 +59,8 @@ export const USER_SCOPED_LOCAL_KEYS = [
   DISMISSED_GAP_KEY,
   OPENING_SKIPPED_KEY,
   ENTRY_PREFS_KEY,
+  WEEK_START_KEY,
+  BALANCE_REMINDER_KEY,
 ] as const
 
 /**

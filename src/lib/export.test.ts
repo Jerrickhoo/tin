@@ -73,7 +73,7 @@ describe('entriesToJson', () => {
   it('bundles entries with metadata and full fidelity', () => {
     const parsed = JSON.parse(entriesToJson([entry], [{ id: 'env1' }], [{ id: 'cat1' }]))
     expect(parsed.app).toBe('tin')
-    expect(parsed.format_version).toBe(1)
+    expect(parsed.format_version).toBe(2)
     expect(parsed.entries[0].amount_centavos).toBe(-12050)
     expect(parsed.envelopes).toHaveLength(1)
     expect(parsed.categories).toHaveLength(1)

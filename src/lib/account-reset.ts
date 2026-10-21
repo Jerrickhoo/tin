@@ -35,6 +35,8 @@ export interface ResetSummary {
   envelopes: number
   checkins: number
   streakSaves: number
+  obligations?: number
+  audit?: number
 }
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`
@@ -57,6 +59,8 @@ export function describeResetSummary(summary: ResetSummary): string {
     summary.recurring > 0 && plural(summary.recurring, 'recurring template'),
     summary.checkins > 0 && plural(summary.checkins, 'check-in day'),
     summary.streakSaves > 0 && plural(summary.streakSaves, 'streak save'),
+    (summary.obligations ?? 0) > 0 && plural(summary.obligations!, 'repayment record'),
+    (summary.audit ?? 0) > 0 && plural(summary.audit!, 'audit event'),
   ].filter((p): p is string => p !== false)
 
   if (parts.length === 0) return 'There was nothing left to delete — the account was already empty.'

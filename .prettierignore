@@ -2,5 +2,8 @@ dist
 node_modules
 package-lock.json
 
+# Generated bundles, exported data, and disposable browser verification artifacts.
+output/
+
 # Hand-maintained doc — prettier's markdown rewrap just creates churn
 ROADMAP.md

@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { errorMessage } from './lib/errors'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 import { Outlet } from 'react-router'
 import {
   AddSheetContext,
@@ -14,11 +23,13 @@ import { runCatchUp } from './db/recurring'
 import { voidGroup } from './db/entries'
 import { openForUser, recordCheckIn } from './db/dexie'
 import { manilaDayKey } from './lib/dates'
+import { useReportingClock } from './lib/reporting-clock'
 import {
   getSyncSnapshot,
   isOffline,
   kickSync,
   startSync,
+  settleSync,
   stopSync,
   subscribeSync,
   syncNow,
@@ -35,6 +46,7 @@ const launchShortcut: AddPrefill | undefined =
     : undefined
 
 export function AppShell() {
+  const reportingDay = manilaDayKey(useReportingClock())
   const { session } = useSession()
   const [version, setVersion] = useState(0)
   const bump = useCallback(() => setVersion((v) => v + 1), [])
@@ -73,6 +85,10 @@ export function AppShell() {
   // than derived, because the whole point is to notice when the wall clock has
   // moved on while React has had no reason to re-render.
   const checkedInDay = useRef<string | null>(null)
+  const bootedFor = useRef<string | null>(null)
+  const bootRequest = useRef<object | null>(null)
+  const [readyOwner, setReadyOwner] = useState<string | null>(null)
+  const [bootFailure, setBootFailure] = useState<{ owner: string; message: string } | null>(null)
 
   /**
    * Record that Tin was opened today, if today is not already recorded.
@@ -90,7 +106,7 @@ export function AppShell() {
    * on the day they changed.
    */
   const noteVisit = useCallback(async () => {
-    const today = manilaDayKey(new Date())
+    const today = reportingDay
     if (checkedInDay.current === today) return
     await recordCheckIn(today)
     checkedInDay.current = today
@@ -98,37 +114,56 @@ export function AppShell() {
     // A day recorded offline sits unsynced until a pass runs; the loop only
     // wakes on outbox changes, and this is deliberately not an outbox write.
     kickSync()
-  }, [bump])
+  }, [bump, reportingDay])
+  useEffect(() => {
+    if (session && checkedInDay.current !== null && bootedFor.current === session.user.id)
+      void noteVisit().catch((error) => show(errorMessage(error, 'record today’s visit'), 'error'))
+  }, [session, noteVisit, show])
 
   // Once per session, wherever the user lands: adopt the local mirror, start
   // the sync loop, seed idempotently, pull, then run the recurring catch-up
   // poster (ROADMAP 5.2) with an undo-all toast. Offline, everything but the
   // mirror adoption quietly waits for connectivity — reads are local anyway.
-  const bootedFor = useRef<string | null>(null)
   useEffect(() => {
     if (!session) {
       bootedFor.current = null // next login must boot again (mirror may be wiped)
+      bootRequest.current = null
       checkedInDay.current = null // …and must re-record, into the new owner's mirror
       return
     }
     if (bootedFor.current === session.user.id) return
-    bootedFor.current = session.user.id
+    const owner = session.user.id
+    const request = {}
+    bootedFor.current = owner
+    bootRequest.current = request
+    checkedInDay.current = null
+    const isCurrent = () => bootRequest.current === request
+    stopSync()
     ;(async () => {
       try {
-        await openForUser(session.user.id)
+        // Let the previous owner's pass finish before adopting another mirror.
+        await settleSync()
+        if (!isCurrent()) return
+        await openForUser(owner)
+        if (!isCurrent()) return
+        setReadyOwner(owner)
         // Record the visit BEFORE anything that needs a network. Opening the
         // app is the event most likely to happen in a dead spot, and a
         // check-in that only counted online would break the streak on exactly
         // the days this is meant to protect. It is a local Dexie write; the
         // sync loop pushes it whenever a connection next appears.
         await noteVisit()
+        if (!isCurrent()) return
         startSync({ onApplied: bump })
         bump() // mirror may already hold yesterday's data — show it now
         if (!isOffline()) {
-          await ensureSeeded(session.user.id)
+          await ensureSeeded(owner)
+          if (!isCurrent()) return
           await syncNow() // push anything queued from last session, then pull
+          if (!isCurrent()) return
           bump()
           const posted = await runCatchUp()
+          if (!isCurrent()) return
           for (const warning of posted.warnings) show(warning, 'error')
           if (posted.postedCount > 0) {
             bump() // catch-up wrote local-first; balances are already current
@@ -142,14 +177,19 @@ export function AppShell() {
                 run: () => {
                   void Promise.all(
                     posted.postedGroupIds.map((g) => voidGroup(g, 'undone from catch-up toast')),
-                  ).then(bump)
+                  )
+                    .then(bump)
+                    .catch((error) => show(errorMessage(error, 'undo recurring entries'), 'error'))
                 },
               },
             )
           }
         }
       } catch (err) {
-        show(err instanceof Error ? err.message : String(err), 'error')
+        if (!isCurrent()) return
+        const message = errorMessage(err, 'start the app')
+        setBootFailure({ owner, message })
+        show(message, 'error')
       }
     })()
   }, [session, bump, show, noteVisit])
@@ -177,7 +217,9 @@ export function AppShell() {
   const [sheetOpen, setSheetOpen] = useState(launchShortcut !== undefined)
   const [sheetNonce, setSheetNonce] = useState(0)
   const [prefill, setPrefill] = useState<AddPrefill | undefined>(launchShortcut)
+  const [returnFocusTo, setReturnFocusTo] = useState<HTMLElement | null>(null)
   const open = useCallback((p?: AddPrefill) => {
+    setReturnFocusTo(document.activeElement instanceof HTMLElement ? document.activeElement : null)
     setPrefill(p)
     setSheetOpen(true)
     setSheetNonce((n) => n + 1) // remount the sheet so prefill lands via initial state
@@ -199,7 +241,14 @@ export function AppShell() {
   // (token refresh included), so its own cleanup would tear the sync loop down
   // during normal operation. Logout goes through wipeLocalCaches, which stops
   // sync itself — this covers the shell simply going away.
-  useEffect(() => stopSync, [])
+  useEffect(
+    () => () => {
+      bootRequest.current = null
+      bootedFor.current = null
+      stopSync()
+    },
+    [],
+  )
 
   // Keyboard path to the app's one core action. A laptop user shouldn't have to
   // travel to a button for the thing they do ten times a day — but the sheet is
@@ -219,6 +268,27 @@ export function AppShell() {
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
 
+  // Children must never read the previous account's resolved database gate.
+  if (session && readyOwner !== session.user.id) {
+    const failure = bootFailure?.owner === session.user.id ? bootFailure.message : null
+    return (
+      <main className="mx-auto flex min-h-dvh max-w-sm flex-col justify-center gap-4 px-6">
+        <p role={failure ? 'alert' : 'status'} className="text-ink-soft">
+          {failure ?? 'Opening your ledger…'}
+        </p>
+        {failure && (
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="press rounded-xl bg-accent px-4 py-3 font-semibold text-on-accent"
+          >
+            Try again
+          </button>
+        )}
+      </main>
+    )
+  }
+
   return (
     <LedgerContext.Provider value={ledger}>
       <ToastContext.Provider value={toast}>
@@ -226,7 +296,7 @@ export function AppShell() {
           <SyncPill />
           {/* bottom padding clears the phone tab bar; left padding clears the
               desktop rail, which is out of the flow so it can stay fixed */}
-          <div className="pb-24 md:pb-8 md:pl-60">
+          <div className="pb-24 max-[320px]:pb-40 md:pb-8 md:pl-60">
             <Outlet />
           </div>
           <NavBar />
@@ -234,6 +304,7 @@ export function AppShell() {
             key={sheetNonce}
             open={sheetOpen}
             prefill={prefill}
+            returnFocusTo={returnFocusTo}
             onClose={() => setSheetOpen(false)}
           />
           {/* above the tab bar on a phone; clear of the rail and tucked to the
@@ -243,6 +314,8 @@ export function AppShell() {
             {toasts.map((t) => (
               <div
                 key={t.id}
+                role={t.kind === 'error' ? 'alert' : 'status'}
+                aria-atomic="true"
                 className={`sheet-in pointer-events-auto flex items-center gap-3 border-2 px-4 py-2.5 text-sm shadow-[3px_3px_0_0_rgb(0_0_0/0.55)] ${
                   t.kind === 'error'
                     ? 'border-neg/40 bg-raised text-neg'
@@ -271,33 +344,38 @@ export function AppShell() {
   )
 }
 
-/**
- * How much room the pill takes out of the top of the viewport.
- *
- * `top-3` (12px) plus roughly 28px of pill and a little air. Published as a CSS
- * variable rather than kept here, because the pill is `fixed` with a higher
- * z-index than anything that scrolls: any element that sticks to the top of the
- * page has to know about it or the pill lands on top of the element. History's
- * day header is the one that did.
- */
-const SYNC_PILL_HEIGHT = '2.75rem'
-
 /** Online/offline indicator + queued-writes badge (ROADMAP 6.5). Silent when
  *  everything is synced and online — status chrome earns its pixels only when
  *  there's status to report. */
 function SyncPill() {
   const snap = useSyncExternalStore(subscribeSync, getSyncSnapshot, getSyncSnapshot)
   const visible = !(snap.online && snap.pending === 0 && !snap.lastError)
+  const pillRef = useRef<HTMLButtonElement>(null)
 
   // Written to the document rather than passed down: the readers are sticky
   // headers on screens this component knows nothing about, and threading a
   // number through the router to reach them would be a prop that exists only to
   // describe a fixed element's height.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const root = document.documentElement
-    if (visible) root.style.setProperty('--sticky-top', SYNC_PILL_HEIGHT)
-    else root.style.removeProperty('--sticky-top')
+    const pill = pillRef.current
+    if (!visible || !pill) {
+      root.style.removeProperty('--sticky-top')
+      return
+    }
+    // Measure the actual bottom, including top offset, wrapping and zoom.
+    const measure = () =>
+      root.style.setProperty(
+        '--sticky-top',
+        `${Math.ceil(pill.getBoundingClientRect().bottom) + 8}px`,
+      )
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(pill)
+    window.addEventListener('resize', measure)
     return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', measure)
       root.style.removeProperty('--sticky-top')
     }
   }, [visible])
@@ -317,9 +395,10 @@ function SyncPill() {
 
   return (
     <button
+      ref={pillRef}
       type="button"
       onClick={() => kickSync()}
-      className={`press fixed inset-x-0 top-3 z-40 mx-auto w-fit border px-3.5 py-1.5 text-xs shadow-lg shadow-black/50 md:left-60 ${
+      className={`press fixed inset-x-0 top-3 z-40 mx-auto w-fit max-w-[calc(100%_-_2rem)] border px-3.5 py-1.5 text-xs shadow-lg shadow-black/50 md:left-60 ${
         snap.lastError && snap.online
           ? 'border-neg/40 bg-raised/90 text-neg'
           : 'border-line bg-raised/90 text-ink-soft'

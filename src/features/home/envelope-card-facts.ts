@@ -24,7 +24,7 @@ export function buildEnvelopeCardFacts(params: {
     facts.push({
       key: 'low-balance',
       text: `Low balance — only ${formatPHP(params.balanceCentavos)} left`,
-      className: 'whitespace-nowrap text-amber-600',
+      className: 'whitespace-nowrap text-warn',
     })
   } else if (params.hasRun && params.pace) {
     facts.push({

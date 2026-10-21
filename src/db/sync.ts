@@ -1,3 +1,4 @@
+import { errorMessage } from '../lib/errors'
 // The sync loop (ROADMAP 6.4): push the outbox FIFO, then delta-pull entries
 // by updated_at with a ~60 s overlap, plus a cheap full refresh of envelopes/
 // categories (a handful of rows). Single-flight with a dirty flag — writes
@@ -7,19 +8,18 @@ import { advanceCursor, pullWindowStart } from '../lib/sync-rules'
 import {
   getCursor,
   markCheckInsSynced,
-  mirrorApplyPulledEntries,
   mirrorMergeCheckIns,
-  mirrorReplaceCategories,
-  mirrorReplaceEnvelopes,
   mirrorReplaceStreakSaves,
   onOutboxChange,
   outboxCount,
   readStreakSaves,
-  setCursor,
   unsyncedCheckIns,
+  mirrorLedgerPull,
 } from './dexie'
+import type { EntryRow } from '../lib/groups'
 import { drainOutbox, type OutboxOp } from './outbox'
 import * as remote from './remote'
+import { syncWeekPreference } from './week-preference'
 
 const PULL_PAGE_SIZE = 1000
 
@@ -58,6 +58,8 @@ function executeOp(op: OutboxOp): Promise<void> {
   switch (op.op) {
     case 'insert_entries':
       return remote.pushInsertEntries(op.rows)
+    case 'financial':
+      return remote.pushFinancialOperation(op.operation)
     case 'void_group':
       return remote.pushVoidGroup(op.groupId, op.voidedAt, op.reason)
     case 'unvoid_group':
@@ -65,7 +67,7 @@ function executeOp(op: OutboxOp): Promise<void> {
   }
 }
 
-async function pullEntries(): Promise<boolean> {
+async function pullEntries(): Promise<{ rows: EntryRow[]; cursor: string | null }> {
   const cursor = await getCursor()
   const windowStart = pullWindowStart(cursor)
   // the id floor must be a parseable uuid (PostgREST casts it); all-zeros
@@ -73,19 +75,24 @@ async function pullEntries(): Promise<boolean> {
   const ZERO_UUID = '00000000-0000-0000-0000-000000000000'
   let after = windowStart === null ? null : { updatedAt: windowStart, id: ZERO_UUID }
   let newCursor = cursor
-  let applied = false
+  const rows: EntryRow[] = []
   for (;;) {
     const page = await remote.pullEntriesPage(after, PULL_PAGE_SIZE)
     if (page.rows.length > 0) {
-      await mirrorApplyPulledEntries(page.rows)
-      applied = true
+      rows.push(...page.rows)
     }
     newCursor = advanceCursor(newCursor, page.updatedAts)
-    if (page.rows.length < PULL_PAGE_SIZE || page.last === null) break
+    if (page.rows.length === 0 || page.last === null) break
+    if (
+      after &&
+      (Date.parse(page.last.updatedAt) < Date.parse(after.updatedAt) ||
+        (Date.parse(page.last.updatedAt) === Date.parse(after.updatedAt) &&
+          page.last.id <= after.id))
+    )
+      throw new Error('The ledger cursor did not advance')
     after = { updatedAt: page.last.updatedAt, id: page.last.id }
   }
-  if (newCursor !== null && newCursor !== cursor) await setCursor(newCursor)
-  return applied
+  return { rows, cursor: newCursor }
 }
 
 async function runOnce(): Promise<void> {
@@ -98,7 +105,16 @@ async function runOnce(): Promise<void> {
   let changed = false
   try {
     const drained = await drainOutbox(executeOp)
-    changed = await pullEntries()
+    // A rejected financial command may have rolled back even if the following
+    // network pull fails. The UI must re-project that rollback immediately.
+    changed = drained.blocked
+    const pulled = await pullEntries()
+    const financial = (await remote.probeFinancialCapability())
+      ? await remote.pullFinancialState()
+      : undefined
+    if (financial) {
+      await syncWeekPreference()
+    }
 
     // Check-ins recorded while offline go up before the pull, so the pull that
     // follows already reflects them. This is NOT the outbox: it is a blind,
@@ -117,11 +133,7 @@ async function runOnce(): Promise<void> {
       remote.pullStreakSaves(),
       remote.pullCheckIns(),
     ])
-    const envReplaced = await mirrorReplaceEnvelopes(envelopes)
-    const catReplaced = await mirrorReplaceCategories(categories)
-    if ((envReplaced && envelopes.length > 0) || (catReplaced && categories.length > 0)) {
-      changed = true
-    }
+    changed = (await mirrorLedgerPull({ ...pulled, financial, envelopes, categories })) || changed
     // Compared before writing, because this mirror always replaces (including
     // with nothing) — so "did anything change" cannot be inferred from the
     // write itself the way it can for envelopes and categories.
@@ -142,7 +154,7 @@ async function runOnce(): Promise<void> {
     if (await mirrorMergeCheckIns(checkIns)) changed = true
     patchSnapshot({ lastError: drained.blocked ? drained.error : null })
   } catch (err) {
-    patchSnapshot({ lastError: err instanceof Error ? err.message : String(err) })
+    patchSnapshot({ lastError: errorMessage(err, 'sync your data') })
   } finally {
     // the database can vanish under us (logout wipes it), and a throw from the
     // bookkeeping read would mask whatever the sync itself was reporting
@@ -206,7 +218,11 @@ export function startSync(opts: { onApplied: () => void }): void {
   stopped = false
   onApplied = opts.onApplied
   const unsubscribeOutbox = onOutboxChange((kind) => {
-    void outboxCount().then((pending) => patchSnapshot({ pending }))
+    void outboxCount()
+      .then((pending) => patchSnapshot({ pending }))
+      .catch(() => {
+        // Logout may close the mirror while this cosmetic count is being read.
+      })
     if (kind === 'enqueue') kickSync()
   })
   const handleOnline = () => {

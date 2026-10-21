@@ -23,6 +23,7 @@ const server = {
 }
 
 vi.mock('./remote', () => ({
+  probeFinancialCapability: () => Promise.resolve(false),
   pushInsertEntries: (rows: EntryRow[]) => {
     if (server.pushInsertFails) return Promise.reject(new Error(server.pushInsertFails))
     server.pushedEntries.push([...rows])
@@ -172,7 +173,9 @@ describe('the sync loop', () => {
 
     await syncNow()
 
-    expect(getSyncSnapshot().lastError).toContain('network down')
+    expect(getSyncSnapshot().lastError).toBe(
+      'Could not sync this change. Check your connection and try again.',
+    )
     expect(getSyncSnapshot().pending).toBe(1)
   })
 

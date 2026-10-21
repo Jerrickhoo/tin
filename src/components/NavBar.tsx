@@ -97,7 +97,8 @@ const DESTINATIONS = [
    so hard stops at whole percentages read as "pixel art" where an interpolated
    ramp reads as "CSS". Three bands is also what survives the dither layer
    without visible banding artifacts of its own. */
-const ADD_GRADIENT = 'linear-gradient(180deg, #dcc6ff 0 34%, #c9a7ff 34% 68%, #ab84ec 68% 100%)'
+const ADD_GRADIENT =
+  'var(--add-background, linear-gradient(180deg, color-mix(in srgb, var(--color-accent), white 20%) 0 34%, var(--color-accent) 34% 68%, color-mix(in srgb, var(--color-accent), black 12%) 68% 100%))'
 
 /**
  * Two navigations, one source of destinations.
@@ -110,6 +111,17 @@ const ADD_GRADIENT = 'linear-gradient(180deg, #dcc6ff 0 34%, #c9a7ff 34% 68%, #a
  */
 export function NavBar() {
   const { pathname } = useLocation()
+  const activePath = [
+    '/settings',
+    '/envelopes',
+    '/recurring',
+    '/import',
+    '/patch-notes',
+    '/budget',
+    '/goals',
+  ].includes(pathname)
+    ? '/settings'
+    : pathname
   const { open } = useAddSheet()
 
   return (
@@ -120,10 +132,10 @@ export function NavBar() {
           it covers — the one place in the app guaranteed to have text sliding
           behind it. Solid also drops a per-frame GPU pass on exactly the
           element that is composited during every scroll. */}
-      <nav className="fixed inset-x-0 bottom-0 z-30 border-t-2 border-line bg-base md:hidden">
-        <div className="mx-auto flex w-full max-w-sm items-end px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-          <TabLink {...DESTINATIONS[0]} active={pathname === DESTINATIONS[0].to} />
-          <TabLink {...DESTINATIONS[1]} active={pathname === DESTINATIONS[1].to} />
+      <nav className="app-nav-mobile fixed inset-x-0 bottom-0 z-30 border-t-2 border-line bg-base md:hidden">
+        <div className="mx-auto flex w-full max-w-sm items-end px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] max-[320px]:grid max-[320px]:grid-cols-3 max-[320px]:gap-1">
+          <TabLink {...DESTINATIONS[0]} active={activePath === DESTINATIONS[0].to} />
+          <TabLink {...DESTINATIONS[1]} active={activePath === DESTINATIONS[1].to} />
 
           {/* The Add button is the one thing on screen allowed to look expensive:
               it's the action the whole app exists to make fast. As a raised
@@ -131,25 +143,25 @@ export function NavBar() {
               thing on the bar — the blur-halo it replaces was doing that job
               with a lens effect, which no amount of palette work makes look
               8-bit. */}
-          <div className="relative mx-1 shrink-0">
+          <div className="relative mx-1 shrink-0 max-[320px]:justify-self-center">
             <button
               type="button"
               onClick={() => open()}
               aria-label="Add an entry"
-              className="press relative flex size-[3.25rem] -translate-y-4 items-center justify-center border-2 border-[#e6d8ff] text-on-accent shadow-[3px_3px_0_0_rgb(0_0_0/0.55)]"
+              className="app-add-button press relative flex size-[3.25rem] -translate-y-4 items-center justify-center border-2 border-accent text-on-accent shadow-[3px_3px_0_0_rgb(0_0_0/0.55)] max-[320px]:translate-y-0"
               style={{ background: ADD_GRADIENT }}
             >
               {PlusIcon}
             </button>
           </div>
 
-          <TabLink {...DESTINATIONS[2]} active={pathname === DESTINATIONS[2].to} />
-          <TabLink {...DESTINATIONS[3]} active={pathname === DESTINATIONS[3].to} />
+          <TabLink {...DESTINATIONS[2]} active={activePath === DESTINATIONS[2].to} />
+          <TabLink {...DESTINATIONS[3]} active={activePath === DESTINATIONS[3].to} />
         </div>
       </nav>
 
       {/* ---- desktop: persistent left rail ---- */}
-      <nav className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r-2 border-line bg-surface px-3 py-6 md:flex">
+      <nav className="app-nav-desktop fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r-2 border-line bg-surface px-3 py-6 md:flex">
         {/* Press Start 2P runs roughly 2.3x wider and taller-in-the-box than
             Nunito did, so every size that switches to it steps DOWN — `text-xl`
             here became `text-sm` and still occupies more room than before.
@@ -164,7 +176,8 @@ export function NavBar() {
         <button
           type="button"
           onClick={() => open()}
-          className="press mt-6 flex items-center justify-center gap-2 border-2 border-[#e6d8ff] px-4 py-2.5 font-display text-[0.625rem] text-on-accent shadow-[3px_3px_0_0_rgb(0_0_0/0.55)]"
+          aria-label="Add an entry"
+          className="app-add-button press mt-6 flex items-center justify-center gap-2 border-2 border-accent px-4 py-2.5 font-display text-[0.625rem] text-on-accent shadow-[3px_3px_0_0_rgb(0_0_0/0.55)]"
           style={{ background: ADD_GRADIENT }}
         >
           <span className="-ml-1">{PlusIcon}</span>
@@ -173,7 +186,7 @@ export function NavBar() {
 
         <div className="mt-6 flex flex-col gap-1">
           {DESTINATIONS.map((d) => (
-            <RailLink key={d.to} {...d} active={pathname === d.to} />
+            <RailLink key={d.to} {...d} active={activePath === d.to} />
           ))}
         </div>
 
@@ -204,7 +217,7 @@ function TabLink({
     <Link
       to={to}
       aria-current={active ? 'page' : undefined}
-      className={`flex flex-1 flex-col items-center gap-1 rounded-xl px-1 py-1.5 transition-colors ${
+      className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-xl px-1 py-1.5 transition-colors ${
         active ? 'text-accent' : 'text-ink-mute'
       }`}
     >
@@ -212,7 +225,11 @@ function TabLink({
         {active && <span aria-hidden className="absolute -inset-x-2 inset-y-0 bg-accent/15" />}
         <span className="relative">{icon}</span>
       </span>
-      <span className={`text-[0.6875rem] ${active ? 'font-semibold' : ''}`}>{label}</span>
+      <span
+        className={`max-w-full break-words text-center text-[0.6875rem] ${active ? 'font-semibold' : ''}`}
+      >
+        {label}
+      </span>
       {/* A 2px block under the active tab. The icon tint alone carried this
           before; against pastels on plum that hue shift is a weaker signal
           than it was against violet on near-black, and it is the only cue a

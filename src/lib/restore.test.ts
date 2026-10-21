@@ -83,7 +83,7 @@ describe('parseBundle', () => {
   })
 
   it('rejects a format version it cannot read', () => {
-    expect(() => parseBundle(json({ format_version: 2 }))).toThrow(/version 2/)
+    expect(() => parseBundle(json({ format_version: 5 }))).toThrow(/version 5/)
   })
 
   it('normalises a +00:00 timestamp to the mirror’s canonical Z form', () => {

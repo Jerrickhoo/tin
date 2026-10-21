@@ -36,8 +36,8 @@ export class ErrorBoundary extends Component<Props, State> {
       <main className="mx-auto flex min-h-dvh max-w-sm flex-col items-center justify-center gap-4 px-6 text-center">
         <h1 className="text-3xl font-semibold tracking-tight">The tin jammed 🫙</h1>
         <p className="text-ink-soft">
-          Something broke while drawing the screen. Your money is safe — the ledger lives on the
-          server, and nothing here was lost.
+          Tin couldn’t draw this screen. Reload to try again, then check the sync status before
+          logging out if you have entries saved offline.
         </p>
         <button
           type="button"

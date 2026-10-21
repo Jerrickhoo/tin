@@ -26,6 +26,15 @@
 // Pure — no React, no IO. db/restore.ts does the writing.
 
 import type { EntryKind, EntryRow } from './groups'
+import {
+  parseFinancialMetadata,
+  assertPositiveCentavos,
+  type Obligation,
+  type LedgerAudit,
+} from './financial'
+import { validateBudgetHistory, parseBudgetEvent, budgetKey } from './budget'
+import { goalKey, parseGoalEvent } from './goals'
+import { validateGoalHistory } from './goal-operations'
 
 const KINDS = new Set<EntryKind>(['income', 'expense', 'transfer', 'adjustment'])
 
@@ -41,6 +50,8 @@ export interface BundleCategory {
 }
 
 export interface ParsedBundle {
+  obligations?: Obligation[]
+  audit?: LedgerAudit[]
   exportedAt: string | null
   envelopes: BundleEnvelope[]
   categories: BundleCategory[]
@@ -82,8 +93,15 @@ export function parseBundle(text: string): ParsedBundle {
   }
   if (!isRecord(raw)) fail('That JSON is not a Tin export.')
   if (raw.app !== 'tin') fail('That JSON is not a Tin export — it has no Tin marker in it.')
-  if (raw.format_version !== 1) {
-    fail(`Unsupported export version ${String(raw.format_version)} — this app reads version 1.`)
+  if (
+    raw.format_version !== 1 &&
+    raw.format_version !== 2 &&
+    raw.format_version !== 3 &&
+    raw.format_version !== 4
+  ) {
+    fail(
+      `Unsupported export version ${String(raw.format_version)} — this app reads versions 1, 2, 3 and 4.`,
+    )
   }
   if (!Array.isArray(raw.entries)) fail('That export has no entries array.')
 
@@ -108,6 +126,10 @@ export function parseBundle(text: string): ParsedBundle {
     const amount = row.amount_centavos
     if (!Number.isSafeInteger(amount)) fail(`entry ${i} has a non-integer amount`)
     if (amount === 0) fail(`entry ${i} has a zero amount, which the ledger forbids`)
+    if ((kind === 'income' && Number(amount) < 0) || (kind === 'expense' && Number(amount) > 0))
+      fail(`entry ${i} has a sign that disagrees with its kind`)
+    if (row.money_type != null && row.money_type !== 'online' && row.money_type !== 'reallife')
+      fail(`entry ${i} has an unknown money type`)
 
     const occurredAt = new Date(str(row.occurred_at, `entry ${i} occurred_at`))
     if (Number.isNaN(occurredAt.getTime())) fail(`entry ${i} has an unreadable occurred_at`)
@@ -134,14 +156,25 @@ export function parseBundle(text: string): ParsedBundle {
       occurred_at: occurredAt.toISOString(),
       voided_at: voidedAt,
       void_reason: strOrNull(row.void_reason, `entry ${i} void_reason`),
+      ...('money_type' in row ? { money_type: row.money_type as EntryRow['money_type'] } : {}),
+      ...('financial' in row
+        ? { financial: row.financial == null ? null : parseFinancialMetadata(row.financial) }
+        : {}),
     }
   })
 
+  const audit = parseAudit(raw.audit)
+  validateBudgetHistory(audit, entries, new Set(envelopes.map((e) => e.id)))
+  if (raw.format_version !== 4 && audit.some((a) => a.details.goals))
+    fail('Goal history needs export version 4.')
+  validateGoalHistory(audit, entries, new Set(envelopes.map((e) => e.id)))
   return {
     exportedAt: typeof raw.exported_at === 'string' ? raw.exported_at : null,
     envelopes,
     categories,
     entries,
+    obligations: parseObligations(raw.obligations),
+    audit,
   }
 }
 
@@ -155,6 +188,8 @@ export interface RestoreRow {
   amount_centavos: number
   note: string | null
   occurred_at: string
+  money_type?: EntryRow['money_type']
+  financial?: EntryRow['financial']
 }
 
 export interface RestoreVoid {
@@ -172,6 +207,8 @@ export interface RestoreTargets {
 }
 
 export interface RestorePlan {
+  obligations?: Obligation[]
+  audit?: LedgerAudit[]
   rows: RestoreRow[]
   voids: RestoreVoid[]
   /** distinct groups in `rows` */
@@ -215,7 +252,7 @@ export function planRestore(bundle: ParsedBundle, targets: RestoreTargets): Rest
   for (const category of targets.categories) {
     const envelope = localEnvelopeById.get(category.envelope_id)
     if (!envelope) continue
-    localCategoryByPair.set(`${nameKey(envelope.name)} ${nameKey(category.name)}`, category)
+    localCategoryByPair.set(`${nameKey(envelope.name)}\u0000${nameKey(category.name)}`, category)
   }
 
   const bundleEnvelopeById = new Map(bundle.envelopes.map((e) => [e.id, e]))
@@ -247,7 +284,7 @@ export function planRestore(bundle: ParsedBundle, targets: RestoreTargets): Rest
         missingCategories.add(entry.category_id)
       } else {
         const local = localCategoryByPair.get(
-          `${nameKey(bundleEnvelope.name)} ${nameKey(bundleCategory.name)}`,
+          `${nameKey(bundleEnvelope.name)}\u0000${nameKey(bundleCategory.name)}`,
         )
         if (!local) missingCategories.add(`${bundleEnvelope.name} › ${bundleCategory.name}`)
         else {
@@ -278,6 +315,8 @@ export function planRestore(bundle: ParsedBundle, targets: RestoreTargets): Rest
       amount_centavos: entry.amount_centavos,
       note: entry.note,
       occurred_at: entry.occurred_at,
+      ...('money_type' in entry ? { money_type: entry.money_type } : {}),
+      ...('financial' in entry ? { financial: entry.financial } : {}),
     })
 
     if (entry.voided_at !== null) {
@@ -306,8 +345,40 @@ export function planRestore(bundle: ParsedBundle, targets: RestoreTargets): Rest
     return a.id.localeCompare(b.id)
   })
 
+  const audit = (bundle.audit ?? []).map((sourceEvent) => {
+    let event = sourceEvent
+    if (Array.isArray(event.details.goals)) {
+      const goals = event.details.goals.map((raw) => {
+        const goal = { ...parseGoalEvent(raw) }
+        const original = bundleEnvelopeById.get(goal.envelope_id)
+        const local = original ? localEnvelopeByName.get(nameKey(original.name)) : undefined
+        if (!local) missingEnvelopes.add(original?.name ?? goal.envelope_id)
+        else {
+          goal.envelope_id = local.id
+          goal.key = goalKey(goal)
+        }
+        return goal
+      })
+      event = { ...event, details: { ...event.details, goals } }
+    }
+    if (!event.details.budget) return event
+    const budget = { ...parseBudgetEvent(event.details.budget) }
+    if (budget.type !== 'assignment' && budget.envelope_id) {
+      const original = bundleEnvelopeById.get(budget.envelope_id)
+      const local = original ? localEnvelopeByName.get(nameKey(original.name)) : undefined
+      if (!local) missingEnvelopes.add(original?.name ?? budget.envelope_id)
+      else {
+        budget.envelope_id = local.id
+        budget.key = budgetKey(budget)
+      }
+    }
+    return { ...event, details: { ...event.details, budget } }
+  })
+
   return {
     rows,
+    obligations: bundle.obligations ?? [],
+    audit,
     voids: [...voidByGroup.values()],
     groupCount: groupIds.size,
     alreadyPresent,
@@ -315,4 +386,79 @@ export function planRestore(bundle: ParsedBundle, targets: RestoreTargets): Rest
     missingEnvelopes: [...missingEnvelopes].sort(),
     missingCategories: [...missingCategories].sort(),
   }
+}
+
+export function parseObligations(value: unknown): Obligation[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) fail('Invalid obligations array')
+  return value.map((row: unknown, i: number) => {
+    if (!isRecord(row)) fail(`obligation ${i} is not an object`)
+    if (
+      !['expense_reimbursement', 'receivable_principal', 'payable_principal'].includes(
+        String(row.type),
+      )
+    )
+      fail(`obligation ${i} has an unknown type`)
+    assertPositiveCentavos(Number(row.amount_centavos))
+    if (typeof row.amount_centavos !== 'number') fail('Obligation amount must be integer centavos')
+    const at = str(row.recorded_at, 'obligation timestamp')
+    if (Number.isNaN(Date.parse(at))) fail('Invalid obligation timestamp')
+    const effective = strOrNull(row.effective_at, 'obligation effective timestamp')
+    if (effective && Number.isNaN(Date.parse(effective)))
+      fail('Invalid obligation effective timestamp')
+    const due = strOrNull(row.due_on, 'obligation due date')
+    if (
+      due &&
+      (!/^\d{4}-\d{2}-\d{2}$/.test(due) ||
+        Number.isNaN(Date.parse(due)) ||
+        new Date(due).toISOString().slice(0, 10) !== due)
+    )
+      fail('Invalid obligation due date')
+    const voided = strOrNull(row.voided_at, 'obligation void timestamp')
+    if (voided && Number.isNaN(Date.parse(voided))) fail('Invalid obligation void timestamp')
+    return {
+      id: str(row.id, 'obligation id'),
+      type: row.type as Obligation['type'],
+      origin_group_id: strOrNull(row.origin_group_id, 'obligation origin'),
+      amount_centavos: row.amount_centavos,
+      person: strOrNull(row.person, 'person'),
+      note: strOrNull(row.note, 'obligation note'),
+      due_on: due,
+      recorded_at: new Date(at).toISOString(),
+      effective_at: effective ? new Date(effective).toISOString() : null,
+      voided_at: voided ? new Date(voided).toISOString() : null,
+    }
+  })
+}
+
+export function parseAudit(value: unknown): LedgerAudit[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) fail('Invalid audit array')
+  return value.map((row: unknown) => {
+    if (
+      !isRecord(row) ||
+      ![
+        'post',
+        'correct',
+        'void',
+        'restore',
+        'claim',
+        'cancel_claim',
+        'reconcile',
+        'import',
+      ].includes(String(row.action)) ||
+      !isRecord(row.details)
+    )
+      fail('Invalid audit event')
+    const at = str(row.recorded_at, 'audit timestamp')
+    if (Number.isNaN(Date.parse(at))) fail('Invalid audit timestamp')
+    return {
+      id: str(row.id, 'audit id'),
+      operation_id: str(row.operation_id, 'audit operation'),
+      group_id: strOrNull(row.group_id, 'audit group'),
+      action: row.action as LedgerAudit['action'],
+      recorded_at: new Date(at).toISOString(),
+      details: row.details,
+    }
+  })
 }

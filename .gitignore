@@ -11,11 +11,13 @@ node_modules
 dist
 dist-ssr
 *.local
+*.local.*
 
 # Secrets — in from commit #1 (ROADMAP Phase 0). Use .env.example as the template.
 .env
 .env.*
 !.env.example
+!.env.p2-staging.example
 
 # Editor directories and files
 .vscode/*
@@ -31,5 +33,12 @@ dist-ssr
 # Local Netlify folder
 .netlify
 
+# Transient Playwright CLI sessions; retained verification artifacts live in output/playwright.
+.playwright-cli/
+
 # Design inspiration screenshots (local only, referenced by ROADMAP §6)
 theme reference/
+
+# Generated disposable verification builds; source fixtures and reports are retained.
+output/**/dist/
+output/**/staging-dist/

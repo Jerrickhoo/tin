@@ -1,22 +1,10 @@
-# CI — run the checks that Netlify doesn't.
+# CI — verify pull requests before merge. Netlify runs the same mandatory
+# checks plus a read-only schema prerequisite check before publishing.
 #
-# The deploy path is `git push` to main → Netlify → `npm run build`, i.e.
-# `tsc -b && vite build`. That gates TYPES and nothing else: a failing test
-# suite, a lint error or a contrast regression all deploy perfectly happily.
-# This workflow closes that gap.
-#
-# READ THIS — a green tick here does NOT block a deploy. Netlify builds from
-# the push, independently, and never consults GitHub's checks. What you get is
-# a red X and an email within ~2 minutes of pushing something broken, which is
-# enough to catch it before you've moved on. To make it an actual gate you need
-# one of:
-#   · work on branches and open a PR, then merge only on green (self-imposed,
-#     free, and the least effort — this workflow already runs on PRs);
-#   · branch protection requiring the `check` job, which on a private repo
-#     needs GitHub Pro;
-#   · make the repo public, where branch protection is free.
-#
-# Cost: ~2 min per run against the 2,000 free minutes/month for private repos.
+# Main still triggers Netlify independently of GitHub status, so required
+# checks live in Netlify's build command as well. Its check subprocess clears
+# live probe credentials and uses placeholder test backend configuration;
+# only the final build receives the actual public deployment configuration.
 # Fifty pushes a month is ~5% of the allowance.
 name: ci
 
@@ -44,6 +32,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Dependency audit
+        run: npm audit --audit-level=moderate
+
       # cheapest first, so an obvious failure reports in seconds
       - name: Lint
         run: npm run lint
@@ -67,6 +58,9 @@ jobs:
       # live project.
       - name: Tests
         run: npm test
+
+      - name: Deployment and staging guards
+        run: npm run check:guards
 
       # `tsc -b && vite build` — the same command Netlify runs, so a broken
       # build is caught here rather than discovered in the deploy log.

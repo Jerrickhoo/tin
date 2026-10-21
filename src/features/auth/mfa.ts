@@ -36,10 +36,14 @@ export async function hasVerifiedTotp(): Promise<boolean> {
  *   is server-side RLS, not this client check.
  */
 export async function aalGateState(): Promise<'ok' | 'aal2-required' | 'unknown'> {
-  const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
-  if (error || !data) return 'unknown'
-  if (data.currentLevel === 'aal1' && data.nextLevel === 'aal2') return 'aal2-required'
-  return 'ok'
+  try {
+    const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+    if (error || !data) return 'unknown'
+    if (data.currentLevel === 'aal1' && data.nextLevel === 'aal2') return 'aal2-required'
+    return 'ok'
+  } catch {
+    return 'unknown'
+  }
 }
 
 /**

@@ -1,19 +1,16 @@
+import { errorMessage } from '../../lib/errors'
+import { useReportingClock, useWeekStart } from '../../lib/reporting-clock'
+import { ReconciliationSheet } from '../entries/ReconciliationSheet'
+import { manilaWeekStart } from '../../lib/dates'
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useAddSheet, useLedger, useToast } from '../../app-context'
 import { buildEnvelopeCardFacts } from './envelope-card-facts'
 import { entriesToJson } from '../../lib/export'
-import {
-  fetchAllCategoriesForExport,
-  fetchAllEntriesForExport,
-  fetchAllEnvelopesForExport,
-} from '../../db/entries'
+import { readBackupSnapshot } from '../../db/backup'
 import { recordExport, getLastExport, exportReminderStatus } from '../../lib/exportReminder'
 import {
-  fetchAllEntriesNewestFirst,
-  fetchBalances,
   fetchEntriesBetween,
-  fetchEnvelopes,
   hasAnyEntries,
   hasOpeningBalances,
   type Envelope,
@@ -22,13 +19,7 @@ import { readCheckIns } from '../../db/dexie'
 import { readStreakSaves, repairDay, undoRepair } from '../../db/streak'
 import { allowancePerDay, spentTodayByEnvelope } from '../../lib/allowance'
 import { envelopePace, type EnvelopePace } from '../../lib/envelope-month'
-import {
-  daysRemainingInMonth,
-  manilaDayKey,
-  manilaHour,
-  monthLabel,
-  shiftDayKey,
-} from '../../lib/dates'
+import { daysRemainingInMonth, manilaDayKey, manilaHour, monthLabel } from '../../lib/dates'
 import {
   computeStreak,
   loggingStrip,
@@ -51,9 +42,20 @@ import {
   type MoneyTypeTotals,
 } from '../../lib/money-type'
 import { OpeningBalancesSheet } from '../entries/OpeningBalancesSheet'
+import { readBudgetSnapshot } from '../../db/budget'
+import { balancesFromEntries } from '../../lib/balances'
+import {
+  envelopeAvailability,
+  scheduleFor,
+  selectedDays,
+  type Availability,
+} from '../../lib/budget'
 
 interface Card extends Envelope {
   balanceCentavos: number
+  availability?: Availability
+  spendingDays?: number
+  selectedSchedule?: boolean
 }
 
 const manilaDate = new Intl.DateTimeFormat('en-PH', {
@@ -130,6 +132,10 @@ function greeting(hour: number): string {
 }
 
 export function Home() {
+  const [checking, setChecking] = useState(false)
+  const reportingNow = useReportingClock(),
+    weekStart = useWeekStart()
+  const reportingDay = manilaDayKey(reportingNow)
   const { version, bump } = useLedger()
   const toast = useToast()
   const addSheet = useAddSheet()
@@ -155,10 +161,7 @@ export function Home() {
   const [offCardCentavos, setOffCardCentavos] = useState(0)
   const [strip, setStrip] = useState<LoggedDay[] | null>(null)
   const [todayCentavos, setTodayCentavos] = useState(0)
-  // Rolling seven days ending today, not "since Monday". A week-to-date figure
-  // is near-zero every Monday and near-complete every Sunday, so it says more
-  // about the weekday than about the spending — and this sits next to a daily
-  // allowance whose whole job is being comparable from one glance to the next.
+  // Calendar week-to-date; the separate rolling seven-day preset stays in History.
   const [weekCentavos, setWeekCentavos] = useState(0)
   const [spentToday, setSpentToday] = useState<Map<string, number>>(new Map())
   const [paces, setPaces] = useState<Map<string, EnvelopePace>>(new Map())
@@ -210,20 +213,47 @@ export function Home() {
         // result rather than issuing a second query.
         const since = new Date(Date.now() - STREAK_WINDOW_DAYS * 86_400_000).toISOString()
         const until = new Date(Date.now() + 86_400_000).toISOString()
-        const [envs, balances, anyEntries, openingDone, recent, saves, checkIns, allEntries] =
-          await Promise.all([
-            fetchEnvelopes(),
-            fetchBalances(),
-            hasAnyEntries(),
-            hasOpeningBalances(),
-            fetchEntriesBetween(since, until),
-            readStreakSaves(),
-            readCheckIns(),
-            fetchAllEntriesNewestFirst(),
-          ])
+        const [budget, anyEntries, openingDone, recent, saves, checkIns] = await Promise.all([
+          readBudgetSnapshot(),
+          hasAnyEntries(),
+          hasOpeningBalances(),
+          fetchEntriesBetween(since, until),
+          readStreakSaves(),
+          readCheckIns(),
+        ])
         if (!active) return
+        const asOf = new Date(Math.max(reportingNow.getTime(), Date.now()))
+        const { rows: allEntries, audit: budgetAudit } = budget
+        const envs = budget.envelopes.filter((e) => !e.archived_at)
+        const actualRows = allEntries.filter((r) => Date.parse(r.occurred_at) <= asOf.getTime())
+        const balances = balancesFromEntries(
+          budget.envelopes.map((e) => e.id),
+          actualRows,
+        )
         setError(null)
-        setCards(envs.map((env) => ({ ...env, balanceCentavos: balances.get(env.id) ?? 0 })))
+        setCards(
+          envs.map((env) => {
+            const availability = envelopeAvailability(allEntries, budgetAudit, env.id, asOf)
+            const config = scheduleFor(budgetAudit, env.id, reportingDay.slice(0, 7))
+            return {
+              ...env,
+              balanceCentavos: balances.get(env.id) ?? 0,
+              availability,
+              spendingDays: selectedDays(
+                reportingDay.slice(0, 7),
+                reportingDay,
+                config.schedule,
+                config.monthConfig,
+              ).remaining,
+              selectedSchedule:
+                !!config.schedule &&
+                (config.schedule.weekdays !== null ||
+                  config.monthConfig?.remaining_days != null ||
+                  !!config.monthConfig?.excluded.length ||
+                  !!config.monthConfig?.extra.length),
+            }
+          }),
+        )
         const onCard = new Set(envs.map((e) => e.id))
         let off = 0
         for (const [id, balance] of balances) if (!onCard.has(id)) off += balance
@@ -232,11 +262,11 @@ export function Home() {
         setNeedsOpening(!openingDone)
         // Fifth use of the same 13-month window, also free.
         setLoggedDays(loggedDayCount(recent))
-        const todayKey = manilaDayKey(new Date())
+        const todayKey = reportingDay
         setStrip(loggingStrip(recent, checkIns))
         setTodayCentavos(spentOnDay(recent, todayKey))
         // Sixth use of the same 13-month window, also free.
-        setWeekCentavos(spentInRange(recent, shiftDayKey(todayKey, -6), todayKey))
+        setWeekCentavos(spentInRange(recent, manilaWeekStart(todayKey, weekStart), todayKey))
         // Same window, third use — the per-envelope daily allowance. Free.
         setSpentToday(spentTodayByEnvelope(recent, todayKey))
         // Fourth use, also free: each envelope's run since its last top-up.
@@ -253,12 +283,12 @@ export function Home() {
         setStreak(computeStreak(recent, saves, checkIns))
         // Voided rows are excluded inside the summariser, so these three buckets
         // sum to exactly the balance the hero above is showing.
-        setMoneyTotals(summarizeMoneyTypeTotals(allEntries))
+        setMoneyTotals(summarizeMoneyTypeTotals(actualRows))
       } catch (err) {
         // No toast: the hero carries this now, and a four-second toast beside a
         // permanent error card would say the same thing twice and then take
         // half of it away.
-        if (active) setError(err instanceof Error ? err.message : String(err))
+        if (active) setError(errorMessage(err, 'load Home'))
       }
     })()
     return () => {
@@ -267,7 +297,7 @@ export function Home() {
     // The exhaustive-deps suppression that used to live here is gone: the only
     // thing it was covering for was `toast` in the catch, and the failure now
     // goes to state instead. Everything else the effect touches is a setter.
-  }, [version, reload])
+  }, [version, reload, reportingDay, reportingNow, weekStart])
 
   // NOT named `useSave`: the hooks lint rule keys on the `use` prefix, and a
   // "hook" called from an onClick is exactly what it exists to reject.
@@ -288,7 +318,7 @@ export function Home() {
       })
       bump() // re-reads the mirror syncNow just refreshed
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : String(err), 'error')
+      toast.show(errorMessage(err, 'repair the activity streak'), 'error')
     } finally {
       setRepairing(false)
     }
@@ -300,7 +330,7 @@ export function Home() {
       toast.show('Save returned — that day is a gap again.', 'ok')
       bump()
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : String(err), 'error')
+      toast.show(errorMessage(err, 'undo the streak repair'), 'error')
     }
   }
 
@@ -308,15 +338,14 @@ export function Home() {
     if (exportBusy) return
     setExportBusy(true)
     try {
-      const [entries, envelopes, categories] = await Promise.all([
-        fetchAllEntriesForExport(),
-        fetchAllEnvelopesForExport(),
-        fetchAllCategoriesForExport(),
-      ])
+      const { entries, envelopes, categories, audit, obligations } = await readBackupSnapshot()
       const day = manilaDayKey(new Date())
-      const blob = new Blob([entriesToJson(entries, envelopes, categories)], {
-        type: 'application/json',
-      })
+      const blob = new Blob(
+        [entriesToJson(entries, envelopes, categories, { audit, obligations })],
+        {
+          type: 'application/json',
+        },
+      )
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
@@ -326,13 +355,13 @@ export function Home() {
       recordExport()
       toast.show('Exported your ledger backup')
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : String(err), 'error')
+      toast.show(errorMessage(err, 'export the backup'), 'error')
     } finally {
       setExportBusy(false)
     }
   }
 
-  const now = new Date()
+  const now = reportingNow
   const total = (cards ?? []).reduce((sum, c) => sum + c.balanceCentavos, 0) + offCardCentavos
   // The forward-looking half of the screen. Deliberately per envelope and never
   // summed into one "safe to spend" figure — see lib/allowance.ts: with no flag
@@ -353,7 +382,7 @@ export function Home() {
   })
 
   const moneyTypeSummary = useMemo(
-    () => moneyTypeSummaryFromTotals(moneyTotals, moneySnapshot),
+    () => moneyTypeSummaryFromTotals(moneyTotals, moneySnapshot, false),
     [moneyTotals, moneySnapshot],
   )
   // What the three lines add up to, versus what is actually in the tin. These
@@ -374,7 +403,7 @@ export function Home() {
 
       {/* The hero: one number, big enough to read at arm's length. This is the
           10×/day glance. */}
-      <section className="card overflow-hidden px-5 py-6 md:px-8 md:py-9">
+      <section className="balance-hero card overflow-hidden px-5 py-6 md:px-8 md:py-9">
         <TinJar />
         <div className="relative">
           <p className="font-display text-[0.625rem] text-ink-soft">IN THE TIN</p>
@@ -429,26 +458,15 @@ export function Home() {
               have bought anything reads as a scolding — and the week is dropped
               when it equals the day, since on a quiet week that would print the
               same number twice with two different labels. */}
-          {cards && todayCentavos > 0 && (
+          {cards && (
             <p className="mt-2 text-xs text-ink-soft tabular-nums">
-              <span className="text-ink-mute">spent today </span>
+              <span className="text-ink-mute">net spending today </span>
               {formatPHP(todayCentavos)}
-              {weekCentavos > todayCentavos && (
-                <>
-                  <span className="mx-1.5 text-ink-mute opacity-50">·</span>
-                  <span className="text-ink-mute">7 days </span>
-                  {formatPHP(weekCentavos)}
-                </>
-              )}
-            </p>
-          )}
-          {/* A quiet day inside a spending week is exactly when the week is the
-              number worth having, so it gets a line of its own rather than
-              disappearing with the day it was hiding behind. */}
-          {cards && todayCentavos === 0 && weekCentavos > 0 && (
-            <p className="mt-2 text-xs text-ink-soft tabular-nums">
-              <span className="text-ink-mute">spent in 7 days </span>
-              {formatPHP(weekCentavos)}
+              <span className="mx-1.5 text-ink-mute opacity-50">·</span>
+              <span className="text-ink-mute">this week </span>
+              <Link to="/history" state={{ period: 'this-week' }} className="text-accent">
+                {formatPHP(weekCentavos)}
+              </Link>
             </p>
           )}
           {strip && <LoggingStrip days={strip} streak={streak} />}
@@ -691,6 +709,21 @@ export function Home() {
                   )
                 })}
             </div>
+            <button
+              type="button"
+              onClick={() => setChecking(true)}
+              className="press mt-3 rounded border border-line px-3 py-2 text-sm text-accent"
+            >
+              Check balance
+            </button>
+            {(moneySnapshot.online !== null || moneySnapshot.reallife !== null) && (
+              <p className="mt-2 text-xs text-ink-mute">
+                Legacy targets: Online{' '}
+                {moneySnapshot.online === null ? 'unset' : formatPHP(moneySnapshot.online)} · Cash{' '}
+                {moneySnapshot.reallife === null ? 'unset' : formatPHP(moneySnapshot.reallife)}.
+                These are references; the balances above come from the ledger.
+              </p>
+            )}
             {moneyHasTargets && moneyDriftCentavos !== 0 && (
               <p className="mt-2 text-xs text-ink-mute">
                 Your saved targets are {formatPHP(Math.abs(moneyDriftCentavos))}{' '}
@@ -713,6 +746,7 @@ export function Home() {
 
       {/* mounted only while open, so each visit starts with empty inputs
           instead of whatever was typed and abandoned last time */}
+      {checking && <ReconciliationSheet onClose={() => setChecking(false)} />}
       {openingOpen && (
         <OpeningBalancesSheet open envelopes={cards ?? []} onClose={() => setOpeningOpen(false)} />
       )}
@@ -999,14 +1033,20 @@ function EnvelopeCard({
 }) {
   const color = card.color ?? '#AFA7C2'
   const red = card.balanceCentavos < 0
-  const perDay = allowancePerDay(card.balanceCentavos, daysLeft)
+  const available = card.availability?.available ?? Math.max(0, card.balanceCentavos)
+  const divisor = card.spendingDays ?? daysLeft
+  const perDay = divisor > 0 ? allowancePerDay(available, divisor) : 0
   // Hidden on an envelope nothing has recently been spent from — the honest way
   // to recognise savings without a flag the app cannot have. "₱82.66/day" on the
   // savings card is an invitation to start, which is the one thing a 70/20/10
   // tracker must not print.
-  const showRate = perDay > 0 && (pace?.hasSpending ?? false)
+  const showRate = perDay > 0 && ((pace?.hasSpending ?? false) || card.selectedSchedule === true)
   const ahead = pace !== null && pace.leftPct >= pace.pacePct
-  const hasRun = pace !== null && pace.setAsideCentavos > 0
+  const hasRun =
+    pace !== null &&
+    pace.setAsideCentavos > 0 &&
+    !card.availability?.held &&
+    !card.availability?.reserved
 
   const meterLabel = !hasRun
     ? `${card.name}: ${formatPHP(card.balanceCentavos)}`
@@ -1100,6 +1140,37 @@ function EnvelopeCard({
           Cover from another envelope →
         </button>
       )}
+      {!!card.availability?.held && (
+        <p className="mt-2 text-sm text-ink-soft">
+          {formatPHP(available)} available · {formatPHP(card.availability.held)} assigned to future
+          months
+        </p>
+      )}
+      {!!card.availability?.reserved && (
+        <p className="mt-2 text-xs text-ink-soft">
+          {formatPHP(available)} free · {formatPHP(card.availability.reserved)} reserved for goals
+        </p>
+      )}
+      {!!card.availability?.shortfall && (
+        <p className="mt-2 text-sm text-warn">
+          Funding shortfall: {formatPHP(card.availability.shortfall)}
+        </p>
+      )}
+      {divisor === 0 && card.selectedSchedule && (
+        <p className="mt-2 text-sm text-ink-soft">No selected days remaining</p>
+      )}
+      <Link
+        className="mt-3 inline-block min-h-11 py-3 text-sm text-accent underline"
+        to={`/budget?envelope=${card.id}`}
+      >
+        Budget &amp; spending days →
+      </Link>
+      <Link
+        className="mt-1 inline-block min-h-11 py-3 text-xs text-accent underline"
+        to={`/goals?envelope=${card.id}`}
+      >
+        Goals & allocations →
+      </Link>
     </article>
   )
 }

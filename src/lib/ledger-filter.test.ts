@@ -171,6 +171,9 @@ describe('totalsFor', () => {
       groups: 2,
       spentCentavos: 250_00,
       receivedCentavos: 1_000_00,
+      returnedCentavos: 0,
+      netSpendingCentavos: 250_00,
+      adjustmentCentavos: 0,
     })
   })
 
@@ -178,7 +181,14 @@ describe('totalsFor', () => {
     const groups = groupsOf([
       row({ amount_centavos: -250_00, voided_at: '2026-07-24T05:00:00.000Z' }),
     ])
-    expect(totalsFor(groups)).toEqual({ groups: 1, spentCentavos: 0, receivedCentavos: 0 })
+    expect(totalsFor(groups)).toEqual({
+      groups: 1,
+      spentCentavos: 0,
+      receivedCentavos: 0,
+      returnedCentavos: 0,
+      netSpendingCentavos: 0,
+      adjustmentCentavos: 0,
+    })
   })
 
   it('leaves transfers out of both totals — the money never left', () => {
@@ -202,18 +212,24 @@ describe('totalsFor', () => {
       groups: 1,
       spentCentavos: 0,
       receivedCentavos: 0,
+      returnedCentavos: 0,
+      netSpendingCentavos: 0,
+      adjustmentCentavos: 0,
     })
   })
 
-  it('sorts an adjustment by its sign', () => {
+  it('keeps signed adjustments separate from income and spending', () => {
     const groups = groupsOf([
       row({ group_id: 'a', kind: 'adjustment', category_id: null, amount_centavos: 900_00 }),
       row({ group_id: 'b', kind: 'adjustment', category_id: null, amount_centavos: -100_00 }),
     ])
     expect(totalsFor(groups)).toEqual({
       groups: 2,
-      spentCentavos: 100_00,
-      receivedCentavos: 900_00,
+      spentCentavos: 0,
+      receivedCentavos: 0,
+      returnedCentavos: 0,
+      netSpendingCentavos: 0,
+      adjustmentCentavos: 800_00,
     })
   })
 })

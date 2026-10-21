@@ -14,6 +14,8 @@ import {
   insertPostedRows,
 } from './entries'
 import { planRestore, type ParsedBundle, type RestorePlan } from '../lib/restore'
+import { financialCapability } from './dexie'
+import { commitFinancial } from './financial'
 
 /** Same ceiling the statement importer uses — one outbox row stays a sane size. */
 const RESTORE_CHUNK_ROWS = 200
@@ -63,6 +65,29 @@ export interface RestoreResult {
  * whose legs do not sum to what was received until the next chunk pushes.
  */
 export async function applyRestore(plan: RestorePlan): Promise<RestoreResult> {
+  if (plan.missingCategories.length || plan.missingEnvelopes.length)
+    throw new RangeError('Resolve missing restore references first')
+  if (
+    plan.rows.some((row) => row.financial) ||
+    plan.obligations?.length ||
+    plan.audit?.length ||
+    (await financialCapability())
+  ) {
+    const voids = new Map(plan.voids.map((item) => [item.groupId, item]))
+    await commitFinancial({
+      id: crypto.randomUUID(),
+      action: 'import',
+      recorded_at: new Date().toISOString(),
+      rows: plan.rows.map((row) => ({
+        ...row,
+        voided_at: voids.get(row.group_id)?.voidedAt ?? null,
+        void_reason: voids.get(row.group_id)?.reason ?? null,
+      })),
+      obligations: plan.obligations ?? [],
+      audit: plan.audit ?? [],
+    })
+    return { rows: plan.rows.length, voids: plan.voids.length }
+  }
   // Keyed by group rather than by "did the id change since the last row": the
   // plan sorts legs adjacent, but a Map cannot be fooled if that ever stops
   // being true, and the cost of being wrong here is a split money group.

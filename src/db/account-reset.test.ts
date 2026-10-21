@@ -75,6 +75,8 @@ describe('clearLocalDataForReset', () => {
       categories: 1,
       checkIns: 1,
       streakSaves: 1,
+      obligations: 0,
+      audit: 0,
     })
     expect(await outboxCount()).toBe(1)
 
@@ -86,6 +88,8 @@ describe('clearLocalDataForReset', () => {
       categories: 0,
       checkIns: 0,
       streakSaves: 0,
+      obligations: 0,
+      audit: 0,
     })
     // Queued writes go too, and must: every one is an insert or a void against
     // a ledger the server no longer has. Pushing them afterwards would put back

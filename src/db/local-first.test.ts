@@ -6,6 +6,7 @@ import 'fake-indexeddb/auto'
 import { beforeAll, describe, expect, it } from 'vitest'
 import {
   applyLocalInsert,
+  localDb,
   getCursor,
   mirrorApplyPulledEntries,
   markCheckInsSynced,
@@ -256,11 +257,15 @@ describe('local-first mirror + outbox', () => {
   it('drainOutbox keeps a failing op at the head and stops', async () => {
     const countBefore = await outboxCount()
     const result = await drainOutbox(() => Promise.reject(new Error('supabase says no')))
-    expect(result).toEqual({ pushed: 0, blocked: true, error: 'supabase says no' })
+    expect(result).toEqual({
+      pushed: 0,
+      blocked: true,
+      error: 'Could not sync this change. Please try again.',
+    })
     expect(await outboxCount()).toBe(countBefore) // nothing dropped
     const head = await firstOutboxRow()
     expect(head?.attempts).toBe(1)
-    expect(head?.last_error).toBe('supabase says no')
+    expect(head?.last_error).toBe('Could not sync this change. Please try again.')
   })
 
   it('drainOutbox pushes FIFO — a void never overtakes its insert', async () => {
@@ -494,4 +499,27 @@ describe('local-first mirror + outbox', () => {
     expect(await entriesDb.hasAnyEntries()).toBe(false)
     expect(await outboxCount()).toBe(0)
   })
+})
+
+it('P1 persists a blank note as null and carries Cash through the local mirror and queued payload', async () => {
+  await openForUser('p1-note-fixture')
+  const id = await entriesDb.addExpense({
+    amountCentavos: 5000,
+    category: food,
+    moneyType: 'reallife',
+    note: '   ',
+    occurredAt: '2026-10-19T04:00:00.000Z',
+  })
+  const db = await localDb()
+  const rows = await db.entries.where('group_id').equals(id).toArray()
+  expect(rows[0]).toMatchObject({
+    note: null,
+    money_type: 'reallife',
+    amount_centavos: -5000,
+    occurred_at: '2026-10-19T04:00:00.000Z',
+  })
+  const payload = (await firstOutboxRow())!.payload
+  expect(payload.op).toBe('insert_entries')
+  if (payload.op === 'insert_entries')
+    expect(payload.rows[0]).toMatchObject({ note: null, money_type: 'reallife', group_id: id })
 })
