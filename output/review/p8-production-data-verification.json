@@ -1,0 +1,21 @@
+{
+  "checked_at": "2026-10-25T08:02:54.686Z",
+  "passed": true,
+  "authenticated_read_only": true,
+  "all_11_account_tables_unchanged": true,
+  "ledger_writes": false,
+  "table_counts": {
+    "profiles": 0,
+    "envelopes": 1,
+    "categories": 0,
+    "ledger_groups": 6,
+    "entries": 6,
+    "recurring_templates": 0,
+    "streak_saves": 0,
+    "checkin_days": 1,
+    "obligations": 0,
+    "ledger_operations": 0,
+    "ledger_audit": 0
+  },
+  "snapshot_sha256": "36334f7097ba6c5d9816e5d2ad11173f90f8bc5000cf5c57340374b4edbb1de3"
+}

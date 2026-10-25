@@ -1,0 +1,23 @@
+{
+  "checked_at": "2026-10-25T08:02:46.939Z",
+  "passed": true,
+  "url": "https://tin-jar.netlify.app",
+  "build": "2026.10.25.p8",
+  "authenticated_existing_account": true,
+  "production_ledger_writes": false,
+  "visit_checkin_suppressed": true,
+  "legacy_auto_posting_suppressed": true,
+  "strict_csp": true,
+  "deep_link_layout_cases": 30,
+  "widths": [
+    1280,
+    390,
+    320
+  ],
+  "debt_form_cancel": true,
+  "offline_service_worker_reload": true,
+  "real_backend_reads": true,
+  "errors": [],
+  "cspErrors": [],
+  "blocked": []
+}

@@ -2,8 +2,8 @@
   "prepared_date_manila": "2026-10-25",
   "checked_at": "2026-10-25T07:49:16.556Z",
   "ready_for_main": true,
-  "pushed": false,
-  "deployed": false,
+  "pushed": true,
+  "deployed": true,
   "unresolved_release_findings": [],
   "tests": 880,
   "test_files": 78,
@@ -29,5 +29,12 @@
     "Device-local reminder preferences",
     "Cross-device reset requires logout first",
     "Existing physical-device waiver and buried sheet-history marker limitation"
-  ]
+  ],
+  "publication": {
+    "application_commit": "0ce6ad26ecab73faaa78c6a0f6960d19ba79f33c",
+    "ci_run_id": 40174757019,
+    "netlify_deploy_id": "6addb675782eba472933e157",
+    "published_at": "2026-10-25T07:59:17.651Z",
+    "live_read_only_smoke_passed": true
+  }
 }

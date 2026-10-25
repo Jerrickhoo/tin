@@ -1,0 +1,31 @@
+{
+  "checked_at": "2026-10-25T08:04:38.633Z",
+  "passed": true,
+  "application_commit": "0ce6ad26ecab73faaa78c6a0f6960d19ba79f33c",
+  "branch": "main",
+  "pushed": true,
+  "deployed": true,
+  "url": "https://tin-jar.netlify.app",
+  "ci": {
+    "run_id": 40174757019,
+    "conclusion": "success",
+    "url": "https://github.com/Jerrickhoo/tin/actions/runs/40174757019"
+  },
+  "netlify": {
+    "deploy_id": "6addb675782eba472933e157",
+    "state": "ready",
+    "commit_ref": "0ce6ad26ecab73faaa78c6a0f6960d19ba79f33c",
+    "published_at": "2026-10-25T07:59:17.651Z"
+  },
+  "build": "2026.10.25.p8",
+  "tests": 880,
+  "ordinary_integration_files_skipped": 3,
+  "sql_assertions": 186,
+  "guards": 9,
+  "live_browser_cases": 30,
+  "offline_service_worker_reload": true,
+  "debt_form_cancel": true,
+  "production_ledger_writes": false,
+  "all_11_test_account_tables_unchanged": true,
+  "new_migrations": []
+}

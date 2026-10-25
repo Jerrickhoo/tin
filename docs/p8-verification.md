@@ -2,6 +2,8 @@
 
 The final follow-up review and commit preparation are recorded in [Main commit readiness](main-readiness-2026-10-25.md), including the three later reporting fixes and the updated 880-test result. The record below preserves the earlier P8 verification stage.
 
+The later authorized push, successful CI and deployment, and authenticated read-only live checks are recorded in [P6–P8 production release](p8-release-2026-10-25.md). P8.2 is now published.
+
 Prepared on **2026-10-25 (Asia/Manila)**. P8 verification and release preparation cover the existing P5–P7 work and the P8 fixes below. No commit, push, production migration or deployment was performed. The requested endpoint is a reviewed working tree ready to push for main.
 
 ## Delivered verification

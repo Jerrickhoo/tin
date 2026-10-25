@@ -1,6 +1,6 @@
 # Main commit readiness — 2026-10-25
 
-This final review covers the P6–P8 working tree based on `9618bcf`, including the three follow-up reporting fixes. It supersedes the earlier 873-test readiness count in the historical P8 verification record. Publication remains a separate step.
+This final review covers the P6–P8 working tree based on `9618bcf`, including the three follow-up reporting fixes. It supersedes the earlier 873-test readiness count in the historical P8 verification record. The later authorized push and verified publication are recorded in [P6–P8 production release](p8-release-2026-10-25.md).
 
 ## Resolved follow-up findings
 
