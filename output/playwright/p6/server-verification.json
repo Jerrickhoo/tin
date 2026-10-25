@@ -1,0 +1,27 @@
+{
+  "passed": true,
+  "dailyProjectExcluded": true,
+  "checks": [
+    {
+      "person": "P6 historical Sam",
+      "original": 10001,
+      "paid": 0,
+      "remaining": 10001,
+      "payments": 1
+    },
+    {
+      "person": "P6 lent Alex",
+      "original": 20002,
+      "paid": 0,
+      "remaining": 20002,
+      "payments": 0
+    },
+    {
+      "person": "P6 borrowed Alex",
+      "original": 20002,
+      "paid": 20002,
+      "remaining": 0,
+      "payments": 1
+    }
+  ]
+}

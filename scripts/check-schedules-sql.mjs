@@ -437,8 +437,45 @@ export async function checkSchedulesSql(db) {
   repost.rows[0].occurred_at = `${next}-01T04:00:00Z`
   await reject(repost)
   // Account reset includes all schedule history and preserved converted templates.
-  await db.query('select public.reset_account()')
+  const resetTables = [
+    'entries',
+    'recurring_templates',
+    'categories',
+    'envelopes',
+    'checkin_days',
+    'streak_saves',
+    'obligations',
+    'ledger_audit',
+    'ledger_operations',
+    'ledger_groups',
+  ]
+  const beforeReset = {}
+  for (const table of resetTables)
+    beforeReset[table] = Number(
+      (await db.query(`select count(*) n from public.${table} where user_id=$1`, [uid])).rows[0].n,
+    )
+  const resetSummary = (await db.query('select public.reset_account() summary')).rows[0].summary
+  for (const [key, table] of Object.entries({
+    entries: 'entries',
+    recurring: 'recurring_templates',
+    categories: 'categories',
+    envelopes: 'envelopes',
+    checkins: 'checkin_days',
+    streak_saves: 'streak_saves',
+    obligations: 'obligations',
+    ledger_audit: 'ledger_audit',
+  })) {
+    assert.equal(Number(resetSummary[key]), beforeReset[table], `Reset summary ${key}`)
+    passed++
+  }
   passed++
-  await check('select count(*) from public.ledger_audit where user_id=$1', [uid], 0)
+  for (const table of resetTables)
+    await check(`select count(*) from public.${table} where user_id=$1`, [uid], 0)
+  await db.exec('reset role')
+  await check(
+    'select count(*) from public.envelopes where id=$1 and user_id=$2',
+    [foreign, other],
+    1,
+  )
   return passed
 }

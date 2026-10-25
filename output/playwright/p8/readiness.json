@@ -1,0 +1,33 @@
+{
+  "prepared_date_manila": "2026-10-25",
+  "checked_at": "2026-10-25T07:49:16.556Z",
+  "ready_for_main": true,
+  "pushed": false,
+  "deployed": false,
+  "unresolved_release_findings": [],
+  "tests": 880,
+  "test_files": 78,
+  "ordinary_integration_files_skipped": 3,
+  "sql_assertions": 186,
+  "guards": 9,
+  "dependency_vulnerabilities": 0,
+  "production_build_passed": true,
+  "clean_index_install_check_build_passed": true,
+  "clean_index_node_version": "24.22.1",
+  "followup_browser_reproductions_passed": 3,
+  "final_browser_layout_cases_passed": 27,
+  "earlier_phase_browser_layout_cases_passed": 129,
+  "earlier_disposable_backend_scenario_groups": 7,
+  "fresh_read_only_backend_rehearsal_passed": true,
+  "full_restore_entries": 432,
+  "full_restore_tables": 11,
+  "new_migrations": [],
+  "staged_private_credential_scan_passed": true,
+  "source_sha256": "318577a920ac18614f7c9f68a348519087d740c3773a8b50fdf8a8cbd40d5986",
+  "known_limits": [
+    "Existing large-bundle warning",
+    "Device-local reminder preferences",
+    "Cross-device reset requires logout first",
+    "Existing physical-device waiver and buried sheet-history marker limitation"
+  ]
+}

@@ -15,7 +15,7 @@ import {
   type Category,
   type Envelope,
 } from '../../db/entries'
-import { manilaDayKey, monthLabel, shiftDayKey } from '../../lib/dates'
+import { fromManilaInput, manilaDayKey, monthLabel, shiftDayKey } from '../../lib/dates'
 import { groupChains, type EntryKind, type EntryRow, type LedgerGroup } from '../../lib/groups'
 import { useReportingClock, useWeekStart } from '../../lib/reporting-clock'
 import { manilaWeekStart, type WeekStart } from '../../lib/dates'
@@ -162,8 +162,14 @@ export function History() {
     incomingIds(location.state, 'envelopeIds'),
   )
   const [kinds, setKinds] = useState<EntryKind[]>([])
-  const [customFrom, saveFrom] = useState<string | null>(null)
-  const [customTo, saveTo] = useState<string | null>(null)
+  const incomingDate = (key: string): string | null => {
+    const value = location.state?.[key]
+    return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && fromManilaInput(value)
+      ? value
+      : null
+  }
+  const [customFrom, saveFrom] = useState<string | null>(() => incomingDate('from'))
+  const [customTo, saveTo] = useState<string | null>(() => incomingDate('to'))
   const [relativePreset, setRelativePreset] = useState<string | null>(() =>
     location.state?.period === 'this-week' ? 'This week' : null,
   )
@@ -246,15 +252,20 @@ export function History() {
     [categories, envelopes],
   )
 
-  const matchedChains = groupChains(rows ?? []).filter(
-    (chain) =>
-      (!receipt || (chain.head.legs[0].financial?.chain_id ?? chain.head.groupId) === receipt) &&
-      filterGroups([chain.head, ...chain.previous], query, names).length > 0,
-  )
-  const matched = useMemo(
-    () => matchedChains.flatMap((chain) => [chain.head, ...chain.previous]),
-    [matchedChains],
-  )
+  const matchedChains = groupChains(rows ?? [])
+    .map((chain) => ({
+      ...chain,
+      matching: filterGroups([chain.head, ...chain.previous], query, names),
+    }))
+    .filter(
+      (chain) =>
+        (!receipt || (chain.head.legs[0].financial?.chain_id ?? chain.head.groupId) === receipt) &&
+        chain.matching.length > 0,
+    )
+  // A prior version can find a chain as audit context. Only versions that
+  // match the query belong in its counts, money totals and daily net.
+  const matched = useMemo(() => matchedChains.flatMap((chain) => chain.matching), [matchedChains])
+  const matchedIds = useMemo(() => new Set(matched.map((group) => group.groupId)), [matched])
   const previousByHead = useMemo(
     () => new Map(matchedChains.map((chain) => [chain.head.groupId, chain.previous])),
     [matchedChains],
@@ -287,12 +298,14 @@ export function History() {
     // above states the totals outright rather than leaving them to be summed.
     return [...byDay.entries()].map(([key, list]) => {
       const projection = projectFinancial(
-        list.filter((group) => !group.voided).flatMap((group) => group.legs),
+        list
+          .filter((group) => !group.voided && matchedIds.has(group.groupId))
+          .flatMap((group) => group.legs),
       )
       const net = sumCentavos([projection.incomeCentavos, -projection.netSpendingCentavos])
       return { key, groups: list, net }
     })
-  }, [matchedChains])
+  }, [matchedChains, matchedIds])
 
   /**
    * Which day sections open a new month, and whether to say so at all.
@@ -457,6 +470,9 @@ export function History() {
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-5 px-5 py-7 md:max-w-2xl md:px-8 md:py-10">
       <h1 className="font-display text-[1rem] text-ink">History</h1>
+      <Link className="min-h-11 py-2 text-accent underline" to="/debts">
+        Debts · Utang
+      </Link>
       <p className="text-sm text-ink-soft">
         Actual activity · dates show when money moved.{' '}
         <Link className="text-accent underline" to="/budget">
@@ -582,6 +598,12 @@ export function History() {
             .filter((item) => !item.voided_at)
             .map((item) => (
               <div key={item.id} className="mt-2 border-t border-line pt-2 text-sm">
+                <Link
+                  className="block min-h-11 py-2 text-accent underline"
+                  to={`/debts?debt=${item.id}`}
+                >
+                  Open debt details
+                </Link>
                 <span>
                   {item.type === 'payable_principal'
                     ? 'I owe'
@@ -873,6 +895,11 @@ export function History() {
               Adjustments {formatPHP(totals.adjustmentCentavos)} shown separately. Voided records,
               transfers and loan principal do not count as spending or income.
             </p>
+            {searching && matchedChains.some((chain) => chain.previous.length > 0) && (
+              <p>
+                Only matching versions contribute to these totals; other versions are audit context.
+              </p>
+            )}
             <p className="mt-1 tabular-nums">
               Account net movement: Online {formatPHP(moneyTotals.online)} · Cash{' '}
               {formatPHP(moneyTotals.reallife)} · Not tagged {formatPHP(moneyTotals.untagged)}
@@ -961,6 +988,11 @@ export function History() {
           <div className="flex flex-col gap-2">
             {groups.map((group) => (
               <div key={group.groupId}>
+                {!matchedIds.has(group.groupId) && (
+                  <p className="mb-1 text-xs text-ink-mute">
+                    Current version is outside these filters; shown as audit context only.
+                  </p>
+                )}
                 {group.kind === 'income' && intentOf(group.legs[0]) === 'ordinary_income' && (
                   <p className="mb-1 text-xs text-ink-mute">
                     Received {manilaDayKey(new Date(group.occurredAt))} Manila · Budget{' '}
@@ -1223,6 +1255,14 @@ function GroupCard({
           </p>
           {group.voided && leg0.void_reason && (
             <p className="mt-1 text-xs text-ink-mute">void reason: {leg0.void_reason}</p>
+          )}
+          {leg0.financial?.obligation_id && (
+            <Link
+              className="mt-2 block min-h-11 py-2 text-accent underline"
+              to={`/debts?debt=${leg0.financial.obligation_id}`}
+            >
+              Linked debt and repayments
+            </Link>
           )}
           {leg0.financial && (
             <p className="mt-2 text-xs text-ink-mute">

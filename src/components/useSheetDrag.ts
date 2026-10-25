@@ -46,8 +46,9 @@ export function useSheetDrag(
   onPointerDown: (e: ReactPointerEvent) => void
   onPointerMove: (e: ReactPointerEvent) => void
   onPointerUp: (e: ReactPointerEvent) => void
+  onPointerCancel: (e: ReactPointerEvent) => void
 } {
-  const start = useRef<{ y: number; at: number } | null>(null)
+  const start = useRef<{ y: number; at: number; pointerId: number } | null>(null)
   const offset = useRef(0)
 
   const onPointerDown = useCallback(
@@ -55,7 +56,7 @@ export function useSheetDrag(
       // Primary button / single finger only: a second finger arriving mid-drag
       // would otherwise restart it from wherever it landed.
       if (e.button !== 0 || start.current !== null) return
-      start.current = { y: e.clientY, at: e.timeStamp }
+      start.current = { y: e.clientY, at: e.timeStamp, pointerId: e.pointerId }
       offset.current = 0
       const panel = panelRef.current
       if (panel) panel.style.transition = 'none'
@@ -74,7 +75,7 @@ export function useSheetDrag(
 
   const onPointerMove = useCallback(
     (e: ReactPointerEvent) => {
-      if (start.current === null) return
+      if (start.current === null || start.current.pointerId !== e.pointerId) return
       // Downward only. Rubber-banding upward would suggest the sheet can go
       // somewhere it cannot — there is no expanded state to drag into.
       offset.current = Math.max(0, e.clientY - start.current.y)
@@ -87,7 +88,7 @@ export function useSheetDrag(
   const onPointerUp = useCallback(
     (e: ReactPointerEvent) => {
       const from = start.current
-      if (from === null) return
+      if (from === null || from.pointerId !== e.pointerId) return
       start.current = null
       const panel = panelRef.current
       const travelled = offset.current
@@ -119,5 +120,19 @@ export function useSheetDrag(
     [onClose, panelRef],
   )
 
-  return { onPointerDown, onPointerMove, onPointerUp }
+  const onPointerCancel = useCallback(
+    (e: ReactPointerEvent) => {
+      if (start.current === null || start.current.pointerId !== e.pointerId) return
+      start.current = null
+      offset.current = 0
+      const panel = panelRef.current
+      if (panel) {
+        panel.style.transition = ''
+        panel.style.transform = ''
+      }
+    },
+    [panelRef],
+  )
+
+  return { onPointerDown, onPointerMove, onPointerUp, onPointerCancel }
 }

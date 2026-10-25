@@ -1,0 +1,106 @@
+{
+  "checked_at": "2026-10-25T07:41:19.568Z",
+  "passed": true,
+  "read_only_daily": true,
+  "ledger_test_writes": false,
+  "deployed": false,
+  "base_commit": "9618bcf2e106838e2c8a9d1cb674469ed31d9ebb",
+  "working_tree_changes_not_committed": true,
+  "migration_versions": [
+    "001",
+    "002",
+    "003",
+    "004",
+    "007",
+    "008",
+    "009",
+    "010",
+    "011",
+    "012",
+    "013",
+    "014"
+  ],
+  "manually_installed_legacy_005_006_effects_verified": true,
+  "capability_versions": [
+    1,
+    1,
+    1,
+    1
+  ],
+  "pending_migrations": [],
+  "private_backup_verified": true,
+  "local_restore_all_fields_match": true,
+  "financial_budget_goal_schedule_invariants": true,
+  "table_counts": {
+    "profiles": 1,
+    "envelopes": 4,
+    "categories": 16,
+    "ledger_groups": 369,
+    "entries": 432,
+    "recurring_templates": 0,
+    "streak_saves": 1,
+    "checkin_days": 82,
+    "obligations": 0,
+    "ledger_operations": 6,
+    "ledger_audit": 6
+  },
+  "backup_sha256": "a3085f84baab89acde62fc891cc918ba6840c117fefd3923f4b23378cb79933a",
+  "migration_sha256": [
+    {
+      "file": "001_core.sql",
+      "sha256": "cad8e5b06a83bbc47231a44864756faa57a3457715b1cc8e7bb96600a3d0559c"
+    },
+    {
+      "file": "002_envelope_theme_colors.sql",
+      "sha256": "c9eed3c2a499ca3c2df99b262296e8e752f6e996071f45fe1cb32ff35e38a5d9"
+    },
+    {
+      "file": "003_streak_saves.sql",
+      "sha256": "ad8397b3339e963d99e013041609afc1a8b9cdbe9d587a9eb45a16b5262f423f"
+    },
+    {
+      "file": "004_checkin_days.sql",
+      "sha256": "702abc94395d92614e2b94d15f8d60133ed26698c4f543a2bfeeab3569073273"
+    },
+    {
+      "file": "005_money_type.sql",
+      "sha256": "fea6cb637f065ef4ba37bb7962853b3215368cd50e5a46ca7c7319709ea574d1"
+    },
+    {
+      "file": "006_account_reset.sql",
+      "sha256": "0b96b30fed204f432b9dd9faf00090bd93ff1edf8952a3022167b66de15019d1"
+    },
+    {
+      "file": "007_financial_operations.sql",
+      "sha256": "b1fb2f164543f025f89a02ba1cfc0022e0e6fe75b01b62c189d548b2ff675adb"
+    },
+    {
+      "file": "008_budget_planning.sql",
+      "sha256": "afd2da7535e372bf90fc3922287bb2ba8dddc3abf91227f7cdc712f320d0329b"
+    },
+    {
+      "file": "009_goals_allocations.sql",
+      "sha256": "708986861e296078201deaec68d43929224857e5cb59f45818d40d91af652bc7"
+    },
+    {
+      "file": "010_goals_clock.sql",
+      "sha256": "3487c2770ec70f09874b525213cbd10b28771d0bf27d9ccc6583a9db0f3afcfb"
+    },
+    {
+      "file": "011_schedules.sql",
+      "sha256": "34e6339a64f4f4e2bbe0223cbc4639945166ac411d69bd0f65ab63498a927f03"
+    },
+    {
+      "file": "012_finite_schedule_obligations.sql",
+      "sha256": "bac08a3fe89ba52a6246cf3aca84d7f7e8f95272454b4aff526abf6554797911"
+    },
+    {
+      "file": "013_future_schedule_terms.sql",
+      "sha256": "6161fdabb6de69a6f6c7d0eb36e57aa070794dc87e097dc4619ce6a76ae2edf2"
+    },
+    {
+      "file": "014_schedule_command_bounds.sql",
+      "sha256": "e60ffe79a688531bba2f1bf9777dfd9f6701355aebe85fcd0d2c7248161b1c77"
+    }
+  ]
+}

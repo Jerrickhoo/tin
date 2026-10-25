@@ -1,6 +1,6 @@
 # Tin — practical improvement roadmap
 
-Implementation update: **2026-10-22 (Asia/Manila)**. P1 is complete under the user's human/device waiver. **P2.1–P2.6, P3.1–P3.3 and P4.1–P4.2 are implemented and deployed**, with local, Edge, isolated Supabase/PostgREST and real offline/reconnect evidence. The daily database has migrations 007/008 after the earlier verified backup and comparison of all 420 existing entries. P4 migrations 009/010 are now applied after a fresh backup and local rehearsal preserving all 423 entries and every field in all 11 public tables. GitHub CI and live authenticated read-only Edge checks passed. See [P4 release](docs/p4-release-2026-10-22.md). P5.1–P5.3 are now implemented and verified for main, including the backed-up daily migrations 011–014. The P5 client release is prepared locally. P6–P8 have not started. See [P5 verification](docs/p5-verification.md) and [P5 release readiness](docs/p5-release-2026-10-22.md). Initial findings remain the pre-P1 snapshot; phase records distinguish later changes and evidence.
+Implementation update: **2026-10-25 (Asia/Manila)**. P1 is complete under the user's human/device waiver. **P2–P4 are implemented and deployed**; see [P4 release](docs/p4-release-2026-10-22.md). P5–P7 are implemented and verified locally for main, including the backed-up daily migrations 011–014. P8.1 verification and P8.2 release preparation are complete for the requested main-ready scope; publication is pending. The fresh P8 read-only daily backup and local restore preserve all 432 entries and every field in all 11 public tables. No new migration is required. See [P8 findings and release evidence](docs/p8-verification.md), [P7 verification](docs/p7-verification.md), [P6 verification](docs/p6-verification.md), [P5 verification](docs/p5-verification.md) and [P5 release readiness](docs/p5-release-2026-10-22.md). Initial findings remain the pre-P1 snapshot; phase records distinguish later changes and evidence.
 
 This file replaces the root document's filename `ROADMAP.md` with the requested `roadmap.md`. The complete pre-existing roadmap is retained verbatim in the **Historical roadmap** appendix. Its historical completion claims and product rationale remain useful evidence, but are not verification of this checkout or the live deployment. `QOL-CHECKLIST.md` is preserved separately, including its unfinished checks. Use the new **P1.1–P8.2** identifiers for this improvement program; old numeric phase identifiers refer only to the appendix.
 
@@ -451,7 +451,7 @@ Daily migrations **011–014** were applied atomically after a fresh private bac
 
 ### P6 — utang without a second repayment system
 
-- [ ] **P6.1 — Debt list and integrated settlements.**
+- [x] **P6.1 — Debt list and integrated settlements.**
   - **Problem/behavior:** see money owed by/to people, optional due dates, original amount, payments and remaining balance.
   - **Scope/exclusions:** add a debt view linked from Upcoming/History, “I owe”/“Owed to me,” person label, effective date, optional due date/notes, partial/full status and the P2.3 repayment sheet. Lending/borrowing entry uses explicit direction and actual account; no separate “mark paid” boolean or contact messaging.
   - **Dependencies:** P2.3/P2.4/P3.1/P5.1; no need to wait for calendar/Insights.
@@ -462,7 +462,7 @@ Daily migrations **011–014** were applied atomically after a fresh private bac
   - **Manual:** lend, borrow, enter old debt, partially repay/receive in another account, open same payment from History, finish and void one repayment.
   - **Edges/gate:** optional due date, same person with multiple debts, exact centavo settlement. Gate: reconcile cash, receivables/payables and report exclusions with P2.3 fixtures before reminders use status.
 
-- [ ] **P6.2 — User-only reminders and balance checks.**
+- [x] **P6.2 — User-only reminders and balance checks.**
   - **Problem/behavior:** surface due repayments/subscriptions/installments and optional stale-balance checks without nagging or contacting other people.
   - **Scope/exclusions:** one in-app reminder queue with due soon, overdue, snooze/dismiss, per-item controls and last-seen suppression. A small Home hint opens Upcoming; no duplicated dashboard panels, SMS, email, contact access or unverified background delivery.
   - **Dependencies:** P6.1/P5.2/P5.3/P2.6; D13 reminder timing.
@@ -473,9 +473,17 @@ Daily migrations **011–014** were applied atomically after a fresh private bac
   - **Manual:** enable, snooze, dismiss, pay and reopen; check offline and later resume; disable all reminders and inspect unchanged balances.
   - **Edges/gate:** in-app reminders can be missed while app is closed; explain this at preference selection. Gate: no unsolicited contact or money changes, with duplicate reminder suppression verified.
 
+### P6 implementation and verification record — 2026-10-24
+
+P6.1–P6.2 are implemented for main. D13 recommended defaults were adopted for the user's instruction to do P6. Debts uses the existing P2 obligation identities and repayment command for both principal directions, historical noncash openings and expense reimbursement claims. Totals remain separate from available cash. Settled/canceled records, immutable person labels, notes and payment links remain discoverable; payments open the exact History movement and link back to the debt. Existing atomic validation blocks overpayment, competing settlements and unresolved origin changes.
+
+Upcoming contains one in-app reminder queue for debts, subscriptions/installments and opt-in balance checks. Controls include timing, snooze, dismissal, per-item mute and seen suppression for the Home hint. Preferences are explicitly device-local, owner-scoped and cleared on logout/reset; reminder actions never issue ledger commands. Dates and wake/midnight refresh use the shared Manila clock. No new schema or backup format is required; P5 migration prerequisites were checked read-only.
+
+Repeated implementation/review/fix passes, the complete findings list, automated checks and actual Edge/offline/staging evidence are recorded in [P6 verification](docs/p6-verification.md). The release is prepared locally; this phase did not push main or publish the client.
+
 ### P7 — calendar and focused analytical review
 
-- [ ] **P7.1 — Calendar as a view over validated records.**
+- [x] **P7.1 — Calendar as a view over validated records.**
   - **Problem/behavior:** see spending and upcoming commitments by day with clear actual/scheduled/expected/overdue distinctions.
   - **Scope/exclusions:** month calendar plus accessible agenda/day drawer linked from Upcoming; actual transactions, subscriptions, installments, debt due dates and expected allowance. Distinct text/icon statuses and separate actual/expected subtotals; no copied calendar ledger, holiday service or automatic payment.
   - **Dependencies:** P2.5/P3.2/P5.2/P5.3/P6.1; reminder links after P6.2.
@@ -486,7 +494,7 @@ Daily migrations **011–014** were applied atomically after a fresh private bac
   - **Manual:** mobile day open/close, keyboard/reader agenda, future month and overdue item, confirm payment and verify spending appears once, inspect an expected allowance.
   - **Edges/gate:** many items on one day collapse with a count and accessible list; overdue remains visible until resolved. Gate: selectors share financial/schedule identities and never create rows merely by browsing months.
 
-- [ ] **P7.2 — Insights with a small useful default review.**
+- [x] **P7.2 — Insights with a small useful default review.**
   - **Problem/behavior:** understand spending, returns, free money, upcoming obligations and trends without a crowded screen.
   - **Scope/exclusions:** four default blocks: (1) gross/returned/net spending with comparison basis, (2) top categories with drilldown, (3) cash versus current budget free/reserved plus upcoming funded/unfunded commitments, (4) recent comparable-period trends. Remove spending-mix/streak from main view; keep envelope flows in an optional Details panel. Biggest purchase/weekday patterns remain deferred.
   - **Dependencies:** P2–P6 financial gates, P3.2 and P7.1 navigation. Can ship a clearly scoped actual-spending subset earlier only if unimplemented panels are omitted and dependencies documented.
@@ -497,9 +505,14 @@ Daily migrations **011–014** were applied atomically after a fresh private bac
   - **Manual:** compare Insights with matching History and account totals; current versus complete/future month; drill category and obligation, expand details, check mobile and screen reader.
   - **Edges/gate:** net return-only periods can be negative; category gross/return/net labels must share a denominator. Gate: four panels agree with authoritative projections and no hidden double counting; optional panels do not crowd Home.
 
+### P7 implementation record — 2026-10-25
+
+P7.1–P7.2 are implemented locally for main. The calendar reuses actual groups, schedule identities, obligation deadlines and month-only expectations without creating financial records. Paid-late and same-day marker behavior preserves source links without duplicating actual money. Insights has the four D14 default blocks, optional envelope flows, date-scoped History links, current availability and labeled comparable periods. D14's recommended reversible layout was adopted under the instruction to do P7.
+
+Repeated review findings and fixes, automated regression checks, Edge offline/navigation/layout evidence and release limitations are documented in [P7 verification](docs/p7-verification.md). No P7 migration, push or deployment was performed. P8 remains separate.
 ### P8 — verification, migration rehearsal and release
 
-- [ ] **P8.1 — Rehearse upgrades and close relevant retained gaps.**
+- [x] **P8.1 — Rehearse upgrades and close relevant retained gaps.**
   - **Problem/behavior:** daily data and existing flows must survive each schema/operation addition.
   - **Scope/exclusions:** run the regression matrix below against old-version fixtures and a disposable Supabase environment; add ownership/transaction probes for the new financial entities. Add targeted Home/AppShell and Settings reset/opening-offer renders, money-type RLS and archived-category revival cases. Preserve recorded limitations rather than expanding into a sync rewrite or unsupported bulk tagging.
   - **Dependencies:** P1.4 baseline; apply incrementally as each P2–P7 step changes its surface, repeat only affected cases after later changes.
@@ -520,6 +533,8 @@ Daily migrations **011–014** were applied atomically after a fresh private bac
   - **Automated:** deployment build and compatible-schema fixture checks; re-run only affected regression/integration cases after release config changes.
   - **Manual:** Home→Add→History→Insights; offline save/reload/reconnect; relevant new flow; backup export; verify pending/stale state labels and recovery instructions.
   - **Edges/gate:** service-worker cached old client and two-device writes need deliberate upgrade handling. Gate: record date, commit, migration/capability versions, exact checks and skips before checking off the feature; rollback if any unexplained financial divergence remains.
+
+P8 implementation and release preparation (**2026-10-25, Asia/Manila**): old-version and queued-write upgrades, rendered Home/Settings acceptance, archived-category revival, complete reset counts/ownership, disposable Supabase/PostgREST probes and private daily backup/local restore are verified. P8 fixes canceled/multiple-pointer sheet gestures and offline-start queue status, and improves pre-reset other-device guidance. See [all review findings, checks and limitations](docs/p8-verification.md). P8.1 is complete within the recorded device waiver. P8.2 preparation is complete; its checkbox stays open because a release commit has not been pushed and CI/deployment have not been observed. No new migration or daily financial write was needed.
 
 ## Verification and regression plan
 
@@ -577,8 +592,8 @@ For each completed step append a short evidence record under that step: implemen
 | D10 (accepted) | Permit permanent Restore for standalone voids after preview; block restoring superseded originals and resolve linked obligations/payments in a compound action. | More useful recovery but requires careful linked-state safeguards; ordinary Undo remains quick. **Blocking permanent-restore portion of P2.2.** |
 | D11 (adopted for P5) | New subscriptions require explicit confirmation; existing auto-post templates remain labeled until reviewed conversion with an occurrence cutover. | Two behaviors coexist temporarily; avoids silently changing the historically confirmed auto-post preference. **Blocking P5.1.** |
 | D12 (adopted for P5) | Start installment plans with payment-time expense tracking: no upfront cash/purchase entry from plan creation, confirmed payments count as expenses, explicit fees separately. Link existing installment payments; flag an already-expensed upfront financed purchase for review before new postings. Defer accrual purchase/liability accounting. | Simpler cash-based daily review; acquisition-date spending analysis is unavailable. Supporting upfront noncash purchases later needs an explicit accounting model rather than subtracting cash that never moved. **Blocking P5.3.** |
-| D13 | In-app reminders default three days before and on due date, overdue retained in Upcoming; balance-check reminder opt-in monthly. No proactive contact or guaranteed closed-app delivery. | Low setup, reminders may be missed while app closed. Timing is reversible; settle copy/preferences in P6.2. |
-| D14 | Four Insights blocks from P7.2; streak/mix removed from main review, flows in Details, calendar linked from Upcoming before any new primary tab. | Some deep metrics need one extra tap; test discoverability on a phone. Reversible P7 layout decision. |
+| D13 (adopted for P6) | In-app reminders default three days before and on due date, overdue retained in Upcoming; balance-check reminder opt-in monthly. No proactive contact or guaranteed closed-app delivery. | Low setup, reminders may be missed while app closed. Timing is reversible; settle copy/preferences in P6.2. |
+| D14 (adopted for P7) | Four Insights blocks from P7.2; streak/mix removed from main review, flows in Details, calendar linked from Upcoming before any new primary tab. | Some deep metrics need one extra tap; test discoverability on a phone. Reversible P7 layout decision. |
 
 ## Feedback coverage matrix
 
@@ -601,7 +616,7 @@ For each completed step append a short evidence record under that step: implemen
 
 ## Current implementation gate
 
-P1 is complete under the explicit human/device waiver. P2.1–P2.6, P3.1–P3.3 and P4.1–P4.2 are implemented, verified locally and on isolated staging, and deployed. The daily database has migrations 007–010 after backed-up releases. The P4 release preserved all 423 entries and every public-table field; authenticated-role and PostgREST checks passed. The read-only release gate requires the goals capability. GitHub CI and live Edge smoke checks passed; see [P4 release](docs/p4-release-2026-10-22.md). P5–P8 remain unstarted. Physical phone/OS sleep behavior remains outside the emulated browser evidence. See [P4 verification](docs/p4-verification.md), [P3 verification](docs/p3-verification.md) and [release readiness](docs/release-readiness-2026-10-21.md).
+P1 is complete under the explicit human/device waiver. P2–P4 are implemented, verified and deployed; see [P4 release](docs/p4-release-2026-10-22.md). P5–P7 are implemented and verified locally for main. The daily database already has migrations 007–014; historical manual 005/006 effects are observed without rewriting migration history. P8.1 and release preparation are verified, including a fresh read-only backup/local restoration preserving all 432 daily entries and every field in all 11 public tables. All four server capabilities are version 1. P8 adds no migration. P5–P8 client changes remain uncommitted/unpushed/undeployed in this checkout. P8.2 publication remains pending; see [P8 verification and findings](docs/p8-verification.md). Physical phone/OS sleep behavior, cross-device reset propagation and the other explicitly deferred limitations remain recorded. No unresolved finding for the main-ready slice is intentionally deferred.
 
 ## Historical roadmap
 

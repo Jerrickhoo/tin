@@ -38,6 +38,7 @@ export const ENTRY_PREFS_KEY = 'tin.entry-prefs'
 export const AMOUNT_INPUT_KEY = 'tin.amount-input'
 export const WEEK_START_KEY = 'tin.week-start'
 export const BALANCE_REMINDER_KEY = 'tin.balance-reminder'
+export const REMINDER_PREFS_KEY = 'tin.reminder-preferences'
 
 /**
  * Keys that describe the PERSON, and so must not survive a logout.
@@ -61,6 +62,7 @@ export const USER_SCOPED_LOCAL_KEYS = [
   ENTRY_PREFS_KEY,
   WEEK_START_KEY,
   BALANCE_REMINDER_KEY,
+  REMINDER_PREFS_KEY,
 ] as const
 
 /**

@@ -155,6 +155,42 @@ function dragHandle(distance: number) {
 }
 
 describe('BottomSheet drag-to-dismiss', () => {
+  it('keeps the draft open and resets its position when a drag is canceled', () => {
+    const onClose = vi.fn()
+    render(
+      <Harness onClose={onClose}>
+        <input aria-label="Draft note" defaultValue="Keep this draft" />
+      </Harness>,
+    )
+    const handle = grabHandle(),
+      panel = screen.getByRole('dialog')
+    fireEvent.pointerDown(handle, { button: 0, clientY: 0, pointerId: 1 })
+    fireEvent.pointerMove(handle, { clientY: 140, pointerId: 1 })
+    fireEvent.pointerCancel(handle, { clientY: 140, pointerId: 1 })
+    expect(onClose).not.toHaveBeenCalled()
+    expect(panel.style.transform).toBe('')
+    expect((screen.getByRole('textbox', { name: 'Draft note' }) as HTMLInputElement).value).toBe(
+      'Keep this draft',
+    )
+  })
+
+  it('ignores another pointer moving, lifting or canceling during a drag', () => {
+    const onClose = vi.fn()
+    render(<Harness onClose={onClose} />)
+    const handle = grabHandle(),
+      panel = screen.getByRole('dialog')
+    fireEvent.pointerDown(handle, { button: 0, clientY: 0, pointerId: 1 })
+    fireEvent.pointerMove(handle, { clientY: 10, pointerId: 1 })
+    fireEvent.pointerDown(handle, { button: 0, clientY: 100, pointerId: 2 })
+    fireEvent.pointerMove(handle, { clientY: 200, pointerId: 2 })
+    fireEvent.pointerCancel(handle, { clientY: 200, pointerId: 2 })
+    fireEvent.pointerUp(handle, { clientY: 200, pointerId: 2 })
+    expect(onClose).not.toHaveBeenCalled()
+    expect(panel.style.transform).toBe('translateY(10px)')
+    fireEvent.pointerUp(handle, { clientY: 10, pointerId: 1 })
+    expect(panel.style.transform).toBe('')
+  })
+
   it('closes on a deliberate drag down', async () => {
     const onClose = vi.fn()
     render(<Harness onClose={onClose} />)

@@ -1,0 +1,8 @@
+{
+  "passed": true,
+  "legacy": "P4 cached service worker",
+  "currentPatch": "2026.10.25.p8",
+  "queueBeforeUpgrade": 1,
+  "queueAfterReconnect": 0,
+  "finalBalance": "953498 centavos"
+}

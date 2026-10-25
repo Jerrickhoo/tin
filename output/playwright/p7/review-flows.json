@@ -1,0 +1,13 @@
+{
+    "passed":  true,
+    "issues":  [
+
+               ],
+    "errors":  [
+
+               ],
+    "futureHref":  "/recurring#due:48ef8e43-5d0c-4dda-8635-31d5ce9b34c3:2027-02",
+    "agenda":  "2026-10-22 · agenda\nClose day\n\nActual gross spending ₱1,299.00 · Returned ₱0.00 · Net spending ₱1,299.00 · Income ₱10,000.00\n\nView these dates in History\nExpense · Phone installments\n\nActual · 2026-10-22 · -₱600.00\n\nDue 2026-10-22 · Phone installments\nIncome\n\nActual · 2026-10-22 · ₱10,000.00\n\nExpense · Music subscription\n\nActual · 2026-10-22 · -₱299.00\n\nDue 2026-10-22 · Music subscription\nExpense · Phone installments\n\nActual · 2026-10-22 · -₱400.00\n\nDue 2026-10-22 · Phone installments\nTerm review\n\nOverdue · 2026-10-22 · ₱1,000.00 remaining · excluded from actual totals",
+    "history":  "Results\n\nAll matching entries in the local ledger\n\nPeriod: 2026-10-22 to 2026-10-22 · Manila dates\n\n5 records (including voided) · Gross spending ₱1,299.00 · Returned ₱0.00 · Net spending ₱1,299.00 · Income ₱10,000.00\n\nAdjustments ₱0.00 shown separately. Voided records, transfers and loan principal do not count as spending or income.\n\nAccount net movement: Online ₱8,701.00 · Cash ₱0.00 · Not tagged ₱0.00",
+    "categoryHistory":  "Results\n\nAll matching entries in the local ledger\n\nPeriod: 2026-10-01 to 2026-10-25 · Manila dates\n\n5 records (including voided) · Gross spending ₱1,620.09 · Returned ₱0.00 · Net spending ₱1,620.09 · Income ₱0.00\n\nAdjustments ₱0.00 shown separately. Voided records, transfers and loan principal do not count as spending or income.\n\nAccount net movement: Online -₱1,620.09 · Cash ₱0.00 · Not tagged ₱0.00"
+}

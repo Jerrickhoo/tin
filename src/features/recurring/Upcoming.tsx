@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Link } from 'react-router'
+import { Link, useLocation } from 'react-router'
 import { useLedger, useToast } from '../../app-context'
 import { BottomSheet } from '../../components/BottomSheet'
 import { MoneyTypePicker } from '../../components/MoneyTypePicker'
@@ -38,6 +38,8 @@ import {
   type ScheduleEvent,
 } from '../../lib/schedules'
 import { LegacyRecurring } from './Recurring'
+import { ReminderQueue } from './Reminders'
+import { validMonth } from '../../lib/budget'
 
 const field =
   'mt-1 min-h-11 w-full min-w-0 rounded-xl border border-line bg-base px-3 py-2 text-ink'
@@ -55,6 +57,7 @@ type Review = {
   voidGroup?: string
 }
 export function Upcoming() {
+  const { hash } = useLocation()
   const { version, bump } = useLedger(),
     toast = useToast(),
     clock = useReportingClock()
@@ -69,6 +72,12 @@ export function Upcoming() {
     [legacy, setLegacy] = useState(false),
     [sync, setSync] = useState(getSyncSnapshot)
   useEffect(() => subscribeSync(() => setSync(getSyncSnapshot())), [])
+  useEffect(() => {
+    if (!data || !hash.startsWith('#due:')) return
+    const target = document.getElementById(hash.slice(1))
+    if (target instanceof HTMLDetailsElement) target.open = true
+    target?.scrollIntoView?.({ block: 'start' })
+  }, [hash, data])
   useEffect(() => {
     let active = true
     void Promise.all([readBudgetSnapshot(), fetchCategories()])
@@ -126,8 +135,13 @@ export function Upcoming() {
         Opening Upcoming…
       </p>
     )
-  const now = new Date(Math.max(clock.getTime(), data.asOf.getTime(), sync.lastSyncedAt ?? 0)),
-    items = projectSchedules(data.rows, data.audit, now),
+  const now = new Date(Math.max(clock.getTime(), data.asOf.getTime(), sync.lastSyncedAt ?? 0))
+  const linkedMonth = hash.startsWith('#due:') ? hash.split(':').at(-1) : null
+  const through =
+    validMonth(linkedMonth) && linkedMonth > nextMonthKey(manilaMonthKey(now))
+      ? linkedMonth
+      : nextMonthKey(manilaMonthKey(now))
+  const items = projectSchedules(data.rows, data.audit, now, through),
     heads = scheduleHeads(data.audit),
     definitions = [...heads.values()]
       .filter((e): e is ScheduleDefinition => e.type === 'schedule')
@@ -167,6 +181,12 @@ export function Upcoming() {
         time. Reminders appear here while Tin is open.
       </p>
       <div className="flex flex-wrap gap-2">
+        <Link className={button} to="/calendar">
+          Calendar
+        </Link>
+        <Link className={button} to="/debts">
+          Debts · Utang
+        </Link>
         <button className={button} onClick={() => setEditing('subscription')}>
           New subscription
         </button>
@@ -177,6 +197,7 @@ export function Upcoming() {
           Legacy auto-post templates
         </button>
       </div>
+      <ReminderQueue />
       {stale && (
         <p role="status" className="text-sm text-ink-soft">
           Account funds are a device snapshot{' '}
@@ -238,6 +259,7 @@ export function Upcoming() {
                 <details
                   className="rounded-xl border border-line p-3"
                   key={item.occurrence.key}
+                  id={item.occurrence.key}
                   open={undefined}
                 >
                   <summary className="min-h-11 cursor-pointer break-words py-2 text-sm">

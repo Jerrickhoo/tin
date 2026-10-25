@@ -1,0 +1,10 @@
+{
+  "passed": true,
+  "daily_project_excluded": true,
+  "mode": "authenticated read-only fixture verification",
+  "financial_entries": 4,
+  "unique_groups": 4,
+  "signed_balance_centavos": 953498,
+  "exactly_once_offline_writes": true,
+  "old_client_queue_preserved": true
+}

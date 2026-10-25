@@ -1,0 +1,57 @@
+{
+  "checked_at": "2026-10-24T20:54:51.376Z",
+  "daily_project_excluded": true,
+  "migration_versions": [
+    "001",
+    "002",
+    "003",
+    "004",
+    "005",
+    "006",
+    "007",
+    "008",
+    "009",
+    "010",
+    "011",
+    "012",
+    "013",
+    "014"
+  ],
+  "scenarios": [
+    "current capabilities and private helper permissions",
+    "legacy queued Cash/Online/untagged writes retain tags and owner isolation",
+    "archived category name collision revives the same identity and preserves past references",
+    "linked principal, competing overpayment and idempotent lost-response replay",
+    "foreign envelope/goal/schedule commands fail atomically and all new histories participate in reset",
+    "private full backup, FK-safe reset counts and cross-owner preservation",
+    "new-owner linked restore preserves IDs, voids, cents, debt and audit references and replays safely"
+  ],
+  "backup_sha256": "4e749c0194f398955c4e8108113bcdbad45d2c40ace0de7b38428ef395ca8cf4",
+  "source_counts": {
+    "profiles": 0,
+    "envelopes": 1,
+    "categories": 1,
+    "ledger_groups": 6,
+    "entries": 6,
+    "recurring_templates": 1,
+    "streak_saves": 1,
+    "checkin_days": 1,
+    "obligations": 1,
+    "ledger_operations": 6,
+    "ledger_audit": 6
+  },
+  "restore_counts": {
+    "profiles": 0,
+    "envelopes": 1,
+    "categories": 1,
+    "ledger_groups": 6,
+    "entries": 6,
+    "recurring_templates": 0,
+    "streak_saves": 0,
+    "checkin_days": 0,
+    "obligations": 1,
+    "ledger_operations": 1,
+    "ledger_audit": 7
+  },
+  "passed": true
+}

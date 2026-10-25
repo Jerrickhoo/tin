@@ -1,4 +1,5 @@
 import { errorMessage } from '../../lib/errors'
+import { ReminderHint } from '../recurring/Reminders'
 import { useReportingClock, useWeekStart } from '../../lib/reporting-clock'
 import { ReconciliationSheet } from '../entries/ReconciliationSheet'
 import { manilaWeekStart } from '../../lib/dates'
@@ -396,6 +397,7 @@ export function Home() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-4 px-5 py-7 md:max-w-4xl md:gap-5 md:px-8 md:py-10">
+      <ReminderHint />
       <header className="flex items-baseline justify-between">
         <p className="text-sm text-ink-mute">{manilaDate.format(now)}</p>
         <p className="text-sm text-ink-mute">{greeting(manilaHour(now))}</p>

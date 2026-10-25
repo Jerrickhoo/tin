@@ -130,7 +130,6 @@ export function BottomSheet({
         <div
           aria-hidden
           {...drag}
-          onPointerCancel={drag.onPointerUp}
           className="-mt-2 mb-2 flex touch-none cursor-grab justify-center py-3 active:cursor-grabbing md:hidden"
         >
           <div className="h-1 w-9 bg-ink-mute/40" />

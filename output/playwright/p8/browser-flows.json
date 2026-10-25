@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "checked": [
+    "caret-aware keypad, hold clear, canceled drag and second-pointer draft protection",
+    "real Edge touch input: body scroll keeps sheet, handle drag dismisses",
+    "Back dismissal, Escape focus restoration and keyboard/keypad preference",
+    "two independent offline devices save/reload/reconnect to identical ₱9,634.99; queue drained; sticky header clearance",
+    "Home/Add/History/Insights totals, JSON download/idempotent restore, reset phrase and other-device guidance"
+  ],
+  "errors": [],
+  "sticky": {
+    "top": 50,
+    "clearance": 50
+  }
+}

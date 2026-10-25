@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router'
 import { History } from './History'
 import { ledgerRow as row } from '../../lib/test-support/financial-fixtures'
 import { AddSheetContext } from '../../app-context'
+import type { FinancialMetadata } from '../../lib/financial'
 
 const { page, all, envs, cats, voidGroup, financial } = vi.hoisted(() => ({
   page: vi.fn(),
@@ -47,6 +48,81 @@ beforeEach(() => {
   ])
 })
 afterEach(cleanup)
+
+it('honors incoming calendar/category date bounds over the entire ledger', async () => {
+  all.mockResolvedValue([
+    row('oct'),
+    row('sep', { occurred_at: '2026-09-19T04:00:00Z', note: 'previous month' }),
+  ])
+  open({ from: '2026-09-01', to: '2026-09-30', categoryIds: ['food'] })
+  const results = await screen.findByRole('region', { name: 'Results' })
+  await waitFor(() => expect(results.textContent).toContain('Gross spending ₱50.00'))
+  expect(all).toHaveBeenCalledOnce()
+  expect(screen.getByRole('button', { name: /Food.*previous month/ })).toBeTruthy()
+  expect(results.textContent).toContain('2026-09-01')
+})
+
+function correctedPurchase() {
+  const financial: FinancialMetadata = {
+    version: 1,
+    intent: 'purchase',
+    operation_id: crypto.randomUUID(),
+    recorded_at: '2026-10-02T04:00:00Z',
+    chain_id: 'original',
+  }
+  return [
+    row('replacement', {
+      category_id: 'travel',
+      envelope_id: 'wants',
+      amount_centavos: -7700,
+      note: 'corrected purchase',
+      occurred_at: '2026-10-01T04:00:00Z',
+      financial: { ...financial, corrects_group_id: 'original' },
+    }),
+    row('original', {
+      note: 'original purchase',
+      occurred_at: '2026-09-01T04:00:00Z',
+      voided_at: '2026-10-02T04:00:00Z',
+      financial: { ...financial, recorded_at: '2026-09-01T04:00:00Z' },
+    }),
+  ]
+}
+
+it.each([
+  { from: '2026-09-01', to: '2026-09-30' },
+  { categoryIds: ['food'] },
+  { envelopeIds: ['needs'] },
+])(
+  'keeps matching prior versions as audit context without counting the replacement: %j',
+  async (state) => {
+    all.mockResolvedValue(correctedPurchase())
+    open(state)
+    const results = await screen.findByRole('region', { name: 'Results' })
+    expect(results.textContent).toContain('1 record (including voided)')
+    expect(results.textContent).toContain('Gross spending ₱0.00')
+    expect(results.textContent).toContain('Net spending ₱0.00')
+    expect(results.textContent).toContain('Cash ₱0.00')
+    expect(
+      screen.getByText('Current version is outside these filters; shown as audit context only.'),
+    ).toBeTruthy()
+    expect(screen.getByText('Previous versions (1)')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /corrected purchase/ })).toBeTruthy()
+    expect(screen.queryByText('-₱77.00', { selector: 'span.text-xs.tabular-nums' })).toBeNull()
+  },
+)
+
+it('counts a replacement once in its new period and retains its original in details', async () => {
+  all.mockResolvedValue(correctedPurchase())
+  open({ from: '2026-10-01', to: '2026-10-31' })
+  const results = await screen.findByRole('region', { name: 'Results' })
+  expect(results.textContent).toContain('1 record (including voided)')
+  expect(results.textContent).toContain('Gross spending ₱77.00')
+  expect(results.textContent).toContain('Cash -₱77.00')
+  expect(screen.getByText('Previous versions (1)')).toBeTruthy()
+  expect(
+    screen.queryByText('Current version is outside these filters; shown as audit context only.'),
+  ).toBeNull()
+})
 
 it('labels loading, loaded-page scope and separate financial totals; actions stay in details', async () => {
   open()

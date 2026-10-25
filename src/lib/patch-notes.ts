@@ -2,6 +2,95 @@ import { PATCH_NOTES_READ_KEY } from './local-keys'
 
 export const PATCH_NOTES = [
   {
+    id: '2026.10.25.p8',
+    date: '2026-10-25',
+    title: 'Keep unfinished entries safe.',
+    summary:
+      'Canceled gestures keep your draft open, with clearer guidance before an account reset.',
+    action: { to: '/settings', label: 'Open Settings →' },
+    sections: [
+      {
+        kind: 'fixed',
+        label: 'Entry gestures',
+        items: [
+          'An interrupted sheet drag returns the form to its position without dismissing your draft.',
+          'A second finger no longer moves or dismisses a sheet being dragged by the first finger.',
+          'Opening Tin offline shows saved queued writes immediately, even before another entry is added.',
+        ],
+      },
+      {
+        kind: 'improved',
+        label: 'Before resetting',
+        items: [
+          'Settings explains when to back up unsynced entries and sign out on other devices before resetting, then sign back in to load the fresh account.',
+        ],
+      },
+    ],
+  },
+  {
+    id: '2026.10.25.p7',
+    date: '2026-10-25',
+    title: 'See your money by date.',
+    summary:
+      'A calendar for actual activity and upcoming commitments, with a focused monthly review.',
+    action: { to: '/calendar', label: 'Open Calendar →' },
+    sections: [
+      {
+        kind: 'added',
+        label: 'Calendar & agenda',
+        items: [
+          'Open any day to see actual movements and separately labeled due items. Late payments stay linked to their original due date.',
+          'Open the original entry, subscription, installment or debt, then go Back to the same month and day. Expected allowance without a due day stays in its month.',
+        ],
+      },
+      {
+        kind: 'improved',
+        label: 'A focused review',
+        items: [
+          'Insights shows gross, returned and net spending, top categories, current free and reserved money, and six comparable periods.',
+          'Category and trend links carry their date range into History. Current funds remain clearly separate from historical and future review months.',
+          'Envelope flows are in Details. Sync limitations, archived categories and shorter months are labeled explicitly.',
+        ],
+      },
+    ],
+  },
+  {
+    id: '2026.10.24.p6',
+    date: '2026-10-24',
+    title: 'Keep track of utang.',
+    summary:
+      'See what you owe, what is owed to you, and the actual repayments behind each balance.',
+    action: { to: '/debts', label: 'Open Debts →' },
+    sections: [
+      {
+        kind: 'added',
+        label: 'Debts & repayments',
+        items: [
+          'Find debts by person, direction or status. Original amounts, partial payments, notes and optional due dates stay together.',
+          'Record lending, borrowing or a historical opening debt, then use the same repayment form from Debts and History.',
+          'Open any payment in History. Voiding it updates the remaining debt; settled records stay available.',
+        ],
+      },
+      {
+        kind: 'improved',
+        label: 'Reminders for you',
+        items: [
+          'Upcoming brings debt, subscription and installment reminders into one queue, with snooze, dismiss and per-item controls.',
+          'Choose your reminder timing and optional monthly balance checks in Settings. Preferences stay on this device and clear on logout.',
+          'A small Home hint links to new reminders. Tin never contacts another person or promises delivery while closed.',
+        ],
+      },
+      {
+        kind: 'fixed',
+        label: 'Dates & navigation',
+        items: [
+          'Repayments recorded today count immediately, including before noon in Manila.',
+          'Reminder links open the relevant item, and payment details link back to their debt.',
+        ],
+      },
+    ],
+  },
+  {
     id: '2026.10.22.p5',
     date: '2026-10-22',
     title: 'Know what is coming due.',

@@ -110,6 +110,18 @@ describe('the sync loop', () => {
     expect(getSyncSnapshot().online).toBe(false)
   })
 
+  it('publishes pending writes and current connectivity when restarting offline without a network pass', async () => {
+    stopSync()
+    await addExpense({ amountCentavos: 5000, category: CATEGORY })
+    setOnline(false)
+    startSync({ onApplied: () => (applied += 1) })
+    await vi.waitFor(() => {
+      expect(getSyncSnapshot().online).toBe(false)
+      expect(getSyncSnapshot().pending).toBe(1)
+    })
+    expect(server.pushedEntries).toHaveLength(0)
+  })
+
   it('pushes a queued write and advances the cursor to the server clock', async () => {
     await addExpense({ amountCentavos: 5000, category: CATEGORY })
     server.entries = [entry('e1', '2026-07-20T09:00:00+00:00')]

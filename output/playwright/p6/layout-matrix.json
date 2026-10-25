@@ -1,0 +1,23 @@
+{
+  "checked": 126,
+  "issues": [],
+  "errors": [],
+  "passed": true,
+  "verified_on": "2026-10-24",
+  "themes": 7,
+  "widths": [
+    1280,
+    390,
+    320
+  ],
+  "views": [
+    "Debts",
+    "Upcoming",
+    "Settings",
+    "Home",
+    "debt form",
+    "repayment form"
+  ],
+  "animations_settled": true,
+  "exactly_one_dialog_per_form": true
+}

@@ -18,6 +18,8 @@ import { AppShell } from './AppShell'
 import { PatchNotes } from './features/updates/PatchNotes'
 import { Budget } from './features/budget/Budget'
 import { Goals } from './features/goals/Goals'
+import { Debts } from './features/debts/Debts'
+import { Calendar } from './features/recurring/Calendar'
 
 export function AppRouter() {
   return (
@@ -37,12 +39,14 @@ export function AppRouter() {
             <Route path="/history" element={<History />} />
             <Route path="/insights" element={<Insights />} />
             <Route path="/recurring" element={<Upcoming />} />
+            <Route path="/calendar" element={<Calendar />} />
             <Route path="/import" element={<ImportStatement />} />
             <Route path="/envelopes" element={<Envelopes />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/patch-notes" element={<PatchNotes />} />
             <Route path="/budget" element={<Budget />} />
             <Route path="/goals" element={<Goals />} />
+            <Route path="/debts" element={<Debts />} />
           </Route>
           <Route path="/split" element={<SplitPreview />} />
           <Route path="/login" element={<Login />} />

@@ -221,12 +221,21 @@ export function startSync(opts: { onApplied: () => void }): void {
   stopSync()
   stopped = false
   onApplied = opts.onApplied
-  const unsubscribeOutbox = onOutboxChange((kind) => {
+  // Boot can stay offline and skip syncNow entirely. Publish this owner's
+  // saved queue without waiting for a new write or connectivity event.
+  patchSnapshot({ online: !isOffline(), pending: 0, syncing: false, lastError: null })
+  let active = true
+  const refreshPending = () => {
     void outboxCount()
-      .then((pending) => patchSnapshot({ pending }))
+      .then((pending) => {
+        if (active) patchSnapshot({ pending })
+      })
       .catch(() => {
         // Logout may close the mirror while this cosmetic count is being read.
       })
+  }
+  const unsubscribeOutbox = onOutboxChange((kind) => {
+    refreshPending()
     if (kind === 'enqueue') kickSync()
   })
   const handleOnline = () => {
@@ -241,11 +250,13 @@ export function startSync(opts: { onApplied: () => void }): void {
   window.addEventListener('offline', handleOffline)
   document.addEventListener('visibilitychange', handleVisible)
   teardown = () => {
+    active = false
     unsubscribeOutbox()
     window.removeEventListener('online', handleOnline)
     window.removeEventListener('offline', handleOffline)
     document.removeEventListener('visibilitychange', handleVisible)
   }
+  refreshPending()
 }
 
 export function stopSync(): void {

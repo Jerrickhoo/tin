@@ -70,7 +70,10 @@ export function FinancialSheet({
               ),
           ),
         )
-        if (request.mode === 'settle') setRemaining(outstandingCentavos(request.obligation, rows))
+        if (request.mode === 'settle') {
+          const current = claims.find((item) => item.id === request.obligation.id)
+          setRemaining(current ? outstandingCentavos(current, rows) : 0)
+        }
         if (request.mode === 'claim')
           setRemaining(recoveryRemaining(request.origin.groupId, rows, claims))
       })
@@ -85,8 +88,9 @@ export function FinancialSheet({
       : request.mode === 'refund'
         ? null
         : remaining
+  const today = manilaDayKey(new Date())
   const value = parseAmountToCentavos(amount),
-    at = fromManilaInput(date)
+    at = date > today ? null : date === today ? new Date().toISOString() : fromManilaInput(date)
   const cash =
     request.mode === 'refund' ||
     request.mode === 'settle' ||
@@ -103,6 +107,7 @@ export function FinancialSheet({
       value === null ||
       value <= 0 ||
       !at ||
+      (request.mode === 'settle' && remaining === null) ||
       (cash && (!account || !envelope)) ||
       (recoveryCap !== null && value > recoveryCap) ||
       (request.mode === 'refund' && !originId && !unknownOrigin)
@@ -117,7 +122,7 @@ export function FinancialSheet({
           envelopeId: envelope,
           moneyType: account!,
           note,
-          occurredAt: at,
+          occurredAt: date === manilaDayKey(new Date()) ? new Date().toISOString() : at,
           ...(request.mode === 'refund'
             ? { originGroupId: unknownOrigin ? undefined : originId, originUnknown: unknownOrigin }
             : { obligationId: request.obligation.id }),
@@ -239,9 +244,10 @@ export function FinancialSheet({
         />
       </label>
       <label className="mt-3 block text-sm">
-        Date (Manila; noon)
+        Date (Manila; earlier dates use noon)
         <input
           type="date"
+          max={today}
           value={date}
           onChange={(event) => setDate(event.target.value)}
           className="ml-2 rounded border border-line bg-base p-2"
@@ -315,6 +321,7 @@ export function FinancialSheet({
           busy ||
           !value ||
           !at ||
+          (request.mode === 'settle' && remaining === null) ||
           (cash && (!account || !envelope)) ||
           (recoveryCap !== null && value > recoveryCap) ||
           (request.mode === 'refund' && !originId && !unknownOrigin)
@@ -323,6 +330,14 @@ export function FinancialSheet({
         className="press mt-4 w-full rounded-xl bg-accent p-3 font-semibold text-on-accent disabled:opacity-40"
       >
         {busy ? 'Saving…' : 'Confirm financial entry'}
+      </button>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={onClose}
+        className="mt-2 min-h-11 w-full rounded-xl border border-line p-3 text-sm disabled:opacity-40"
+      >
+        Cancel
       </button>
       {value !== null && recoveryCap !== null && value > recoveryCap && (
         <p role="alert" className="mt-2 text-sm text-neg">

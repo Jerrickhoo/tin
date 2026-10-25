@@ -1,6 +1,7 @@
 import { errorMessage, persistedErrorMessage } from '../../lib/errors'
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router'
+import { ReminderPreferencesPanel } from '../recurring/Reminders'
 import { useLedger, useToast } from '../../app-context'
 import { supabase } from '../../db/supabase'
 import { wipeLocalCaches } from '../../db/cacheWipe'
@@ -35,8 +36,7 @@ import { useWeekStart, useReportingClock } from '../../lib/reporting-clock'
 import { saveWeekStart } from '../../db/week-preference'
 import { ReconciliationSheet } from '../entries/ReconciliationSheet'
 import { isBlocked, parseBundle, type RestorePlan } from '../../lib/restore'
-import { manilaDayKey, daysBetweenKeys } from '../../lib/dates'
-import { BALANCE_REMINDER_KEY } from '../../lib/local-keys'
+import { manilaDayKey } from '../../lib/dates'
 import { formatPHP } from '../../lib/money'
 import { exportReminderStatus, getLastExport, recordExport } from '../../lib/exportReminder'
 import {
@@ -440,13 +440,6 @@ function MoneySummarySection() {
   const toast = useToast()
   const { version } = useLedger()
   const [lastChecks, setLastChecks] = useState<Record<string, string>>({})
-  const [remind, setRemind] = useState(() => {
-    try {
-      return localStorage.getItem(BALANCE_REMINDER_KEY) === '1'
-    } catch {
-      return false
-    }
-  })
   const [snapshot, setSnapshot] = useState<MoneyTypeSnapshot>(readMoneyTypeSnapshot)
   const [live, setLive] = useState<MoneyTypeTotals>(emptyMoneyTypeTotals)
   const [inputValues, setInputValues] = useState<Record<'online' | 'reallife', string>>(() => {
@@ -525,7 +518,7 @@ function MoneySummarySection() {
   const totalDelta = liveTotal - (targetTotal + live.untagged)
 
   return (
-    <section className="card p-4">
+    <section id="current-money" className="card p-4">
       <h3 className="font-display text-[0.6875rem] leading-relaxed">Current money</h3>
       <button
         type="button"
@@ -540,27 +533,6 @@ function MoneySummarySection() {
         {lastChecks.reallife ? manilaDayKey(new Date(lastChecks.reallife)) : 'never'} · Online{' '}
         {lastChecks.online ? manilaDayKey(new Date(lastChecks.online)) : 'never'}
       </p>
-      <label className="mt-2 block text-xs">
-        <input
-          type="checkbox"
-          checked={remind}
-          onChange={(event) => {
-            setRemind(event.target.checked)
-            try {
-              localStorage.setItem(BALANCE_REMINDER_KEY, event.target.checked ? '1' : '0')
-            } catch {
-              /* session only */
-            }
-          }}
-        />{' '}
-        Show an in-app reminder after 30 days
-      </label>
-      {remind &&
-        ['online', 'reallife'].some(
-          (key) =>
-            !lastChecks[key] ||
-            daysBetweenKeys(manilaDayKey(new Date(lastChecks[key])), manilaDayKey(now)) >= 30,
-        ) && <p className="mt-2 text-xs text-accent">An account is due for a balance check.</p>}
       <p className="mt-1 mb-3 text-sm text-ink-soft">
         Home shows the ledger balances. Use Check balance to review an observation and record a
         missing transaction, account classification or explicit adjustment. Saved targets below are
@@ -905,8 +877,9 @@ function DangerZone({
                 Logging out there wipes its mirror wholesale (6.6), which is the
                 whole fix. */}
             <p className="mt-2 text-ink-mute">
-              Log out and back in on your other devices afterwards. They keep their own copy until
-              you do — sync carries changes forward, not deletions.
+              Back up unsynced entries and log out on your other devices before resetting. Log back
+              in afterwards to load the fresh account. Devices left signed in keep their old copy
+              and may sync queued writes back into this account.
             </p>
           </div>
 
@@ -988,8 +961,8 @@ function DangerZone({
 export function Settings() {
   const { hash } = useLocation()
   useEffect(() => {
-    if (hash === '#appearance')
-      document.getElementById('appearance')?.scrollIntoView({ block: 'start' })
+    if (hash === '#appearance' || hash === '#current-money')
+      document.getElementById(hash.slice(1))?.scrollIntoView({ block: 'start' })
   }, [hash])
   const weekStart = useWeekStart()
   const { session } = useSession()
@@ -1071,6 +1044,7 @@ export function Settings() {
           things last. Setup is the reason Settings gets opened; the danger zone
           is the reason it gets opened once. */}
       <SettingsGroup title="Setup" hint="The parts of Tin you shape to your money.">
+        <ReminderPreferencesPanel />
         <label className="card block p-4 text-sm">
           Week starts on
           <select
